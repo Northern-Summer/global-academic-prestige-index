@@ -40,9 +40,9 @@ def merge_config(config: dict[str, Any] | None) -> dict[str, Any]:
     return merged
 
 
-def _accepted_edges(
+def _accepted_events(
     education: Iterable[EducationEvent], employment: Iterable[EmploymentEvent], config: dict[str, Any]
-) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], dict[str, float]], dict[str, set[str]], dict[str, int]]:
+) -> list[tuple[EducationEvent, EmploymentEvent]]:
     education_by_person: dict[str, list[EducationEvent]] = defaultdict(list)
     for event in education:
         if event.accepted:
@@ -54,30 +54,24 @@ def _accepted_edges(
         if event.accepted and event.role_type in config["qualifying_role_types"] and valid_fraction and resolved_joint:
             employment_by_person[event.person_id].append(event)
 
-    weights = config["stage_weights"]
-    edges: dict[tuple[str, str], float] = defaultdict(float)
-    edge_stages: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    sources_by_origin: dict[str, set[str]] = defaultdict(set)
-    event_counts: dict[str, int] = defaultdict(int)
+    accepted: list[tuple[EducationEvent, EmploymentEvent]] = []
     seen: set[tuple[str, str, str, str]] = set()
     for person_id, trainings in education_by_person.items():
         for training in trainings:
             for job in employment_by_person.get(person_id, []):
                 if training.institution_id == job.institution_id:
                     continue
-                if training.year is not None and job.year_start is not None and job.year_start < training.year:
+                # Missing dates cannot establish that training preceded employment.
+                if training.year is None or job.year_start is None:
                     continue
-                # Employment institution -> training institution.
+                if job.year_start < training.year:
+                    continue
                 key = (person_id, training.stage, training.institution_id, job.institution_id)
                 if key in seen:
                     continue
                 seen.add(key)
-                fraction = job.joint_fraction if job.joint_fraction is not None else 1.0
-                edges[(job.institution_id, training.institution_id)] += weights[training.stage] * fraction
-                edge_stages[(job.institution_id, training.institution_id)][training.stage] += weights[training.stage] * fraction
-                sources_by_origin[training.institution_id].add(training.source_class)
-                event_counts[training.institution_id] += 1
-    return edges, edge_stages, sources_by_origin, event_counts
+                accepted.append((training, job))
+    return accepted
 
 
 def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float, tolerance: float, max_iterations: int) -> tuple[dict[str, float], dict[str, Any]]:
@@ -138,42 +132,46 @@ def calculate_rankings(
 ) -> dict[str, Any]:
     cfg = merge_config(config)
     nodes = sorted({institution.id for institution in institutions})
-    edges, edge_stages, sources_by_origin, event_counts = _accepted_edges(education, employment, cfg)
     evidence_by_id = {item.id: item for item in (evidence or [])}
-    education_by_person: dict[str, list[EducationEvent]] = defaultdict(list)
-    employment_by_person: dict[str, list[EmploymentEvent]] = defaultdict(list)
-    for event in education:
-        if event.accepted:
-            education_by_person[event.person_id].append(event)
-    for event in employment:
-        valid_fraction = event.joint_fraction is None or 0 < event.joint_fraction <= 1
-        resolved_joint = not event.is_joint_appointment or event.joint_fraction is not None
-        if event.accepted and event.role_type in cfg["qualifying_role_types"] and valid_fraction and resolved_joint:
-            employment_by_person[event.person_id].append(event)
+    accepted_events = _accepted_events(education, employment, cfg)
+    stage_weights = cfg["stage_weights"]
+    edges: dict[tuple[str, str], float] = defaultdict(float)
+    edge_stages: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    sources_by_origin: dict[str, set[str]] = defaultdict(set)
+    event_counts: dict[str, int] = defaultdict(int)
     traced_counts: dict[str, int] = defaultdict(int)
-    traced_seen: set[tuple[str, str, str, str]] = set()
-    for person_id, trainings in education_by_person.items():
-        for training in trainings:
-            for job in employment_by_person.get(person_id, []):
-                key = (person_id, training.stage, training.institution_id, job.institution_id)
-                if key in traced_seen or training.institution_id == job.institution_id:
-                    continue
-                traced_seen.add(key)
-                if training.evidence_id in evidence_by_id and job.evidence_id in evidence_by_id:
-                    traced_counts[training.institution_id] += 1
+    for training, job in accepted_events:
+        # Employer institution -> training institution.
+        fraction = job.joint_fraction if job.joint_fraction is not None else 1.0
+        sources_by_origin[training.institution_id].add(training.source_class)
+        event_counts[training.institution_id] += 1
+        if training.evidence_id in evidence_by_id and job.evidence_id in evidence_by_id:
+            traced_counts[training.institution_id] += 1
+        if stage_weights[training.stage] <= 0:
+            continue
+        edge = (job.institution_id, training.institution_id)
+        weight = stage_weights[training.stage] * fraction
+        edges[edge] += weight
+        edge_stages[edge][training.stage] += weight
     traceability = {
         node: traced_counts.get(node, 0) / event_counts[node] if event_counts.get(node, 0) else 0.0
         for node in nodes
     }
     eligibility_cfg = cfg["eligibility"]
     stable_ids = {institution.id for institution in institutions if institution.stable_id}
-    eligible = {
-        node for node in nodes
-        if event_counts.get(node, 0) >= eligibility_cfg["min_events"]
-        and len(sources_by_origin.get(node, set())) >= eligibility_cfg["min_source_classes"]
-        and traceability.get(node, 0.0) >= eligibility_cfg["min_traceability"]
-        and node in stable_ids
-    }
+    eligibility_reasons: dict[str, list[str]] = {}
+    for node in nodes:
+        reasons = []
+        if event_counts.get(node, 0) < eligibility_cfg["min_events"]:
+            reasons.append("insufficient_observed_events")
+        if len(sources_by_origin.get(node, set())) < eligibility_cfg["min_source_classes"]:
+            reasons.append("insufficient_source_classes")
+        if traceability.get(node, 0.0) < eligibility_cfg["min_traceability"]:
+            reasons.append("traceability_below_threshold")
+        if node not in stable_ids:
+            reasons.append("missing_stable_institution_identifier")
+        eligibility_reasons[node] = reasons
+    eligible = {node for node, reasons in eligibility_reasons.items() if not reasons}
     network, convergence = pagerank(nodes, edges, cfg["alpha"], cfg["tolerance"], cfg["max_iterations"])
     award_scores = {node: 0.0 for node in nodes}
     award_category_scores: dict[str, dict[str, float]] = {node: defaultdict(float) for node in nodes}
@@ -216,10 +214,16 @@ def calculate_rankings(
             "award_percentile": award_pct[node] if status == "ranked" else None,
             "coverage": {"event_count": event_counts.get(node, 0), "source_class_count": len(sources_by_origin.get(node, set())), "traceability": traceability.get(node, 0.0)},
             "status": status,
+            "unranked_reasons": eligibility_reasons[node],
             "award_contributions": award_contributions.get(node, []),
         })
     ranked = sorted((row for row in rows if row["status"] == "ranked"), key=lambda row: (-row["composite_score"], row["institution_name"]))
-    for rank, row in enumerate(ranked, 1):
+    rank = 0
+    previous_score: float | None = None
+    for position, row in enumerate(ranked, 1):
+        if previous_score is None or not math.isclose(row["composite_score"], previous_score, rel_tol=0.0, abs_tol=1e-12):
+            rank = position
+        previous_score = row["composite_score"]
         row["rank"] = rank
     return {
         "schema_version": "gapi-ranking/v1",

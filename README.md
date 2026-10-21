@@ -23,7 +23,7 @@ Open the local URL printed by Vite. To rebuild the static site, run `npm run bui
 gapi rank --input path/to/dataset.json --config configs/default.json --out build/rankings.json --manifest build/manifest.json
 ```
 
-The demo generator is deterministic. The production eligibility defaults intentionally leave the small demo institution set unranked; the bundled site uses an explicitly relaxed demo-only event threshold.
+The demo generator is deterministic and writes both `rankings.json` and `scenarios.json`. The site lets you compare a reference mix, stage-weight changes, network-only/award-only composites, and a removed synthetic hiring hub. These are constructed teaching fixtures, not observations about real institutions. The production eligibility defaults leave low-coverage demo institutions unranked; the bundled site uses an explicitly relaxed demo-only event threshold.
 
 ## Project status
 

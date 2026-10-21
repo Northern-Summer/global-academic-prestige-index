@@ -1,6 +1,6 @@
 import unittest
 
-from gapi.demo import build_demo
+from gapi.demo import build_demo, generate
 from gapi.model import parse_dataset
 from gapi.ranking import DEFAULT_CONFIG, _percentiles, calculate_rankings, pagerank, release_manifest
 
@@ -39,8 +39,8 @@ class RankingTests(unittest.TestCase):
     def test_award_duplicate_is_counted_once(self):
         result = calculate_rankings(self.institutions, self.education, self.employment,
                                     self.awards + [self.awards[0]], {"eligibility": {"min_events": 5}}, self.evidence)
-        alpha = next(row for row in result["nodes"] if row["institution_id"] == "gapi:alpha")
-        self.assertEqual(alpha["award_score"], 1.0)
+        charlie = next(row for row in result["nodes"] if row["institution_id"] == "gapi:charlie")
+        self.assertEqual(charlie["award_score"], 1.0)
 
     def test_config_rejects_invalid_alpha(self):
         with self.assertRaises(ValueError):
@@ -83,7 +83,53 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG["eligibility"]["min_events"], 10)
         result = calculate_rankings(self.institutions, self.education, self.employment, self.awards,
                                     None, self.evidence)
-        self.assertTrue(all(row["status"] != "ranked" for row in result["nodes"]))
+        self.assertEqual(next(row for row in result["nodes"] if row["institution_id"] == "gapi:alpha")["status"], "unranked_low_coverage")
+        self.assertEqual(next(row for row in result["nodes"] if row["institution_id"] == "gapi:bravo")["status"], "ranked")
+
+    def test_missing_temporal_order_is_not_accepted(self):
+        from gapi.model import EducationEvent, EmploymentEvent
+        education = [EducationEvent("p", "gapi:alpha", "doctorate", None, "demo-000-edu", "official_profile")]
+        employment = [EmploymentEvent("p", "gapi:bravo", "faculty", None, "demo-000-job", "official_cv")]
+        result = calculate_rankings(self.institutions, education, employment, [], {"eligibility": {"min_events": 1}}, self.evidence)
+        self.assertEqual(result["edges"], [])
+
+    def test_unranked_rows_explain_eligibility_reasons(self):
+        result = calculate_rankings(self.institutions, self.education, self.employment, self.awards, None, self.evidence)
+        low = next(row for row in result["nodes"] if row["institution_id"] == "gapi:low")
+        self.assertIn("insufficient_observed_events", low["unranked_reasons"])
+
+    def test_demo_contains_multiple_stages_and_asymmetric_edges(self):
+        payload = build_demo()
+        self.assertGreaterEqual(len({event["stage"] for event in payload["education_events"]}), 4)
+        result = calculate_rankings(self.institutions, self.education, self.employment, self.awards,
+                                    {"eligibility": {"min_events": 5}}, self.evidence)
+        weights = {(edge["source"], edge["target"]): edge["weight"] for edge in result["edges"]}
+        self.assertNotEqual(weights[("gapi:alpha", "gapi:bravo")], weights[("gapi:bravo", "gapi:alpha")])
+
+    def test_demo_generator_writes_explanatory_scenarios(self):
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            generate(Path(directory))
+            payload = __import__("json").loads((Path(directory) / "scenarios.json").read_text())
+            self.assertEqual(payload["dataset_kind"], "synthetic/demo")
+            self.assertGreaterEqual(len(payload["scenarios"]), 4)
+            self.assertTrue(any(item["id"] == "without_alpha_hiring" for item in payload["scenarios"]))
+            network_only = next(item for item in payload["scenarios"] if item["id"] == "network_only")
+            awards_only = next(item for item in payload["scenarios"] if item["id"] == "awards_only")
+            network_ranks = {node["institution_id"]: node["rank"] for node in network_only["result"]["nodes"]}
+            awards_ranks = {node["institution_id"]: node["rank"] for node in awards_only["result"]["nodes"]}
+            self.assertNotEqual(network_ranks, awards_ranks)
+
+    def test_equal_composite_scores_receive_a_shared_rank(self):
+        result = calculate_rankings(
+            self.institutions, self.education, self.employment, [],
+            {"eligibility": {"min_events": 5}, "composite_network_weight": 1.0,
+             "stage_weights": {"bachelor": 0, "master": 0, "doctorate": 1, "postdoc": 0}}, self.evidence,
+        )
+        top = [row for row in result["nodes"] if row["composite_score"] == max(item["composite_score"] for item in result["nodes"] if item["composite_score"] is not None)]
+        self.assertGreaterEqual(len(top), 2)
+        self.assertEqual(len({row["rank"] for row in top}), 1)
 
 
 if __name__ == "__main__":

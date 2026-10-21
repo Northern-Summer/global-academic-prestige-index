@@ -8,7 +8,7 @@ GAPI measures observed links in which a person received education or research tr
 
 The canonical input stores training and employment as separate events connected by an internal person identifier. The ranking layer emits a directed edge `Y -> X`, so influence from the hiring institution flows to the training institution. Events are deduplicated by person, training stage, training institution, and employer. Duplicate source records should be consolidated before scoring.
 
-The reference implementation counts one event per person/stage/training institution/employer tuple. A role beginning before a known training completion year is excluded. Administrative role categories are excluded; the configured qualifying types are faculty, researcher, research scientist, and postdoc. Postdoctoral training is represented as its own `postdoc` stage; it is not treated as a degree. Joint appointments are included only with an explicit fraction.
+The reference implementation counts one event per person/stage/training institution/employer tuple. A role beginning before a known training completion year is excluded. When either the training year or employment start year is missing, the event is held out of the primary graph because the available record cannot establish the required temporal order. Administrative role categories are excluded; the configured qualifying types are faculty, researcher, research scientist, and postdoc. Postdoctoral training is represented as its own `postdoc` stage; it is not treated as a degree. Joint appointments are included only with an explicit fraction.
 
 ## Network score
 
@@ -32,6 +32,10 @@ Production defaults require at least 10 observed events, two education source cl
 
 Institutions outside eligibility remain visible in the directory. Ranking scores are withheld from ineligible rows to avoid making missing coverage look like low measured influence.
 
+The output includes `unranked_reasons` for each ineligible institution. These are mechanical qualification results such as `insufficient_observed_events`, `insufficient_source_classes`, `traceability_below_threshold`, and `missing_stable_institution_identifier`; they describe data readiness, not institutional quality.
+
+The public demo additionally ships `data/demo/scenarios.json`. Its scenarios deliberately change stage weights, award/composite settings, or remove a synthetic hiring hub so a reader can inspect directionality and parameter effects. Every scenario is labeled `synthetic/demo` and must not be interpreted as an observation about real institutions.
+
 ## Reproducibility
 
 Inputs and config are JSON. Output ordering is deterministic. The CLI can write a release manifest containing input labels and SHA-256 hashes of the result and release envelope. For a formal release, the manifest must identify immutable input artifact hashes and the exact source revision; the current CLI input label is not a substitute for that release process.
@@ -41,5 +45,5 @@ Inputs and config are JSON. Output ordering is deterministic. The CLI can write 
 - Network volume, intensity, coverage-aware uncertainty, sensitivity sweeps, and bootstrap intervals are not yet implemented as separate published measures.
 - Geography, discipline, institution-size adjustment, and source-language perturbation are not currently applied to scores.
 - No verified real-world event dataset or award catalog is bundled.
-- The web view filters the stored edge stage breakdown but currently uses a small synthetic graph.
+- The web view applies one shared filtered edge slice to the network and selected-institution detail list; it still uses a small synthetic graph.
 - The current traceability field validates event-to-evidence linkage; it does not prove the source's factual correctness.

@@ -1,0 +1,949 @@
+{
+  "dataset_kind": "synthetic/demo",
+  "notice": "Every scenario is a constructed teaching fixture, not an observed institutional comparison.",
+  "scenarios": [
+    {
+      "description": "All training stages and separate award signal; fixed synthetic inputs.",
+      "id": "baseline",
+      "label": "Reference mix",
+      "result": {
+        "algorithm": {
+          "alpha": 0.85,
+          "composite_network_weight": 0.8,
+          "max_iterations": 200,
+          "stage_weights": {
+            "bachelor": 0.2,
+            "doctorate": 1.0,
+            "master": 0.35,
+            "postdoc": 0.6
+          },
+          "tolerance": 1e-12
+        },
+        "convergence": {
+          "converged": true,
+          "error": 6.848133171644122e-13,
+          "iterations": 48
+        },
+        "edges": [
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 6.0,
+              "master": 0.7,
+              "postdoc": 0.6
+            },
+            "target": "gapi:bravo",
+            "weight": 7.499999999999999
+          },
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "doctorate": 3.0,
+              "master": 0.35
+            },
+            "target": "gapi:charlie",
+            "weight": 3.35
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 4.0,
+              "master": 0.35,
+              "postdoc": 0.6
+            },
+            "target": "gapi:alpha",
+            "weight": 4.949999999999999
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 2.0
+            },
+            "target": "gapi:charlie",
+            "weight": 2.2
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0,
+              "master": 0.35
+            },
+            "target": "gapi:alpha",
+            "weight": 1.35
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:bravo",
+            "weight": 1.0
+          }
+        ],
+        "nodes": [
+          {
+            "award_categories": {},
+            "award_contributions": [],
+            "award_percentile": 0.0,
+            "award_score": 0.0,
+            "composite_score": 0.8,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 8,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:alpha",
+            "institution_name": "Northstar Institute (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 1.0,
+            "network_score": 0.3679500757358368,
+            "rank": 1,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "technical_history": 0.25
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-milestone-001",
+                "category": "technical_history",
+                "evidence_id": "demo-001-job",
+                "year": 2021
+              }
+            ],
+            "award_percentile": 0.5,
+            "award_score": 0.25,
+            "composite_score": 0.5,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 11,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:bravo",
+            "institution_name": "Meridian University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.5,
+            "network_score": 0.348975590398873,
+            "rank": 2,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "personal": 1.0
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-award-personal-001",
+                "category": "personal",
+                "evidence_id": "demo-023-job",
+                "year": 2020
+              }
+            ],
+            "award_percentile": 1.0,
+            "award_score": 1.0,
+            "composite_score": 0.19999999999999996,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 7,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:charlie",
+            "institution_name": "Tidewater Research University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.0,
+            "network_score": 0.23545528624624257,
+            "rank": 3,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 0,
+              "source_class_count": 0,
+              "traceability": 0.0
+            },
+            "institution_id": "gapi:low",
+            "institution_name": "Unobserved Example Institute (DEMO)",
+            "institution_type": "research_institute",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes",
+              "traceability_below_threshold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "description": "Recalculate after setting bachelor, master, and postdoc weights to zero.",
+      "id": "doctorate_only",
+      "label": "Doctorate only",
+      "result": {
+        "algorithm": {
+          "alpha": 0.85,
+          "composite_network_weight": 0.8,
+          "max_iterations": 200,
+          "stage_weights": {
+            "bachelor": 0,
+            "doctorate": 1,
+            "master": 0,
+            "postdoc": 0
+          },
+          "tolerance": 1e-12
+        },
+        "convergence": {
+          "converged": true,
+          "error": 9.095363351363517e-13,
+          "iterations": 21
+        },
+        "edges": [
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "doctorate": 6.0
+            },
+            "target": "gapi:bravo",
+            "weight": 6.0
+          },
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "doctorate": 3.0
+            },
+            "target": "gapi:charlie",
+            "weight": 3.0
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 4.0
+            },
+            "target": "gapi:alpha",
+            "weight": 4.0
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 2.0
+            },
+            "target": "gapi:charlie",
+            "weight": 2.0
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:alpha",
+            "weight": 1.0
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:bravo",
+            "weight": 1.0
+          }
+        ],
+        "nodes": [
+          {
+            "award_categories": {},
+            "award_contributions": [],
+            "award_percentile": 0.0,
+            "award_score": 0.0,
+            "composite_score": 0.6000000000000001,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 8,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:alpha",
+            "institution_name": "Northstar Institute (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.75,
+            "network_score": 0.35250463821897293,
+            "rank": 2,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "technical_history": 0.25
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-milestone-001",
+                "category": "technical_history",
+                "evidence_id": "demo-001-job",
+                "year": 2021
+              }
+            ],
+            "award_percentile": 0.5,
+            "award_score": 0.25,
+            "composite_score": 0.7000000000000001,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 11,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:bravo",
+            "institution_name": "Meridian University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.75,
+            "network_score": 0.35250463821897293,
+            "rank": 1,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "personal": 1.0
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-award-personal-001",
+                "category": "personal",
+                "evidence_id": "demo-023-job",
+                "year": 2020
+              }
+            ],
+            "award_percentile": 1.0,
+            "award_score": 1.0,
+            "composite_score": 0.19999999999999996,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 7,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:charlie",
+            "institution_name": "Tidewater Research University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.0,
+            "network_score": 0.24737167594300494,
+            "rank": 3,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 0,
+              "source_class_count": 0,
+              "traceability": 0.0
+            },
+            "institution_id": "gapi:low",
+            "institution_name": "Unobserved Example Institute (DEMO)",
+            "institution_type": "research_institute",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes",
+              "traceability_below_threshold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "description": "Set the composite award contribution to zero; network input is unchanged.",
+      "id": "network_only",
+      "label": "Talent network only",
+      "result": {
+        "algorithm": {
+          "alpha": 0.85,
+          "composite_network_weight": 1.0,
+          "max_iterations": 200,
+          "stage_weights": {
+            "bachelor": 0.2,
+            "doctorate": 1.0,
+            "master": 0.35,
+            "postdoc": 0.6
+          },
+          "tolerance": 1e-12
+        },
+        "convergence": {
+          "converged": true,
+          "error": 6.848133171644122e-13,
+          "iterations": 48
+        },
+        "edges": [
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 6.0,
+              "master": 0.7,
+              "postdoc": 0.6
+            },
+            "target": "gapi:bravo",
+            "weight": 7.499999999999999
+          },
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "doctorate": 3.0,
+              "master": 0.35
+            },
+            "target": "gapi:charlie",
+            "weight": 3.35
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 4.0,
+              "master": 0.35,
+              "postdoc": 0.6
+            },
+            "target": "gapi:alpha",
+            "weight": 4.949999999999999
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 2.0
+            },
+            "target": "gapi:charlie",
+            "weight": 2.2
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0,
+              "master": 0.35
+            },
+            "target": "gapi:alpha",
+            "weight": 1.35
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:bravo",
+            "weight": 1.0
+          }
+        ],
+        "nodes": [
+          {
+            "award_categories": {},
+            "award_contributions": [],
+            "award_percentile": 0.0,
+            "award_score": 0.0,
+            "composite_score": 1.0,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 8,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:alpha",
+            "institution_name": "Northstar Institute (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 1.0,
+            "network_score": 0.3679500757358368,
+            "rank": 1,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "technical_history": 0.25
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-milestone-001",
+                "category": "technical_history",
+                "evidence_id": "demo-001-job",
+                "year": 2021
+              }
+            ],
+            "award_percentile": 0.5,
+            "award_score": 0.25,
+            "composite_score": 0.5,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 11,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:bravo",
+            "institution_name": "Meridian University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.5,
+            "network_score": 0.348975590398873,
+            "rank": 2,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "personal": 1.0
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-award-personal-001",
+                "category": "personal",
+                "evidence_id": "demo-023-job",
+                "year": 2020
+              }
+            ],
+            "award_percentile": 1.0,
+            "award_score": 1.0,
+            "composite_score": 0.0,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 7,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:charlie",
+            "institution_name": "Tidewater Research University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.0,
+            "network_score": 0.23545528624624257,
+            "rank": 3,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 0,
+              "source_class_count": 0,
+              "traceability": 0.0
+            },
+            "institution_id": "gapi:low",
+            "institution_name": "Unobserved Example Institute (DEMO)",
+            "institution_type": "research_institute",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes",
+              "traceability_below_threshold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "description": "Set the composite network contribution to zero; awards remain a separate synthetic signal.",
+      "id": "awards_only",
+      "label": "Award signal only",
+      "result": {
+        "algorithm": {
+          "alpha": 0.85,
+          "composite_network_weight": 0.0,
+          "max_iterations": 200,
+          "stage_weights": {
+            "bachelor": 0.2,
+            "doctorate": 1.0,
+            "master": 0.35,
+            "postdoc": 0.6
+          },
+          "tolerance": 1e-12
+        },
+        "convergence": {
+          "converged": true,
+          "error": 6.848133171644122e-13,
+          "iterations": 48
+        },
+        "edges": [
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 6.0,
+              "master": 0.7,
+              "postdoc": 0.6
+            },
+            "target": "gapi:bravo",
+            "weight": 7.499999999999999
+          },
+          {
+            "source": "gapi:alpha",
+            "stages": {
+              "doctorate": 3.0,
+              "master": 0.35
+            },
+            "target": "gapi:charlie",
+            "weight": 3.35
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 4.0,
+              "master": 0.35,
+              "postdoc": 0.6
+            },
+            "target": "gapi:alpha",
+            "weight": 4.949999999999999
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 2.0
+            },
+            "target": "gapi:charlie",
+            "weight": 2.2
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0,
+              "master": 0.35
+            },
+            "target": "gapi:alpha",
+            "weight": 1.35
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:bravo",
+            "weight": 1.0
+          }
+        ],
+        "nodes": [
+          {
+            "award_categories": {},
+            "award_contributions": [],
+            "award_percentile": 0.0,
+            "award_score": 0.0,
+            "composite_score": 0.0,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 8,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:alpha",
+            "institution_name": "Northstar Institute (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 1.0,
+            "network_score": 0.3679500757358368,
+            "rank": 3,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "technical_history": 0.25
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-milestone-001",
+                "category": "technical_history",
+                "evidence_id": "demo-001-job",
+                "year": 2021
+              }
+            ],
+            "award_percentile": 0.5,
+            "award_score": 0.25,
+            "composite_score": 0.5,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 11,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:bravo",
+            "institution_name": "Meridian University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.5,
+            "network_score": 0.348975590398873,
+            "rank": 2,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": {
+              "personal": 1.0
+            },
+            "award_contributions": [
+              {
+                "award_id": "synthetic-award-personal-001",
+                "category": "personal",
+                "evidence_id": "demo-023-job",
+                "year": 2020
+              }
+            ],
+            "award_percentile": 1.0,
+            "award_score": 1.0,
+            "composite_score": 1.0,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 7,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:charlie",
+            "institution_name": "Tidewater Research University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 0.0,
+            "network_score": 0.23545528624624257,
+            "rank": 1,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 0,
+              "source_class_count": 0,
+              "traceability": 0.0
+            },
+            "institution_id": "gapi:low",
+            "institution_name": "Unobserved Example Institute (DEMO)",
+            "institution_type": "research_institute",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes",
+              "traceability_below_threshold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "description": "Remove all synthetic employment events at Northstar Institute and recalculate.",
+      "id": "without_alpha_hiring",
+      "label": "Remove one hiring hub",
+      "result": {
+        "algorithm": {
+          "alpha": 0.85,
+          "composite_network_weight": 0.8,
+          "max_iterations": 200,
+          "stage_weights": {
+            "bachelor": 0.2,
+            "doctorate": 1.0,
+            "master": 0.35,
+            "postdoc": 0.6
+          },
+          "tolerance": 1e-12
+        },
+        "convergence": {
+          "converged": true,
+          "error": 6.591116541443398e-13,
+          "iterations": 22
+        },
+        "edges": [
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "doctorate": 4.0,
+              "master": 0.35,
+              "postdoc": 0.6
+            },
+            "target": "gapi:alpha",
+            "weight": 4.949999999999999
+          },
+          {
+            "source": "gapi:bravo",
+            "stages": {
+              "bachelor": 0.2,
+              "doctorate": 2.0
+            },
+            "target": "gapi:charlie",
+            "weight": 2.2
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0,
+              "master": 0.35
+            },
+            "target": "gapi:alpha",
+            "weight": 1.35
+          },
+          {
+            "source": "gapi:charlie",
+            "stages": {
+              "doctorate": 1.0
+            },
+            "target": "gapi:bravo",
+            "weight": 1.0
+          }
+        ],
+        "nodes": [
+          {
+            "award_categories": {},
+            "award_contributions": [],
+            "award_percentile": 1.0,
+            "award_score": 0.0,
+            "composite_score": 1.0,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 8,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:alpha",
+            "institution_name": "Northstar Institute (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": 1.0,
+            "network_score": 0.3969534401065544,
+            "rank": 1,
+            "region": "Demo Region",
+            "status": "ranked",
+            "unranked_reasons": []
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [
+              {
+                "award_id": "synthetic-milestone-001",
+                "category": "technical_history",
+                "evidence_id": "demo-001-job",
+                "year": 2021
+              }
+            ],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 1,
+              "source_class_count": 1,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:bravo",
+            "institution_name": "Meridian University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes"
+            ]
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [
+              {
+                "award_id": "synthetic-award-personal-001",
+                "category": "personal",
+                "evidence_id": "demo-023-job",
+                "year": 2020
+              }
+            ],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 3,
+              "source_class_count": 2,
+              "traceability": 1.0
+            },
+            "institution_id": "gapi:charlie",
+            "institution_name": "Tidewater Research University (DEMO)",
+            "institution_type": "research_university",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events"
+            ]
+          },
+          {
+            "award_categories": null,
+            "award_contributions": [],
+            "award_percentile": null,
+            "award_score": null,
+            "composite_score": null,
+            "country": "Synthetic",
+            "coverage": {
+              "event_count": 0,
+              "source_class_count": 0,
+              "traceability": 0.0
+            },
+            "institution_id": "gapi:low",
+            "institution_name": "Unobserved Example Institute (DEMO)",
+            "institution_type": "research_institute",
+            "network_percentile": null,
+            "network_score": null,
+            "rank": null,
+            "region": "Demo Region",
+            "status": "unranked_low_coverage",
+            "unranked_reasons": [
+              "insufficient_observed_events",
+              "insufficient_source_classes",
+              "traceability_below_threshold"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
