@@ -1,0 +1,9 @@
+{
+  "config_sha256": "5f9b299a1703f39f041921f5005d4e0beebaf8379a8bab96222dffa98a8c067e",
+  "input_sha256": {
+    "dataset": "62b3156972a78c231b3d1f5b9ff2095d2e10468f32dd485739d98b7633cc2adf"
+  },
+  "release_sha256": "6be0a90f4efc52f1e679c6b30028f5e4b6c0df6745c5747073c1e6dd2c40caba",
+  "result_sha256": "e4c82123474d8b6334457bee441d37b550a368d5e1ff96009e8a1f10679de5e8",
+  "schema_version": "gapi-release-manifest/v1"
+}

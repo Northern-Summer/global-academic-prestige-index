@@ -1,0 +1,10 @@
+{
+  "stage_weights": {"bachelor": 0.2, "master": 0.35, "doctorate": 1.0, "postdoc": 0.6},
+  "alpha": 0.85,
+  "tolerance": 1e-12,
+  "max_iterations": 200,
+  "qualifying_role_types": ["faculty", "researcher", "research_scientist", "postdoc"],
+  "eligibility": {"min_events": 10, "min_source_classes": 2, "min_traceability": 0.8},
+  "award_weights": {"personal": 1.0, "institutional": 0.5, "technical_history": 0.25},
+  "composite_network_weight": 0.8
+}

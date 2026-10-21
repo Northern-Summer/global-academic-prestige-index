@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="An evidence-bounded academic talent-flow network measurement prototype." />
+    <title>GAPI | Academic Talent Flow</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="GAPI home"><span class="brand-mark">G</span><span>GAPI</span></a>
+        <nav aria-label="Main navigation"><a href="#rankings">Rankings</a><a href="#network">Network</a><a href="#method">Method</a></nav>
+        <span class="demo-badge"><span></span> SYNTHETIC DEMO</span>
+      </header>
+      <main id="top">
+        <section class="intro" aria-labelledby="page-title">
+          <div class="intro-copy"><p class="eyebrow">ACADEMIC MOBILITY · RESEARCH PROTOTYPE</p><h1 id="page-title">Where academic talent travels</h1><p class="lede">A transparent view of observed training-to-employment links across research institutions.</p></div>
+          <div class="as-of"><span>DATASET</span><strong>Synthetic fixture</strong><small>Not a real global ranking</small></div>
+        </section>
+        <section class="metric-strip" aria-label="Dataset summary"><div><span>INSTITUTIONS</span><strong id="institution-count">—</strong></div><div><span>OBSERVED LINKS</span><strong id="link-count">—</strong></div><div><span>RANKED IN DEMO</span><strong id="ranked-count">—</strong></div><div><span>ALGORITHM</span><strong>PageRank v1</strong></div></section>
+        <section class="workspace" id="rankings">
+          <div class="section-heading"><div><p class="eyebrow">01 / COMPARISON</p><h2>Institution table</h2></div><div class="table-tools"><label class="search"><span>Search</span><input id="search" type="search" placeholder="Institution or country" autocomplete="off" /></label><label class="filter-label">Region<select id="region-filter"><option value="all">All regions</option></select></label><label class="filter-label">Order<select id="sort-filter"><option value="rank">Composite rank</option><option value="network">Network score</option><option value="awards">Award score</option><option value="name">Institution name</option></select></label></div></div>
+          <div class="table-wrap"><table><thead><tr><th scope="col">Rank</th><th scope="col">Institution</th><th scope="col">Region</th><th scope="col">Network</th><th scope="col">Awards</th><th scope="col">Composite</th><th scope="col">Coverage</th></tr></thead><tbody id="ranking-rows"></tbody></table></div>
+          <p class="table-note">Ranked entries require the demo fixture's relaxed sample threshold. The production default remains stricter.</p>
+        </section>
+        <section class="network-section" id="network">
+          <div class="section-heading"><div><p class="eyebrow">02 / RELATIONSHIPS</p><h2>Talent-flow network</h2></div><div class="controls"><label>Stage<select id="stage-filter"><option value="all">All stages</option><option value="doctorate">Doctorate</option><option value="master">Master</option><option value="bachelor">Bachelor</option><option value="postdoc">Postdoc</option></select></label><label>Minimum flow<input id="flow-filter" type="range" min="0" max="2" value="0" step="0.1" /><span id="flow-value">0.0</span></label></div></div>
+          <div class="network-layout"><div class="network-canvas" id="network-canvas" aria-label="Interactive three-dimensional institution network"></div><aside class="network-detail"><p class="eyebrow">SELECTED INSTITUTION</p><h3 id="detail-name">Select a node</h3><p id="detail-copy">Links point from the hiring institution to the institution where a person trained.</p><p id="detail-awards" class="award-breakdown"></p><div class="legend"><span><i class="legend-dot employer"></i>Hiring institution</span><span><i class="legend-dot origin"></i>Training institution</span></div><ul id="detail-links" class="link-list"></ul></aside></div>
+        </section>
+        <section class="method-section" id="method"><div class="section-heading"><div><p class="eyebrow">03 / INTERPRETATION</p><h2>What this measures</h2></div></div><div class="method-grid"><p>GAPI summarizes evidence-backed relationships in which a person trained at one institution and later held an academic or research role at another. The edge points from employer to training institution.</p><p>Network influence is not an employment probability, a causal estimate of training quality, or a complete census of global academia. Coverage gaps remain visible and can affect comparisons.</p><p>Awards remain a separate signal. Personal awards, institutional recognition, and technical-history milestones are distinct categories and are not propagated through the mobility network.</p></div><div class="method-footer"><span>CONFIGURATION</span><code>α 0.85 · doctorate 1.00 · master 0.35 · bachelor 0.20 · postdoc 0.60</code><a href="./docs/METHODOLOGY.md">Full methodology <span aria-hidden="true">↗</span></a></div></section>
+      </main>
+      <footer><span>GAPI · RESEARCH PROTOTYPE</span><span>Release data and method are versioned independently.</span><a href="./docs/DATA_SOURCES.md">Data sources</a></footer>
+    </div>
+    <script type="module" src="/web/main.js"></script>
+  </body>
+</html>

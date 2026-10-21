@@ -1,0 +1,959 @@
+{
+  "awards": [
+    {
+      "accepted": true,
+      "award_id": "synthetic-award-personal-001",
+      "category": "personal",
+      "evidence_id": "demo-000-job",
+      "institution_id": "gapi:alpha",
+      "producing_institution_id": null,
+      "recipient_id": "demo-person-001",
+      "training_institution_id": null,
+      "year": 2020
+    },
+    {
+      "accepted": true,
+      "award_id": "synthetic-milestone-001",
+      "category": "technical_history",
+      "evidence_id": "demo-001-job",
+      "institution_id": "gapi:bravo",
+      "producing_institution_id": null,
+      "recipient_id": null,
+      "training_institution_id": null,
+      "year": 2021
+    }
+  ],
+  "dataset_kind": "synthetic/demo",
+  "education_events": [
+    {
+      "accepted": true,
+      "evidence_id": "demo-000-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-000",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2000
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-001-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-001",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2001
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-002-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-002",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2002
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-003-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-003",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2003
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-004-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-004",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2004
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-005-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-005",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2005
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-006-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-006",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2006
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-007-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-007",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2007
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-008-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-008",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2008
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-009-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-009",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2009
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-010-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-010",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2010
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-011-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-011",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2011
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-012-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-012",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2000
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-013-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-013",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2001
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-014-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-014",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2002
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-015-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-015",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2003
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-016-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-016",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2004
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-017-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-017",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2005
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-018-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-018",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2006
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-019-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-019",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2007
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-020-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-020",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2008
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-021-edu",
+      "institution_id": "gapi:alpha",
+      "person_id": "demo-person-021",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2009
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-022-edu",
+      "institution_id": "gapi:bravo",
+      "person_id": "demo-person-022",
+      "source_class": "official_profile",
+      "stage": "doctorate",
+      "year": 2010
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-023-edu",
+      "institution_id": "gapi:charlie",
+      "person_id": "demo-person-023",
+      "source_class": "official_cv",
+      "stage": "doctorate",
+      "year": 2011
+    }
+  ],
+  "employment_events": [
+    {
+      "accepted": true,
+      "evidence_id": "demo-000-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-000",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2015
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-001-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-001",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2016
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-002-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-002",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2017
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-003-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-003",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2018
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-004-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-004",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2019
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-005-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-005",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2020
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-006-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-006",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2021
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-007-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-007",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2022
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-008-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-008",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2015
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-009-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-009",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2016
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-010-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-010",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2017
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-011-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-011",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2018
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-012-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-012",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2019
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-013-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-013",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2020
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-014-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-014",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2021
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-015-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-015",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2022
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-016-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-016",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2015
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-017-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-017",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2016
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-018-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-018",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2017
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-019-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-019",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2018
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-020-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-020",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2019
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-021-job",
+      "institution_id": "gapi:charlie",
+      "joint_fraction": null,
+      "person_id": "demo-person-021",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2020
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-022-job",
+      "institution_id": "gapi:alpha",
+      "joint_fraction": null,
+      "person_id": "demo-person-022",
+      "role_type": "faculty",
+      "source_class": "official_cv",
+      "year_start": 2021
+    },
+    {
+      "accepted": true,
+      "evidence_id": "demo-023-job",
+      "institution_id": "gapi:bravo",
+      "joint_fraction": null,
+      "person_id": "demo-person-023",
+      "role_type": "faculty",
+      "source_class": "official_profile",
+      "year_start": 2022
+    }
+  ],
+  "evidence": [
+    {
+      "content_sha256": "f41a85a991b68b382ac5467446d514227904eeee09e77feda208f7eb35c9f70c",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-000-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-000-edu"
+    },
+    {
+      "content_sha256": "fcbbbc53a527ea03d3c316703f75018cfbb68169212f884560798f4538d103bc",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-000-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-000-job"
+    },
+    {
+      "content_sha256": "0b1d2d3bdc03afaa58aba3dc2ef037ec675e53a93fee913bdff8399f413cf32a",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-001-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-001-edu"
+    },
+    {
+      "content_sha256": "adbb20e78fed8fb62bbecf5ce9d0b24bf1aa408a9942449047c6d95a62111e7d",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-001-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-001-job"
+    },
+    {
+      "content_sha256": "4a5ae7377c645456d49aa81cd00d120bc5fc8058ee26fb05a961a9b719119dc3",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-002-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-002-edu"
+    },
+    {
+      "content_sha256": "de505b1ac267dac1cc4ff93be369781e686799ea063be09f45622b5df054997d",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-002-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-002-job"
+    },
+    {
+      "content_sha256": "43f8beb8fa71c461632ac4d6de42ad222d5ec2008c10d024dbbf931ff6b7b078",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-003-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-003-edu"
+    },
+    {
+      "content_sha256": "9d5ae4205f24bdebebe9f1441e300cf60af58625bb15f1fd82ce81a17dc83335",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-003-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-003-job"
+    },
+    {
+      "content_sha256": "af7d463bac4793b9a7f9e9f8e67be1ab42e8f8a2a34a912d036c05ed31148758",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-004-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-004-edu"
+    },
+    {
+      "content_sha256": "9d44faec94ea9ad2a11bca61176223f797dd123263dd9e9fe379446b1af95bfa",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-004-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-004-job"
+    },
+    {
+      "content_sha256": "51ef20602ae88996813c6b435a3d7b2533b3c258ab49e7fd8857069ca6bce0fb",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-005-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-005-edu"
+    },
+    {
+      "content_sha256": "8857b0330d47ad9101fc676d40974c35f6a45c47d9c6c342fb4c8cee656719d9",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-005-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-005-job"
+    },
+    {
+      "content_sha256": "308e9fd17985cc8d37ac22a42e4306c37afb3a3c460364fa46aa0e727508b6de",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-006-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-006-edu"
+    },
+    {
+      "content_sha256": "4066b277c17a811610e2682633c4a1467c928d73e8c634bf09acf3596e9afc7a",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-006-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-006-job"
+    },
+    {
+      "content_sha256": "370a299928889dc3c5b6c72c74ad47457af58371c07c60d0ba30618a6f29c045",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-007-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-007-edu"
+    },
+    {
+      "content_sha256": "a7ce5b7c003f2949be31da748dc16c76dfdba690bbd80eac50a369f943fafa5f",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-007-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-007-job"
+    },
+    {
+      "content_sha256": "d733c9a9317e9c671057e6526b736b567c4c405fb535b7cbb25b1281a7f75b6e",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-008-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-008-edu"
+    },
+    {
+      "content_sha256": "577e42f33bbd40f4a62f94bb5b4c9f4780d14a538e37cdb6b98fa00ec9784bbf",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-008-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-008-job"
+    },
+    {
+      "content_sha256": "f49f29eb564a57be6acb7e8d96e1554a23457ca28fa0d6c0932773ef1cb82aa0",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-009-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-009-edu"
+    },
+    {
+      "content_sha256": "1ebe1e73277c3b6b064632bfeaee27a6fab368d89f52323f32f22f4771856984",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-009-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-009-job"
+    },
+    {
+      "content_sha256": "8f1159e92fa2b7b3d4b27ffdcd2abfa09deb709eb348c0f2cf0528bf3556557f",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-010-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-010-edu"
+    },
+    {
+      "content_sha256": "ef12474bd936cc53deb5914d46e866cd4304c68f5fd82145b6ebc037d888d181",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-010-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-010-job"
+    },
+    {
+      "content_sha256": "3cfaaa182d47c86157602fb09b8a2cc0f1fd11ea83d95fcd0d4da98871956d4e",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-011-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-011-edu"
+    },
+    {
+      "content_sha256": "f77c47fe99536dd28629b4cc52a6e76bec51637212f804ecd2af1b47a0c944ea",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-011-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-011-job"
+    },
+    {
+      "content_sha256": "c464d5a5ec5f41c69e9ed3845a1c60945992954f2cb00e9c53824ace5c74afcd",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-012-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-012-edu"
+    },
+    {
+      "content_sha256": "ebea4567da3f916a17afd9e5eaf2808b454226a2b4b1a98cf86056d1f8b23721",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-012-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-012-job"
+    },
+    {
+      "content_sha256": "a5442b5f3099d35809c461bc4f2fae8e7de96c579d4e728030aaab860f920034",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-013-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-013-edu"
+    },
+    {
+      "content_sha256": "cf517cd668906cfe998b1f838f2337e4d030beb8d8bbf19e5e12d6829d0d7890",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-013-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-013-job"
+    },
+    {
+      "content_sha256": "3d98f6c39106ca1156669dc272fb49d62efcfda3c61f171e30707d43b48dd743",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-014-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-014-edu"
+    },
+    {
+      "content_sha256": "9961db148cab7d391568fc033f84965366f6ad2e58394d154f239fe5c6e0dac3",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-014-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-014-job"
+    },
+    {
+      "content_sha256": "4c20822a81e9322014d9912398a269e9f0aed8e0d7e644dae9d236dbf03efa87",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-015-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-015-edu"
+    },
+    {
+      "content_sha256": "6fc3e200d9320f29ed7f3974fbcef84385bba2b991b3967679c6b785e6c8d342",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-015-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-015-job"
+    },
+    {
+      "content_sha256": "a551399e8c8b07b5c328fb1726f682bd7a8a9a06d16bd92accc31aa9a82603e7",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-016-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-016-edu"
+    },
+    {
+      "content_sha256": "ac07bc5f57b5c9de32d9e6f7ea8e3e5d65b9dcd5e6f913ed8424619003a0e925",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-016-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-016-job"
+    },
+    {
+      "content_sha256": "5d5b0c8b6d542ec9ae02157a4dd17c12c40d3c3c81a235e035b894f656afdc6c",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-017-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-017-edu"
+    },
+    {
+      "content_sha256": "37876445fc091f98355afb0a6238ccda8815747acd95fb069d10d8ffb5eaa24b",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-017-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-017-job"
+    },
+    {
+      "content_sha256": "676b6628bc0277fc25bd8d93fcd3d0eb8a0763946b90698dab4c49e7afc75e3a",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-018-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-018-edu"
+    },
+    {
+      "content_sha256": "7b20587cb0ad5af3494857a9f2af361c00e8c7c46723cd578158e91b705c02fa",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-018-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-018-job"
+    },
+    {
+      "content_sha256": "336f3db42d193a343566d17988e3b93c7970aa215d2c25eea64e3505dbda47c0",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-019-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-019-edu"
+    },
+    {
+      "content_sha256": "bc7fdb19e9f7d2f7d4f9df581d943b38c2897394fc2ab3a18a4724018381c393",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-019-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-019-job"
+    },
+    {
+      "content_sha256": "267bacec0cc1eb35bb5c0833b12d5b265b9a9d133e4611156a1393c685661bc5",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-020-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-020-edu"
+    },
+    {
+      "content_sha256": "36f0c0649ba7830f540b8648e9e719d420ee725a0b6d2ef4f28a0f6b08daa1ad",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-020-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-020-job"
+    },
+    {
+      "content_sha256": "28fd0eee6c733723c1a2feae3fb9262afa38d1ce3830f2d1e9a8f14151bbae9a",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-021-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-021-edu"
+    },
+    {
+      "content_sha256": "9ac3feca93133bb5c42bab4f914d6dbc4a9f81ec0616b273f7c8cab5aaf43469",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-021-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-021-job"
+    },
+    {
+      "content_sha256": "6f29d06330fe1686ac691c73fc5d95c71cfada6588733af189cf267ffccdb080",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-022-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-022-edu"
+    },
+    {
+      "content_sha256": "29ebda22bc70d79cba6f8c914aaa2c435def498946187389027c1f907dbd3700",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-022-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-022-job"
+    },
+    {
+      "content_sha256": "fa15ff9eea1c9ae2030e5649f5e8f37be72df21886cda1c667f1845dafa9bc50",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-023-edu",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_cv",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-023-edu"
+    },
+    {
+      "content_sha256": "61c1e5f20f81c320a4d58d99b5c144d0e0a0eb41ad3de3eff6b4ef307d5d70b9",
+      "evidence_level": "synthetic_fixture",
+      "id": "demo-023-job",
+      "license_status": "synthetic_demo",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "source_class": "official_profile",
+      "url": "https://example.invalid/gapi-synthetic-fixture/demo-023-job"
+    }
+  ],
+  "institutions": [
+    {
+      "aliases": [],
+      "country": "Synthetic",
+      "id": "gapi:alpha",
+      "institution_type": "research_university",
+      "name": "Northstar Institute (DEMO)",
+      "region": "Demo Region",
+      "stable_id": "DEMO-001"
+    },
+    {
+      "aliases": [],
+      "country": "Synthetic",
+      "id": "gapi:bravo",
+      "institution_type": "research_university",
+      "name": "Meridian University (DEMO)",
+      "region": "Demo Region",
+      "stable_id": "DEMO-002"
+    },
+    {
+      "aliases": [],
+      "country": "Synthetic",
+      "id": "gapi:charlie",
+      "institution_type": "research_university",
+      "name": "Tidewater Research University (DEMO)",
+      "region": "Demo Region",
+      "stable_id": "DEMO-003"
+    },
+    {
+      "aliases": [],
+      "country": "Synthetic",
+      "id": "gapi:low",
+      "institution_type": "research_institute",
+      "name": "Unobserved Example Institute (DEMO)",
+      "region": "Demo Region",
+      "stable_id": "DEMO-004"
+    }
+  ]
+}

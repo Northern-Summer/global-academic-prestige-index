@@ -1,0 +1,179 @@
+{
+  "algorithm": {
+    "alpha": 0.85,
+    "composite_network_weight": 0.8,
+    "max_iterations": 200,
+    "stage_weights": {
+      "bachelor": 0.2,
+      "doctorate": 1.0,
+      "master": 0.35,
+      "postdoc": 0.6
+    },
+    "tolerance": 1e-12
+  },
+  "convergence": {
+    "converged": true,
+    "error": 2.488148576063054e-13,
+    "iterations": 19
+  },
+  "dataset_kind": "synthetic/demo",
+  "demo_notice": "Synthetic records only. No real institution or person data; not a global ranking.",
+  "edges": [
+    {
+      "source": "gapi:alpha",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:bravo",
+      "weight": 4.0
+    },
+    {
+      "source": "gapi:alpha",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:charlie",
+      "weight": 4.0
+    },
+    {
+      "source": "gapi:bravo",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:alpha",
+      "weight": 4.0
+    },
+    {
+      "source": "gapi:bravo",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:charlie",
+      "weight": 4.0
+    },
+    {
+      "source": "gapi:charlie",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:alpha",
+      "weight": 4.0
+    },
+    {
+      "source": "gapi:charlie",
+      "stages": {
+        "doctorate": 4.0
+      },
+      "target": "gapi:bravo",
+      "weight": 4.0
+    }
+  ],
+  "limitations": [
+    "Scores measure observed, evidence-backed mobility relationships; they are not employment probabilities or causal estimates."
+  ],
+  "nodes": [
+    {
+      "award_categories": {
+        "personal": 1.0
+      },
+      "award_contributions": [
+        {
+          "award_id": "synthetic-award-personal-001",
+          "category": "personal",
+          "evidence_id": "demo-000-job",
+          "year": 2020
+        }
+      ],
+      "award_percentile": 1.0,
+      "award_score": 1.0,
+      "composite_score": 0.6,
+      "country": "Synthetic",
+      "coverage": {
+        "event_count": 8,
+        "source_class_count": 2,
+        "traceability": 1.0
+      },
+      "institution_id": "gapi:alpha",
+      "institution_name": "Northstar Institute (DEMO)",
+      "institution_type": "research_university",
+      "network_percentile": 0.5,
+      "network_score": 0.31746031746030623,
+      "rank": 1,
+      "region": "Demo Region",
+      "status": "ranked"
+    },
+    {
+      "award_categories": {
+        "technical_history": 0.25
+      },
+      "award_contributions": [
+        {
+          "award_id": "synthetic-milestone-001",
+          "category": "technical_history",
+          "evidence_id": "demo-001-job",
+          "year": 2021
+        }
+      ],
+      "award_percentile": 0.5,
+      "award_score": 0.25,
+      "composite_score": 0.5,
+      "country": "Synthetic",
+      "coverage": {
+        "event_count": 8,
+        "source_class_count": 2,
+        "traceability": 1.0
+      },
+      "institution_id": "gapi:bravo",
+      "institution_name": "Meridian University (DEMO)",
+      "institution_type": "research_university",
+      "network_percentile": 0.5,
+      "network_score": 0.31746031746030623,
+      "rank": 2,
+      "region": "Demo Region",
+      "status": "ranked"
+    },
+    {
+      "award_categories": {},
+      "award_contributions": [],
+      "award_percentile": 0.0,
+      "award_score": 0.0,
+      "composite_score": 0.4,
+      "country": "Synthetic",
+      "coverage": {
+        "event_count": 8,
+        "source_class_count": 2,
+        "traceability": 1.0
+      },
+      "institution_id": "gapi:charlie",
+      "institution_name": "Tidewater Research University (DEMO)",
+      "institution_type": "research_university",
+      "network_percentile": 0.5,
+      "network_score": 0.31746031746030623,
+      "rank": 3,
+      "region": "Demo Region",
+      "status": "ranked"
+    },
+    {
+      "award_categories": null,
+      "award_contributions": [],
+      "award_percentile": null,
+      "award_score": null,
+      "composite_score": null,
+      "country": "Synthetic",
+      "coverage": {
+        "event_count": 0,
+        "source_class_count": 0,
+        "traceability": 0.0
+      },
+      "institution_id": "gapi:low",
+      "institution_name": "Unobserved Example Institute (DEMO)",
+      "institution_type": "research_institute",
+      "network_percentile": null,
+      "network_score": null,
+      "rank": null,
+      "region": "Demo Region",
+      "status": "unranked_low_coverage"
+    }
+  ],
+  "schema_version": "gapi-ranking/v1"
+}

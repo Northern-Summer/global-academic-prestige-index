@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "If you use GAPI, cite the repository release you used."
+title: "Global Academic Prestige Index (GAPI)"
+type: software
+version: 0.1.0
+abstract: "A reproducible research prototype for evidence-backed academic talent-flow network measurement."
+license: Apache-2.0
