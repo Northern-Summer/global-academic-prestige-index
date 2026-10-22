@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import data from '../data/demo/rankings.json';
 import scenarioData from '../data/demo/scenarios.json';
-import { edgeWeightRange, edgesForInstitution, filterEdges } from './state.js';
+import { edgeWeightRange, edgesForInstitution, filterEdges, nodeColor } from './state.js';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+
+document.documentElement.style.setProperty('--gapi-node-ranked', nodeColor('ranked'));
+document.documentElement.style.setProperty('--gapi-node-unranked', nodeColor('unranked'));
 
 const nodesById = new Map(data.nodes.map((node) => [node.institution_id, node]));
 let currentScenario = scenarioData.scenarios[0];
@@ -14,6 +17,7 @@ let currentEdges = currentScenario.result.edges;
 let selected = null;
 let edgeObjects = [];
 const nodeObjects = new Map();
+const labelObjects = new Map();
 const positions = new Map();
 const nodesByCurrentId = () => new Map(currentNodes.map((node) => [node.institution_id, node]));
 
@@ -67,7 +71,7 @@ function updateMetrics() {
 }
 
 function renderNodePicker() {
-  $('#node-picker').innerHTML = currentNodes.map((node, index) => `<button type="button" data-id="${esc(node.institution_id)}" class="node-chip ${node.institution_id === selected ? 'is-selected' : ''}" aria-pressed="${node.institution_id === selected}"><span>${String(index + 1).padStart(2, '0')}</span>${esc(node.institution_name.replace(' (DEMO)', ''))}</button>`).join('');
+  $('#node-picker').innerHTML = currentNodes.map((node) => `<button type="button" data-id="${esc(node.institution_id)}" class="node-chip ${node.institution_id === selected ? 'is-selected' : ''}" aria-pressed="${node.institution_id === selected}"><span>${node.rank === null ? '—' : String(node.rank).padStart(2, '0')}</span>${esc(node.institution_name.replace(' (DEMO)', ''))}</button>`).join('');
   $('#node-picker').querySelectorAll('button').forEach((button) => button.addEventListener('click', () => selectNode(button.dataset.id)));
 }
 
@@ -101,9 +105,8 @@ function selectNode(id) {
   if (!id || !currentById.has(id)) return;
   selected = id;
   const node = currentById.get(id);
-  const index = currentNodes.findIndex((item) => item.institution_id === id) + 1;
   $('#detail-name').textContent = node.institution_name;
-  $('#detail-index').textContent = `NODE / ${String(index).padStart(2, '0')}`;
+  $('#detail-index').textContent = `RANK / ${node.rank === null ? '—' : String(node.rank).padStart(2, '0')}`;
   $('#selected-network-label').textContent = node.institution_name.replace(' (DEMO)', '');
   $('#detail-copy').textContent = `${node.status === 'ranked' ? `Scenario position ${node.rank}${currentNodes.filter((item) => item.rank === node.rank).length > 1 ? ' (tied)' : ''}. ` : 'Not ranked in this scenario. '}${node.coverage.event_count} constructed events are visible in this fixture. This is not real-world evidence.`;
   $('#detail-awards').textContent = node.award_categories ? `Separate award signal · ${Object.entries(node.award_categories).map(([category, score]) => `${category.replaceAll('_', ' ')} ${score.toFixed(2)}`).join(' · ') || 'none in this fixture'}` : `Not-ranked reasons · ${(node.unranked_reasons ?? []).map((reason) => reason.replaceAll('_', ' ')).join(' · ') || 'not eligible'}`;
@@ -115,6 +118,14 @@ function applyScenario(scenarioId) {
   currentNodes = currentScenario.result.nodes;
   currentEdges = currentScenario.result.edges;
   selected = currentNodes.some((node) => node.institution_id === selected) ? selected : currentNodes[0]?.institution_id;
+  const scenarioNodes = nodesByCurrentId();
+  for (const [id, object] of nodeObjects) {
+    const node = scenarioNodes.get(id);
+    object.visible = Boolean(node);
+    const label = labelObjects.get(id);
+    if (label) label.visible = Boolean(node);
+    if (node) object.material.color.set(nodeColor(node.status));
+  }
   $('#scenario-explainer').innerHTML = `<span class="scenario-kicker">${esc(currentScenario.label.toUpperCase())}</span><span>${esc(currentScenario.description)}</span><span class="scenario-disclaimer">Synthetic teaching scenario</span>`;
   updateSliderRange(); renderTable(); updateMetrics(); renderNodePicker(); selectNode(selected);
   edgeObjects.forEach(({ line, head }) => { line.visible = false; head.visible = false; });
@@ -152,8 +163,10 @@ function createLabel(text) {
 }
 
 function rebuildEdges() {
+  const scenarioNodes = nodesByCurrentId();
   for (const { line, head } of edgeObjects) { scene.remove(line, head); line.geometry.dispose(); line.material.dispose(); head.geometry.dispose(); head.material.dispose(); }
   edgeObjects = currentEdges.map((edge) => {
+    if (!scenarioNodes.has(edge.source) || !scenarioNodes.has(edge.target)) return null;
     const origin = positions.get(edge.source); const destination = positions.get(edge.target);
     if (!origin || !destination) return null;
     const direction = destination.clone().sub(origin).normalize();
@@ -174,10 +187,10 @@ function initializeScene() {
   scene.add(new THREE.HemisphereLight(0xe2f2e9, 0x203c38, 2.1)); const light = new THREE.DirectionalLight(0xffffff, 1.2); light.position.set(-3, 5, 5); scene.add(light);
   raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
   for (const node of data.nodes) {
-    const position = positions.get(node.institution_id); const geometry = new THREE.SphereGeometry(node.status === 'ranked' ? 0.24 : 0.16, 22, 16);
-    const material = new THREE.MeshStandardMaterial({ color: node.status === 'ranked' ? '#79b5a1' : '#d88a70', roughness: 0.45, metalness: 0.08 });
+    const position = positions.get(node.institution_id); const geometry = new THREE.SphereGeometry(0.2, 22, 16);
+    const material = new THREE.MeshStandardMaterial({ color: nodeColor(node.status), roughness: 0.45, metalness: 0.08 });
     const mesh = new THREE.Mesh(geometry, material); mesh.position.copy(position); mesh.userData.id = node.institution_id; scene.add(mesh); nodeObjects.set(node.institution_id, mesh);
-    const label = createLabel(node.institution_name.replace(' (DEMO)', '')); label.position.copy(position).add(new THREE.Vector3(0, 0.45, 0)); scene.add(label);
+    const label = createLabel(node.institution_name.replace(' (DEMO)', '')); label.position.copy(position).add(new THREE.Vector3(0, 0.45, 0)); scene.add(label); labelObjects.set(node.institution_id, label);
   }
   rebuildEdges();
   renderer.domElement.addEventListener('pointerdown', (event) => { dragging = true; previous = { x: event.clientX, y: event.clientY }; renderer.domElement.setPointerCapture(event.pointerId); });
@@ -185,7 +198,7 @@ function initializeScene() {
   renderer.domElement.addEventListener('pointermove', (event) => {
     const rect = renderer.domElement.getBoundingClientRect(); pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     if (dragging) { rotation.y += (event.clientX - previous.x) * 0.007; rotation.x = Math.max(-0.65, Math.min(0.65, rotation.x + (event.clientY - previous.y) * 0.004)); previous = { x: event.clientX, y: event.clientY }; }
-    raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects([...nodeObjects.values()])[0]?.object ?? null; hovered = hit?.userData.id ?? null; renderer.domElement.style.cursor = hit ? 'pointer' : dragging ? 'grabbing' : 'grab';
+    raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects([...nodeObjects.values()].filter((object) => object.visible))[0]?.object ?? null; hovered = hit?.userData.id ?? null; renderer.domElement.style.cursor = hit ? 'pointer' : dragging ? 'grabbing' : 'grab';
   });
   renderer.domElement.addEventListener('click', () => { if (hovered) selectNode(hovered); });
   renderer.domElement.addEventListener('wheel', (event) => { camera.position.z = Math.max(5, Math.min(13, camera.position.z + event.deltaY * 0.008)); }, { passive: true });

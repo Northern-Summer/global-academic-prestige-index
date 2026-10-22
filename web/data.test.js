@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { edgeWeightRange, edgesForInstitution, filterEdges } from './state.js';
+import { edgeWeightRange, edgesForInstitution, filterEdges, nodeColor } from './state.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,6 +49,18 @@ test('flow threshold range follows selected stage and high threshold excludes fl
   assert.deepEqual(edgeWeightRange(edges, 'doctorate'), { min: 1, max: 6, count: 2 });
   assert.equal(filterEdges(edges, { stage: 'all', minWeight: 6 }).length, 1);
   assert.equal(filterEdges(edges, { stage: 'doctorate', minWeight: 6 }).length, 1);
+});
+
+test('scenario node color maps eligibility only and never encodes a score', async () => {
+  const data = JSON.parse(await readFile(resolve(root, 'data/demo/scenarios.json'), 'utf8'));
+  const baseline = data.scenarios.find((scenario) => scenario.id === 'baseline').result.nodes;
+  const removedHub = data.scenarios.find((scenario) => scenario.id === 'without_alpha_hiring').result.nodes;
+  const baselineById = new Map(baseline.map((node) => [node.institution_id, node]));
+  const hub = removedHub.find((node) => baselineById.get(node.institution_id)?.status === 'ranked' && node.status !== 'ranked');
+
+  assert.equal(nodeColor('ranked'), '#79b5a1');
+  assert.equal(nodeColor('unranked_low_coverage'), '#d88a70');
+  assert.ok(hub && nodeColor(hub.status) === '#d88a70');
 });
 
 test('static HTML exposes scenario, keyboard-selectable nodes, and coverage explanation', async () => {

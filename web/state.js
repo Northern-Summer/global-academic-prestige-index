@@ -20,3 +20,7 @@ export function edgesForInstitution(edges, institutionId) {
     outgoing: edges.filter((edge) => edge.source === institutionId),
   };
 }
+
+export function nodeColor(status) {
+  return status === 'ranked' ? '#79b5a1' : '#d88a70';
+}
