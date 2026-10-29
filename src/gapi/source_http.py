@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import time
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
@@ -12,7 +13,27 @@ from urllib.robotparser import RobotFileParser
 
 USER_AGENT = "GAPI/0.2 (+https://github.com/global-academic-prestige-index; research)"
 HOSTS = {"orcid.figshare.com", "ndownloader.figshare.com", "api.figshare.com", "s3-eu-west-1.amazonaws.com",
-         "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org", "dumps.wikimedia.org"}
+         "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org", "dumps.wikimedia.org",
+         "www.tamucc.edu"}
+
+
+class SourceResponse:
+    """Normalize mid-body transport failures at the shared HTTP boundary."""
+    def __init__(self,response):
+        self.response=response
+        self.headers=response.headers
+
+    def read(self,size):
+        if size<0:raise ValueError('unbounded source read forbidden')
+        try:
+            return self.response.read(min(size,65536))
+        except HTTPException as exc:
+            raise OSError('source body transport failed: '+type(exc).__name__) from exc
+
+    def geturl(self):return self.response.geturl()
+    def close(self):self.response.close()
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
 
 
 def safe_url(url: str):
@@ -117,7 +138,7 @@ class PublicHTTP:
         )
         if not documented_api:
             self.allowed(url)
-        return self._open(url, accept)
+        return SourceResponse(self._open(url, accept))
 
     def json(self, url, limit=2*1024**2):
         with self.open(url, "application/json") as response:

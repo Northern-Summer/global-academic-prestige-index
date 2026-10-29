@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS discovery_feeds(
  sha256 TEXT, detail TEXT, prefix_sha256 TEXT);
 CREATE TABLE IF NOT EXISTS institution_aliases(
  alias TEXT PRIMARY KEY, institution TEXT NOT NULL, provenance TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS official_checks(
+ event_id TEXT NOT NULL, url TEXT NOT NULL, content_sha256 TEXT NOT NULL,
+ rule_version TEXT NOT NULL, retrieved_at TEXT NOT NULL, status TEXT NOT NULL,
+ origin_relation TEXT NOT NULL, field_hash TEXT NOT NULL,
+ PRIMARY KEY(event_id,url));
 CREATE TABLE IF NOT EXISTS failures(
  source TEXT NOT NULL, locator TEXT NOT NULL, reason TEXT NOT NULL,
  attempts INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(source,locator,reason));
@@ -111,6 +116,15 @@ class CareerStore:
 
     def seen(self, source, locator):
         return self.db.execute("SELECT sha256,status FROM members WHERE source=? AND locator=?", (source, locator)).fetchone()
+
+    def pending(self, command, limit=200):
+        sources={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
+        if command not in sources or not 1<=limit<=1000:
+            raise ValueError('invalid pending source/batch limit')
+        return [r[0] for r in self.db.execute('''SELECT d.identifier FROM discovery d WHERE d.source=?
+            AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
+            AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) ORDER BY d.identifier LIMIT ?''',
+            (command,sources[command],limit))]
 
     @contextmanager
     def member(self, source, locator):

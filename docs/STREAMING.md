@@ -96,6 +96,30 @@ career candidates. This confirms a real bulk ingress, not whole-source completio
 Wikidata search and unauthenticated ORCID search were refused under current access
 rules; no robots exception, account change or alternate protected host was used.
 
+For a finite programmatic collection run use:
+
+```powershell
+python -m gapi collect-global --max-seconds 1800 --batch-members 50
+python -m gapi corroborate --official --max-pages 20
+```
+
+The collection loop has one writer and one HTTP stream. It alternates bounded ORCID
+and Wikidata queue work, suspends a source for the current invocation when no progress
+is possible, and continues the other source. When queues cannot advance it attempts
+the bulk discovery route once, increasing the previous compressed prefix bound.
+The process ends at its time/resource/source boundary; it creates no scheduler or
+background timer. Every invocation resumes the existing database. Access denials
+remain denials and cannot change source trust or trigger authentication workarounds.
+
+The official-profile adapter currently supports the exact TAMU-CC business-directory
+layout and existing Wikidata P854 profile references. It incrementally reads HTML,
+extracts only education lines and explicit academic/start-year statements, checks
+stable institution crosswalks, and retains field/content hashes. Unsupported layouts
+remain unsupported. Two real fields were verified in the initial official profile.
+Because the Wikidata statements already cite that page, the check is explicitly
+same-origin confirmation; neither copied evidence nor the dump/API paths become two
+independent source classes. No formal-eligibility promotion is made.
+
 Discovery uses ordered live Wikidata pages, atomically committing each page's query
 hash, response hash, retrieval time, queue and last person identifier to SQLite.
 Each `--discover --resume` invocation advances one page (at most 200 people) and

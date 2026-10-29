@@ -50,3 +50,15 @@ class HTTPTests(unittest.TestCase):
     def test_oversized_response_rejected(self):
         with self.assertRaisesRegex(ValueError,"exceeds bound"):
             PublicHTTP(self.task(),opener=lambda *a,**k:Response(b"x"*100)).json("https://pub.orcid.org/v3.0/0000-0002-1825-0097/record",limit=10)
+
+    def test_truncated_chunked_body_is_normalized_and_closed_without_retry(self):
+        from http.client import IncompleteRead
+        class Truncated(Response):
+            def read(self,n=-1):raise IncompleteRead(b'partial')
+        response=Truncated()
+        calls=[]
+        def opener(*args,**kwargs):calls.append(1);return response
+        with self.assertRaisesRegex(OSError,'IncompleteRead'):
+            PublicHTTP(self.task(),opener=opener).json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record')
+        self.assertTrue(response.closed)
+        self.assertEqual(len(calls),1)

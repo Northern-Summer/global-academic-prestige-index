@@ -108,4 +108,19 @@ os._exit(19)
         for value in ('PhD candidate','honorary PhD','PhD student','在读博士'):
             self.assertIsNone(classify('education',value)[1])
 
+    def test_intensity_denominator_resolves_aliases_and_deduplicates_people(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:
+                s.db.executemany('INSERT INTO institution_aliases VALUES(?,?,?)',[
+                    ('wd:Q1','ror:example','test'),('ringgold:123','ror:example','test')])
+            result=rank_global(s)
+            node=next(n for n in result['nodes'] if n['institution_id']=='ror:example')
+            self.assertEqual(node['observed_training_denominator'],2)
+            public=rank_global(s,public=True)
+            node=next(n for n in public['nodes'] if n['institution_id']=='ror:example')
+            self.assertEqual(node['observed_training_denominator'],1)
+        finally:s.close()
+
 

@@ -210,12 +210,14 @@ def rank_global(store, *, public=False):
         scenario("region_balanced_prior",edges,personalization={node:1/groups[directory.get(node,(None,None,{}))[2].get("region") or "unknown"] for node in nodes})
     # Conditional intensity: denominator is observed training people, never graduates at risk.
     denominators = Counter()
-    denominator_sql = "SELECT institution,count(DISTINCT person) FROM events WHERE kind IN ('education','training') AND status IN ('observed','corroborated')"
+    denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
+        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+        WHERE e.kind IN ('education','training') AND e.status IN ('observed','corroborated')"""
     params = ()
     if allowed is not None:
-        denominator_sql += " AND source IN (" + ','.join('?' for _ in allowed) + ")"
+        denominator_sql += " AND e.source IN (" + ','.join('?' for _ in allowed) + ")"
         params = tuple(sorted(allowed))
-    for institution, count in store.db.execute(denominator_sql + " GROUP BY institution",params):
+    for institution, count in store.db.execute(denominator_sql + " GROUP BY COALESCE(a.institution,e.institution)",params):
         if institution:
             denominators[institution] = count
     intensity, _ = pagerank(nodes,{(s,t):w/max(1,denominators[t]) for (s,t),w in sorted(edges.items())},.85,1e-12,200)

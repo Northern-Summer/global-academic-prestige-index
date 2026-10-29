@@ -15,13 +15,16 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-        if name == 'discover-wikidata-dump':
+        if name in ('discover-wikidata-dump','collect-global'):
             parser.add_argument('--feed', type=Path, default=Path('configs/discovery-dump.json'))
             parser.add_argument('--max-seconds', type=float, default=300)
+        if name == 'discover-wikidata-dump':
             parser.add_argument('--max-compressed-bytes', type=int)
+        if name == 'collect-global':
+            parser.add_argument('--batch-members',type=int,default=50)
         if name.startswith("ingest-"):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
@@ -33,10 +36,13 @@ def register(sub):
             parser.add_argument("--discovery-scope", choices=['academic','degree-employer'], default='academic')
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
+        if name == 'corroborate':
+            parser.add_argument('--official',action='store_true')
+            parser.add_argument('--max-pages',type=int,default=20)
 
 
 def execute(args):
-    names = {"sources", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -58,7 +64,12 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command == 'discover-wikidata-dump':
+        if args.command == 'collect-global':
+            from .collection import collect
+            from .dump_discovery import load_feed
+            result=collect(store,http,load_feed(args.feed),max_seconds=args.max_seconds,
+                batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True))
+        elif args.command == 'discover-wikidata-dump':
             from .dump_discovery import discover_dump, load_feed
             if args.max_compressed_bytes is not None and args.max_compressed_bytes <= 0:
                 raise ValueError('max-compressed-bytes must be positive')
@@ -85,11 +96,7 @@ def execute_task(task, args):
                     except (OSError, RuntimeError, ValueError) as exc:
                         store.failure('wikidata', 'discovery:'+args.command, str(exc))
                         print(json.dumps({'discovery_failed': str(exc)[:256], 'continuing_committed_queue': True}), flush=True)
-                source = 'wikidata' if args.command == 'ingest-wikidata' else 'orcid-public-api'
-                ids = [r[0] for r in store.db.execute('''SELECT d.identifier FROM discovery d WHERE d.source=?
-                    AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
-                    AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) ORDER BY d.identifier LIMIT ?''',
-                    (args.command, source, args.max_members or 200))]
+                ids=store.pending(args.command,min(args.max_members or 200,1000))
             if args.max_members:
                 ids = ids[:args.max_members]
             result = (ingest_wikidata if args.command == "ingest-wikidata" else ingest_orcid_api)(store, http, ids,
@@ -112,6 +119,9 @@ def execute_task(task, args):
             from .global_analysis import corroborate, export_release, export_local
             result = {"corroborate": corroborate, "rank-global": export_local,
                       "export-release": lambda s: export_release(s, args.out)}[args.command](store)
+            if args.command=='corroborate' and args.official:
+                from .official_profiles import check_official_profiles
+                result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)
         print(json.dumps(result, indent=2, sort_keys=True))
         if args.command == 'ingest-orcid' and any(r['source']=='orcid-2026-summary' and r['status'] in ('access_failed','failed') for r in result['sources']):
             raise SystemExit(2)
