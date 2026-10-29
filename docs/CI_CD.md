@@ -94,3 +94,5 @@ Local regression fixtures use small temporary repositories under the task's
 D-drive budget on Windows. They cover unchanged repeated verification, data-only
 commits, source/asset/manifest/snapshot modification, dirty source at build time,
 in-flight input changes, line-ending portability and disallowed build modes.
+
+Public asset readback retries transient network/timeouts and HTTP 429/500/502/503/504 up to three times, with a 10-second per-request deadline and bounded backoff. Permanent HTTP errors, byte-limit violations and content-hash mismatches still fail. This addresses observed Pages HTTP 503 after the site manifest had settled; it does not repeat publication writes. The rejected run is retained as evidence.
