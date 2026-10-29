@@ -5,3 +5,4 @@ type: software
 version: 0.2.0
 abstract: "A reproducible research prototype for evidence-backed academic talent-flow network measurement."
 license: Apache-2.0
+repository-code: "https://github.com/Northern-Summer/global-academic-prestige-index"

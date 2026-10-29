@@ -85,3 +85,60 @@ The code and source-permitted observation subset can be published as a prereleas
 The formal global ranking remains withheld. Continue from the external source lock,
 SQLite members/events/discovery/failures and current release manifest; do not rebuild
 the project or reinterpret a partial source as a global census.
+
+## Continuation: real page processing and public preview
+
+The complete source history was uploaded without force to the public repository
+`Northern-Summer/global-academic-prestige-index`; its default source branch is
+`codex/global-streaming`. The original bootstrap branch and local history are
+preserved. Publication uses SHA-addressed Git objects and remote ref readback;
+an ambiguous network write was reconciled before continuing.
+
+Replaced the one-shot first-200 discovery queue with ordered live keyset pages.
+Each page atomically commits its query/response hashes, timestamp, queue and
+cursor. A failed query does not advance the cursor; resume processes unfinished
+members rather than slicing the already-completed queue. Independent scope
+cursors separate university-teacher candidates from degree/employer selection.
+Conflicting ORCIDs are not selected and occupational candidates never create
+employment or degree facts.
+
+Actual execution: one new 200-person candidate page was committed and fully
+processed across a bounded ingest and a resume. Total local structured inputs
+are now **2,269 events, 572 person keys, 72 observed country/territory codes**;
+637 events are observed and 1,632 unresolved. The current local aggregate has
+1,162 institution identifiers, 98 weighted edges and converges in 26 iterations.
+The source-permitted public slice has **1,231 Wikidata events, 372 person keys,
+677 institution identifiers, 3 directed edges and 5 score-bearing endpoints**.
+Identifiers are not a deduplicated census. No independent official confirmations
+exist; awards, composites and all formal ranks remain missing.
+
+The next real keyset request timed out. Its cursor and the completed first page
+remain intact. The degree/employer ordered join also timed out; the simpler
+university-teacher candidate query succeeded. These observations establish a
+first-page processing/recovery mechanism, **not a successful complete multi-page
+scan**. The annual ORCID access/checksum boundary remains unchanged.
+
+Executed verification after corrections: **67 Python tests, 13 Node tests**;
+production browser checks bind the fetched snapshot SHA to its manifest, exercise
+filters/sorting/keyboard/details/CSV/WebGL/fallback/mobile, and confirm that the
+public build makes no restricted US-sample request. Browser testing exposed an
+invalid production mount dependency and a long scenario select overflowing at
+390px; both were fixed and the same acceptance checks rerun. A preview-base
+mismatch was corrected. A quality command attempted during ingestion was correctly
+refused by the existing writer lock; it was rerun after the writer exited.
+
+At 2,269 events, SQLite uses 5,832,704 bytes; normalized payloads total 3,050,465
+bytes, averaging 1,344 bytes per event. Including current indexes/queues/entities,
+the database ratio is about 2,571 bytes/event. This small-source mix is not a
+global sizing model. At that observed ratio, the remaining authorized budget
+after runtime and journal/export reserve would hold roughly 0.7 million additional
+events; actual capacity may vary materially. Total accounted task/build/release
+storage remains about 45 MiB, with zero detected raw source archives/XML. No
+increase to the 2 GiB cap or reduction in evidence requirements was made.
+
+Publication is an observation/code **prerelease only**. Source/ref, release/tag,
+site-tree and live-site checks have separate task-local receipts; repository
+creation or a successful upload alone is not evidence of a live site. External
+dual-track review, official-profile adapters, complete enumeration and fuller OOD
+analysis remain unfinished. The user's complete-global-statistics objective has
+not been achieved by this preview.
