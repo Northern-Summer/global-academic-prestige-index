@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS official_checks(
  rule_version TEXT NOT NULL, retrieved_at TEXT NOT NULL, status TEXT NOT NULL,
  origin_relation TEXT NOT NULL, field_hash TEXT NOT NULL,
  PRIMARY KEY(event_id,url));
+CREATE TABLE IF NOT EXISTS official_profile_subjects(
+ url TEXT NOT NULL, content_sha256 TEXT NOT NULL, rule_version TEXT NOT NULL,
+ person TEXT NOT NULL, PRIMARY KEY(url,content_sha256,rule_version));
 CREATE TABLE IF NOT EXISTS failures(
  source TEXT NOT NULL, locator TEXT NOT NULL, reason TEXT NOT NULL,
  attempts INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(source,locator,reason));

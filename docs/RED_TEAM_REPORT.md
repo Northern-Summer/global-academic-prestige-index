@@ -22,6 +22,19 @@ establishes only those declared cases. External reviewer independence, conflict
 disclosures, complete OOD/discipline analysis and global enumeration remain open.
 No formal global ranking is approved.
 
+An additional bounded internal read-only pass on 2026-10-30 reproduced three
+defects: first-ID duplicate evidence selection, unfinished degree confirmation in
+the official adapter, and an unimplemented independent-corroboration path. Fixes
+add source-preserving deterministic aggregation, a shared completed-qualification
+rule and a derived evidence-decision owner. A cross-challenge then exposed an
+unverified page/person connection and overstrict optional-date equality. Official
+profile v3 requires a same-ORCID connection; optional dates are conflict checked
+without pretending missing fields were confirmed. These findings and their
+negative/legitimate cases are covered by executable regression tests. Actual test
+counts, collection scope and deployment settlement belong to the dated acceptance
+receipt. Internal agents remain members of the implementation team and do not
+satisfy independent third-party review.
+
 Continuation adds a runnable offline OOD module (9 scenarios/26 invariants in the
 executed report), a stdlib-only public aggregate replay using an independently
 implemented PageRank iteration, and conservative Nobel label attribution. Exact

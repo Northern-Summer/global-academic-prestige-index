@@ -1,8 +1,8 @@
 """Deterministic official profile verification; references/copies never count twice.
 
 Current adapter scope is explicit. Other layouts stay unsupported instead of being
-guessed. No LLM or fuzzy names; an existing statement's exact P854 URL binds the
-person/profile identity, and the institution uses the stable crosswalk.
+guessed. P854 supplies a candidate URL only. Independent corroboration requires an
+explicit same-ORCID link in the official profile, never a name or citation match.
 """
 import codecs
 import hashlib
@@ -12,11 +12,11 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
-from .career_rules import classify, normalized
-from .orcid_stream import CHUNK
+from .career_rules import classify, normalized, valid_orcid
+from .orcid_stream import CHUNK, private_person
 from .task import digest
 
-RULE = 'official-profile-education-lines/1'
+RULE = 'official-profile-education-lines/3'
 ADAPTERS = {'www.tamucc.edu': {'path':'/business/about/directory/', 'employer':'ror:01mrfdz82'}}
 
 
@@ -32,10 +32,18 @@ class ProfileParser(HTMLParser):
         self.degrees = []
         self.joined = set()
         self.academic = False
+        self.orcids = set()
 
     def handle_starttag(self,tag,attrs):
         if tag == 'main':self.main = True
         if tag in ('script','style'):self.skip += 1
+        if self.main and not self.skip and tag == 'a':
+            href=dict(attrs).get('href') or ''
+            link=urlsplit(href)
+            identifier=link.path.removeprefix('/')
+            if (link.scheme=='https' and link.netloc=='orcid.org' and not link.query
+                    and not link.fragment and valid_orcid(identifier)):
+                self.orcids.add(identifier)
         if self.main and tag in ('h1','h2','h3','h4'):
             self.boundary();self.heading=tag;self.heading_text=''
         if tag in ('p','li','br','div'):self.boundary()
@@ -64,7 +72,7 @@ class ProfileParser(HTMLParser):
             match=re.fullmatch(r'([^,]{1,80}),\s*([^,]{1,250}),\s*(\d{4})',text)
             if match:
                 degree,institution,date=match.groups()
-                kind,stage=classify('education',degree)
+                kind,stage=classify('education',degree,completed_only=True)
                 if stage:self.degrees.append((stage,normalized(institution),int(date),digest(text)))
                 if len(self.degrees)>100:raise ValueError('too many degree lines')
         joined=re.fullmatch(r'Joined the faculty in (\d{4})',text)
@@ -112,10 +120,12 @@ def check_official_profiles(store,http,*,limit=20):
         url=profile_url(event)
         if url and (url in selected or len(selected)<limit):
             selected.setdefault(url,[]).append((event_id,event,institution))
-    confirmed=failed=0
+    confirmed=failed=identity_bound=field_candidates=0
     for url,events in selected.items():
         try:
             parsed,sha=fetch_profile(http,store.task,url)
+            subject=private_person(next(iter(parsed.orcids))) if len(parsed.orcids)==1 else None
+            identity_bound+=int(subject is not None)
             checked=[]
             for event_id,event,institution in events:
                 label=store.db.execute('SELECT name FROM entities WHERE id=?',(institution,)).fetchone()
@@ -128,14 +138,24 @@ def check_official_profiles(store,http,*,limit=20):
                     if institution==ADAPTERS[urlsplit(url).hostname]['employer']:
                         field=digest({'academic':True,'joined':event['year_start']})
                 if field:
+                    bound=subject==event['person']
                     checked.append((event_id,url,sha,RULE,datetime.now(timezone.utc).isoformat(),
-                        'official-underlying-source-confirmed','same-origin-as-wikidata-reference',field))
+                        'official-underlying-source-confirmed' if bound else 'official-fields-match-identity-unresolved',
+                        'same-origin-as-wikidata-reference',field))
             store.task.check(1024**2)
             with store.db:
+                # A successful negative reread invalidates the previous derived
+                # check. Historical frozen inputs retain the preceding evidence.
+                store.db.execute('DELETE FROM official_checks WHERE url=?', (url,))
+                store.db.execute('DELETE FROM official_profile_subjects WHERE url=?', (url,))
+                if subject:
+                    store.db.execute('INSERT INTO official_profile_subjects VALUES(?,?,?,?)',(url,sha,RULE,subject))
                 store.db.executemany('INSERT OR REPLACE INTO official_checks VALUES(?,?,?,?,?,?,?,?)',checked)
-            confirmed+=len(checked)
+            confirmed+=sum(row[5]=='official-underlying-source-confirmed' for row in checked)
+            field_candidates+=sum(row[5]=='official-fields-match-identity-unresolved' for row in checked)
         except (OSError,ValueError,RuntimeError) as exc:
             store.failure('official-profile',url,str(exc));failed+=1
     return {'official_pages_checked':len(selected)-failed,'official_fields_confirmed':confirmed,
+        'official_identity_bound_pages':identity_bound,'fields_with_unresolved_identity':field_candidates,
         'failed_pages':failed,'independent_source_promotions':0,
         'scope':'exact supported profile layout; referenced original evidence is not an independent second source'}

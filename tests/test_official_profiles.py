@@ -4,11 +4,12 @@ from unittest.mock import patch
 
 from gapi.official_profiles import ProfileParser, profile_url, check_official_profiles
 import test_streaming as fixtures
-from test_streaming import archive
+from test_streaming import archive, PERSON
+from gapi.orcid_stream import private_person
 
 URL='https://www.tamucc.edu/business/about/directory/larry-crumbley.php'
 HTML='''<html><script>Ph.D., Fake University, 2000</script><main>
-<h1>Official profile</h1><p>Professor of Accounting</p><h2>Education</h2>
+<h1>Official profile</h1><a href="https://orcid.org/0000-0002-1825-0097">ORCID</a><p>Professor of Accounting</p><h2>Education</h2>
 <p>Ph.D., Louisiana State University, 1967</p><p>Joined the faculty in 2019</p>
 <h2>Biography</h2><p>Ph.D., Fake University, 2000</p></main></html>'''
 
@@ -37,7 +38,7 @@ class OfficialTests(unittest.TestCase):
         s=self.store(archive([]))
         try:
             s.start('wikidata')
-            event=dict(person='person',institution='ror:05ect4e57',kind='education',stage='doctorate',
+            event=dict(person=private_person(PERSON),institution='ror:05ect4e57',kind='education',stage='doctorate',
                 year_end=1967,source='wikidata',locator='Q1@1#claim',status='observed',
                 references=[{'snaks':{'P854':[{'datavalue':{'value':URL}}]}}])
             with s.member('wikidata','Q1@1'):
@@ -56,3 +57,51 @@ class OfficialTests(unittest.TestCase):
     def test_wrong_year_or_institution_does_not_confirm(self):
         p=ProfileParser();p.feed(HTML);p.close()
         self.assertFalse(any(stage=='doctorate' and name=='stanford university' and date==1967 for stage,name,date,_ in p.degrees))
+
+    def test_unfinished_and_honorary_degrees_never_confirm(self):
+        for degree in ('PhD not completed', 'PhD withdrawn', '博士未完成',
+                       'PhD candidate', 'PhD honorary', 'PhD en cours'):
+            with self.subTest(degree=degree):
+                p=ProfileParser();p.feed('<main><h2>Education</h2><p>'+degree+', Example University, 2005</p></main>');p.close()
+                self.assertEqual(p.degrees, [])
+
+    def test_successful_negative_reread_invalidates_old_check(self):
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            event=dict(person=private_person(PERSON),institution='ror:05ect4e57',kind='education',stage='doctorate',
+                year_end=1967,source='wikidata',locator='Q1@1#claim',status='observed',
+                references=[{'snaks':{'P854':[{'datavalue':{'value':URL}}]}}])
+            with s.member('wikidata','Q1@1'):
+                s.event(event);s.finish_member('wikidata','Q1@1','a'*64)
+                s.db.execute('INSERT INTO entities VALUES(?,?,?,?,?)',('ror:05ect4e57','Louisiana State University','US',1,'{}'))
+            for html, expected in ((HTML,1),(HTML.replace('Ph.D., Louisiana','PhD not completed, Louisiana'),0)):
+                p=ProfileParser();p.feed(html);p.close()
+                with patch('gapi.official_profiles.fetch_profile',return_value=(p,'b'*64)):
+                    result=check_official_profiles(s,None)
+                self.assertEqual(result['official_fields_confirmed'],expected)
+                self.assertEqual(s.db.execute('SELECT count(*) FROM official_checks').fetchone()[0],expected)
+        finally:s.close()
+
+    def test_foreign_missing_and_ambiguous_profile_identity_stays_candidate(self):
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            event=dict(person=private_person(PERSON),institution='ror:05ect4e57',kind='education',stage='doctorate',
+                year_end=1967,source='wikidata',locator='Q1@1#claim',status='observed',
+                references=[{'snaks':{'P854':[{'datavalue':{'value':URL}}]}}])
+            with s.member('wikidata','Q1@1'):
+                s.event(event);s.finish_member('wikidata','Q1@1','a'*64)
+                s.db.execute('INSERT INTO entities VALUES(?,?,?,?,?)',('ror:05ect4e57','Louisiana State University','US',1,'{}'))
+            own=f'<a href="https://orcid.org/{PERSON}">ORCID</a>'
+            foreign='<a href="https://orcid.org/0000-0000-0000-0001">ORCID</a>'
+            for identity in ('',foreign,own+foreign):
+                with self.subTest(identity=identity):
+                    p=ProfileParser();p.feed(HTML.replace(own,identity));p.close()
+                    with patch('gapi.official_profiles.fetch_profile',return_value=(p,'b'*64)):
+                        result=check_official_profiles(s,None)
+                    self.assertEqual(result['official_fields_confirmed'],0)
+                    self.assertEqual(result['fields_with_unresolved_identity'],1)
+                    self.assertEqual(s.db.execute('SELECT status FROM official_checks').fetchone()[0],
+                        'official-fields-match-identity-unresolved')
+        finally:s.close()

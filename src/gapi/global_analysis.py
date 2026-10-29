@@ -95,24 +95,30 @@ def resolve_institutions(store):
 
 
 def corroborate(store):
+    from .corroboration import decisions, VERSION, POLICY_SHA256
     resolution = resolve_institutions(store)
     candidates = store.db.execute('''SELECT count(*) FROM (
         SELECT person,institution,kind,stage,year_start,year_end FROM events
         WHERE institution IS NOT NULL AND stage IS NOT NULL
         GROUP BY person,institution,kind,stage,year_start,year_end HAVING count(DISTINCT source)>1)''').fetchone()[0]
+    verified = decisions(store)
     return {"identity": resolution, "cross_source_candidates": candidates,
-            "independent_official_confirmations": 0,
-            "policy": "matching statements alone do not establish independent provenance; official adapter review pending"}
+            "independent_official_confirmations": len(verified),
+            "rule_version": VERSION, "policy_sha256": POLICY_SHA256,
+            "decision_index_sha256": digest(verified), "canonical_events_modified": 0,
+            "policy": "exact official profile and same-ORCID self assertion; copied official reference counts once"}
 
 
 def relation_rows(store, *, allowed_sources=None):
     """Read one person's bounded events at a time. No population-sized JSON/list."""
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     enriched = has_interpretations(store)
+    from .corroboration import decisions
+    verified = decisions(store, allowed_sources=allowed_sources)
     statuses = {r[0]: r[1] for r in store.db.execute("SELECT source,status FROM runs")}
     columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
-    cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source""" + columns + """
+    cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source,e.id""" + columns + """
         FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution""" + join + """
         WHERE EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
           AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
@@ -121,20 +127,35 @@ def relation_rows(store, *, allowed_sources=None):
     def relations(items):
         trainings = [e for e in items if e["kind"] in ("education", "training") and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
         jobs = [e for e in items if e["kind"] == "employment" and e.get("stage") == "academic" and e.get("year_start")]
-        seen = set()
+        grouped = {}
         for train in trainings:
             for job in jobs:
                 key = (job["institution"], train["institution"], train["stage"])
-                if key in seen or key[0] == key[1] or job["year_start"] < train["year_end"]:
+                if key[0] == key[1] or job["year_start"] < train["year_end"]:
                     continue
                 # Detect overlapping jobs at different institutions. Missing end means ongoing.
                 if any(other["institution"] != job["institution"] and
                        other["year_start"] <= (job.get("year_end") or 2100) and
                        job["year_start"] <= (other.get("year_end") or 2100) for other in jobs):
                     continue
-                seen.add(key)
-                yield key, train, job
-    for pid, payload, institution, status, source, interpreted_kind, interpreted_stage, interpreted_status in cursor:
+                # Count the relation once, retaining every valid evidence source.
+                # Strong evidence cannot disappear when an unrelated ID sorts first.
+                priority = (not (train.get('evidence_origins') and job.get('evidence_origins')),
+                    not (train['status'] == job['status'] == 'corroborated'),
+                    -(int(train['status']=='corroborated')+int(job['status']=='corroborated')),
+                    job['year_start'], train['year_end'], train['source'], job['source'],
+                    train['locator'], job['locator'])
+                if key not in grouped:
+                    if len(grouped) >= 200000:
+                        raise BudgetStop('person relation fanout exceeds bounded analysis')
+                    grouped[key] = [priority, train, job, set(), set()]
+                entry = grouped[key]
+                entry[3].add(train['source']); entry[4].add(job['source'])
+                if priority < entry[0]: entry[:3] = [priority, train, job]
+        for key in sorted(grouped):
+            _, train, job, training_sources, job_sources = grouped[key]
+            yield key, dict(train, supporting_sources=sorted(training_sources)), dict(job, supporting_sources=sorted(job_sources))
+    for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
         if person is not None and pid != person:
             yield from relations(events)
             events = []
@@ -152,9 +173,12 @@ def relation_rows(store, *, allowed_sources=None):
         row = json.loads(payload)
         row["institution"], row["status"] = institution, status
         if source.startswith('orcid-'):
-            row['kind'], row['stage'] = classify(row['kind'],row.get('role'))
+            row['kind'], row['stage'] = classify(row['kind'],row.get('role'),completed_only=True)
         if interpreted_status is not None:
             row['kind'], row['stage'] = interpreted_kind, interpreted_stage
+        if event_id in verified:
+            row['status'] = 'corroborated'
+            row['evidence_origins'] = verified[event_id]['origins']
         events.append(row)
     if events:
         yield from relations(events)
@@ -165,15 +189,18 @@ def rank_global(store, *, public=False, publication_policy=None):
     allowed = public_sources(store.task,publication_policy) if public else None
     edges, stages, counts, source_counts = defaultdict(float), defaultdict(Counter), Counter(), defaultdict(set)
     corroborated = Counter()
+    independent_origins = defaultdict(set)
     recent_edges = defaultdict(float)
     relation_count = 0
     for (employer, training, stage), train, job in relation_rows(store, allowed_sources=allowed):
         relation_count += 1
         key = employer, training
         counts[training] += 1
-        source_counts[training].update((train["source"], job["source"]))
+        source_counts[training].update(train['supporting_sources'])
+        source_counts[training].update(job['supporting_sources'])
         if train["status"] == job["status"] == "corroborated":
             corroborated[training] += 1
+            independent_origins[training].update(set(train.get('evidence_origins', ())) & set(job.get('evidence_origins', ())))
         weight = DEFAULT_CONFIG["stage_weights"][stage]
         edges[key] += weight
         stages[key][stage] += weight
@@ -272,7 +299,7 @@ def rank_global(store, *, public=False, publication_policy=None):
         name, country, meta = directory.get(node, (node, None, {}))
         reasons = []
         if corroborated[node] < 10: reasons.append("insufficient_independently_corroborated_relations")
-        if len(source_counts[node]) < 2: reasons.append("insufficient_independent_source_classes")
+        if len(independent_origins[node]) < 2: reasons.append("insufficient_independent_source_classes")
         if node not in directory or directory[node][2].get("identity_status") == 'reported-label-unresolved': reasons.append("institution_crosswalk_pending")
         reasons.append("external_dual_review_pending")
         rows.append({"institution_id":node,"name":name,"country":country,"region":meta.get("region"),
@@ -281,6 +308,7 @@ def rank_global(store, *, public=False, publication_policy=None):
             "network_intensity_score":intensity.get(node),"observed_training_denominator":denominators[node] or None,
             "award_status":"missing_official_award_data", "status":"observed_only" if node in network else "unranked_no_qualifying_relations",
             "unranked_reasons":reasons,"relations":counts[node],"source_classes":sorted(source_counts[node]),
+            "independent_source_classes":sorted(independent_origins[node]),
             "corroborated_relations":corroborated[node],"traceability":1.0 if counts[node] else None,
             "rank_range":[min(s["ranks"][node] for s in scenarios.values() if not s["prior_only"]),max(s["ranks"][node] for s in scenarios.values() if not s["prior_only"])] if node in network else None})
     report = store.report()
@@ -302,7 +330,7 @@ def rank_global(store, *, public=False, publication_policy=None):
         "scope":{"complete_global_census":False,"enumeration_complete":False,"source_scope":"committed, individually hashed records; annual archive excluded until verified"},
         "coverage":coverage,"nodes":rows,
         "edges":[{"source":s,"target":t,"weight":w,"stages":dict(stages[(s,t)])} for (s,t),w in sorted(edges.items())],
-        "algorithm":{"method_version":"gapi-observed-network/2", "direction":"employer -> training",
+        "algorithm":{"method_version":"gapi-observed-network/3", "direction":"employer -> training",
             "config":DEFAULT_CONFIG,"network_universe":nodes,
             "version_boundary":"New method outputs supersede predecessor calculations; historical bytes require their frozen inputs and pinned predecessor code."},
         "convergence":convergence,"sensitivity":scenarios,"expanded_universe_sensitivity":expanded_scenarios,
@@ -312,6 +340,13 @@ def rank_global(store, *, public=False, publication_policy=None):
             "intensity_denominator":"observed training people; not all graduates or job seekers"},
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
     from .nobel import public_inventory
+    from .corroboration import decisions, VERSION as EVIDENCE_VERSION, POLICY_SHA256 as EVIDENCE_POLICY
+    verified = decisions(store, allowed_sources=allowed)
+    result['evidence_adjudication'] = {'version': EVIDENCE_VERSION, 'policy_sha256': EVIDENCE_POLICY,
+        'corroborated_events': len(verified), 'canonical_events_modified': 0,
+        'scope': 'exact supported official profiles plus same-owner ORCID self assertions'}
+    if verified:
+        result['limitations'][2] = 'Official corroboration is limited to explicitly supported profile layouts and exact self assertions.'
     awards = public_inventory(store)
     if awards is not None:
         result['official_award_inventory'] = awards

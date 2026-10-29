@@ -160,7 +160,8 @@ def run_ood(*, measurements=False):
     budget.check()
     hashes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
               for name in ("ood.py", "career_normalization.py", "career_rules.py",
-                           "career_store.py", "global_analysis.py", "ranking.py", "task.py")}
+                           "career_store.py", "global_analysis.py", "ranking.py", "task.py",
+                           "corroboration.py", "official_profiles.py")}
     seed_basis = digest({"fixtures": FIXTURE_SPEC, "rules": hashes, "policy": POLICY_SHA256})
     seed = int(seed_basis[:16], 16)
     rng = random.Random(seed)

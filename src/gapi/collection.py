@@ -16,7 +16,7 @@ from .task import BudgetStop
 from .source_http import SourcePause
 
 
-def collect(store,http,feed,*,max_seconds=900,batch_members=50,progress=None):
+def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None):
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
         raise ValueError('invalid collection time/batch budget')
     deadline=time.monotonic()+max_seconds
@@ -89,7 +89,7 @@ def collect(store,http,feed,*,max_seconds=900,batch_members=50,progress=None):
             stages.append(item)
             if progress:progress(item)
         if progressed:continue
-        if not dump_attempted and time.monotonic()<deadline:
+        if feed is not None and not dump_attempted and time.monotonic()<deadline:
             dump_attempted=True
             previous=store.db.execute('SELECT compressed_bytes FROM discovery_feeds WHERE id=?',(feed['id'],)).fetchone()
             # Increase the observed prefix instead of replaying a fixed first slice forever.
@@ -109,4 +109,4 @@ def collect(store,http,feed,*,max_seconds=900,batch_members=50,progress=None):
     return {'status':'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
         'suspended_sources':sorted(suspended),'suspended_discovery':sorted(discovery_suspended),
         'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':store.report(),
-        'global_complete':False}
+        'global_complete':False,'archive_discovery_enabled':feed is not None}

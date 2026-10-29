@@ -26,6 +26,8 @@ def register(sub):
             parser.add_argument('--max-compressed-bytes', type=int)
         if name == 'collect-global':
             parser.add_argument('--batch-members',type=int,default=50)
+            parser.add_argument('--allow-dump-discovery',action='store_true',
+                help='explicitly enable optional compressed-stream candidate discovery; default uses finite APIs only')
         if name == 'ingest-nobel':
             parser.add_argument('--source', type=Path, default=Path('configs/nobel-20261029.json'))
             parser.add_argument('--max-pages', type=int, default=100)
@@ -95,7 +97,7 @@ def execute_task(task, args):
         elif args.command == 'collect-global':
             from .collection import collect
             from .dump_discovery import load_feed
-            result=collect(store,http,load_feed(args.feed),max_seconds=args.max_seconds,
+            result=collect(store,http,load_feed(args.feed) if args.allow_dump_discovery else None,max_seconds=args.max_seconds,
                 batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True))
         elif args.command == 'discover-wikidata-dump':
             from .dump_discovery import discover_dump, load_feed
@@ -164,6 +166,8 @@ def execute_task(task, args):
             if args.command=='corroborate' and args.official:
                 from .official_profiles import check_official_profiles
                 result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)
+                # Consume the fresh official checks in the same invocation.
+                result.update(corroborate(store))
         print(json.dumps(result, indent=2, sort_keys=True))
         if args.command == 'ingest-nobel' and result and result.get('status') == 'resumable-source-boundary':
             raise SystemExit(2)

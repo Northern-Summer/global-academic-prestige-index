@@ -9,14 +9,10 @@ visible, and a newer rule cannot retroactively rewrite an older frozen input.
 import json
 import re
 
-from .career_rules import classify, normalized
+from .career_rules import classify, normalized, EXCLUSIONS, excluded_qualification
 from .task import digest
 
 VERSION = 'career-interpretation/3'
-EXCLUSIONS = (r'\b(student|candidate|honorary|honoris causa|pursuing|abd)\b'
-              r'|在读|在讀|肄业|肄業|名誉|名譽|未完成|en cours|en curso|cursando|em andamento|studierend'
-              r'|not completed|not finished|unfinished|incomplete|withdrawn|non.degree'
-              r'|no finalizado|abandonado|interrompido|incompleto|sin terminar|non terminé|non termine')
 RULES = (
     ('education', 'bachelor', r'\b(b\.?\s*s\.?|s\.?\s*b\.?)'),
     ('education', 'master', r'\b(m\.?\s*s\.?|s\.?\s*m\.?|masters)'),
@@ -37,7 +33,7 @@ def interpretation(event):
     kind = event['kind']
     if event['source'] != 'orcid-public-api': return None
     text = normalized(event.get('role'))
-    if re.search(EXCLUSIONS, text):
+    if excluded_qualification(text):
         if event.get('status') in ('observed', 'unresolved'):
             return kind, None, 'unresolved', -1
         return None

@@ -60,6 +60,17 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(result['status'],'resumable-source-boundary')
         finally:s.close()
 
+    def test_default_api_only_never_opens_dump_when_all_apis_fail(self):
+        s=self.store(archive([]))
+        try:
+            with patch('gapi.collection.discover_openalex',side_effect=OSError('offline')), \
+                 patch('gapi.collection.discover_dump',side_effect=AssertionError('archive route forbidden')) as dump:
+                result=collect(s,None,max_seconds=10)
+            dump.assert_not_called()
+            self.assertFalse(result['archive_discovery_enabled'])
+            self.assertEqual(result['status'],'resumable-source-boundary')
+        finally:s.close()
+
     def test_queue_refills_more_than_one_page_in_one_invocation(self):
         s=self.store(archive([]))
         pages=[]

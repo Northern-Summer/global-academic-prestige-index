@@ -73,6 +73,17 @@ observed training people as its explicit denominator, never all graduates or job
 Independent official-profile corroboration and full OOD review are pending. An observed
 source statement is not a confirmed personal fact. See [STREAMING.md](STREAMING.md).
 
+Method `gapi-observed-network/3` additionally merges the supporting sources of
+duplicate relations and selects evidence deterministically by its explicit
+corroboration support before source/date tie-breaks. Event IDs are not a policy
+input. The separate `independent_source_classes` field requires actual evidence
+decisions, rather than treating two database names as independent origins.
+Official-profile rule v3 requires a same-ORCID subject connection; old profile
+checks do not promote facts. Required field agreement and optional-date conflict
+checks are owned by `corroboration.py`. Its derived decisions retain field scope
+and evidence hashes. Historical v2 bytes require their pinned predecessor code
+and inputs; a new rule is not retroactively labelled as the previous method.
+
 ## Official award-time label attribution
 
 The Nobel-only view is owned by `award_projection.py`, policy

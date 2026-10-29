@@ -125,13 +125,37 @@ class AnalysisTests(unittest.TestCase):
                         status='observed',country='CN'))
                 store.finish_member(source,'conflict-fixture','d'*64)
 
+    def test_relation_evidence_is_independent_of_event_id_order(self):
+        s=self.store(archive([]))
+        try:
+            for source in ('wikidata','orcid-public-api'):
+                s.start(source)
+                with s.member(source,'same-facts'):
+                    for inst,kind,stage,start,end,role in (
+                        ('X','education','doctorate',2000,2005,'PhD'),
+                        ('Y','employment','academic',2010,None,'Professor')):
+                        s.event(dict(source=source,person='same-person',institution=inst,kind=kind,
+                            stage=stage,year_start=start,year_end=end,role=role,locator='same-facts',
+                            status='corroborated' if source=='orcid-public-api' else 'observed'))
+                    s.finish_member(source,'same-facts','a'*64)
+            original=rank_global(s)
+            node=next(n for n in original['nodes'] if n['institution_id']=='X')
+            self.assertEqual(node['relations'],1)
+            self.assertEqual(node['corroborated_relations'],1)
+            self.assertEqual(node['source_classes'],['orcid-public-api','wikidata'])
+            # Mutate only ordering keys, never facts or source records.
+            with s.db:
+                s.db.execute("UPDATE events SET id='z-'||id WHERE source='wikidata'")
+            self.assertEqual(original,rank_global(s))
+        finally:s.close()
+
     def test_source_deletion_reports_filtered_edges_and_expanded_universe(self):
         s=self.store(archive([]))
         try:
             self.seed_conflicting_jobs(s)
             result=rank_global(s)
             self.assertEqual(result['algorithm']['network_universe'],['V','W'])
-            self.assertEqual(result['algorithm']['method_version'],'gapi-observed-network/2')
+            self.assertEqual(result['algorithm']['method_version'],'gapi-observed-network/3')
             fixed=result['sensitivity']['delete_source_wikidata']
             self.assertEqual((fixed['available_edges'],fixed['edges'],fixed['filtered_boundary_edges']),(2,1,1))
             self.assertEqual(fixed['new_endpoints'],['X','Z'])

@@ -11,10 +11,11 @@ data in chunks no larger than 64 KiB, and samples process resident memory agains
 ```powershell
 $env:PYTHONPATH='src'
 python -m gapi sources freeze
-python -m gapi ingest-orcid --resume --max-members 100 --max-seconds 300
+python -m gapi collect-global --max-seconds 1200 --batch-members 50
 python -m gapi ingest-wikidata --discover --resume --max-members 200 --max-seconds 300
 python -m gapi ingest-orcid-api --discover --resume --max-members 200 --max-seconds 300
-python -m gapi corroborate
+python -m gapi normalize-careers
+python -m gapi corroborate --official
 python -m gapi quality
 python -m gapi rank-global
 npm run dev
@@ -315,3 +316,34 @@ After a finite collection batch, run `normalize-careers`, `corroborate`,
 `project-awards` is deterministic and does not fetch/download source material.
 Only a verified committed manifest goes to the automatic deployment route in
 [CI_CD.md](CI_CD.md). Full source enumeration and world coverage remain distinct.
+
+The collector now defaults to finite APIs even when every API is temporarily
+unavailable. It never falls through to a compressed dump automatically. The legacy
+streaming dump-discovery route requires explicit `--allow-dump-discovery`; the
+archive itself still never lands on disk. Interrupted API batches preserve the
+committed queue and retry deadlines instead of requiring a large download.
+
+## Evidence decisions and qualification checks
+
+`corroboration.py` derives a versioned, hashed decision from frozen structured
+evidence; acquisition events are never rewritten. For the supported university
+profile layout, the official page must explicitly link the same valid ORCID as
+the person's self assertion. A Wikidata reference supplies only a candidate URL.
+Missing, ambiguous or different official ORCIDs cannot promote a fact. University
+pages and their Wikidata transcriptions remain one origin. Client assertions,
+uncommitted records, unhashed API affiliation parts and old profile rule versions
+cannot satisfy this route.
+
+Required matching fields are canonical ROR institution, event kind, degree or job
+stage and graduation year / employment start year. Other dates must not conflict
+when both sources provide them. Single-source optional dates are not claimed as
+corroborated. Each decision lists its supported fields. The profile adapter's
+completed-qualification check shares the ORCID normalization exclusion owner;
+unfinished, candidate and honorary degrees cannot be confirmed. The acquisition
+v1 contract remains frozen; these stricter checks belong to the derived view.
+
+One person/stage/employer/training relation contributes once. All valid alternative
+sources survive deduplication; evidence selection and qualification do not depend
+on event ID order. Source deletion replays the join after removing that source,
+including evidence decisions. Missing real independent evidence remains missing;
+the existence of this mechanism does not establish global corroboration coverage.

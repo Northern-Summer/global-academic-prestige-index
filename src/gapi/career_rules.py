@@ -5,6 +5,18 @@ import re
 import unicodedata
 
 RULES_VERSION = "career-rules/1"
+QUALIFICATION_RULE_VERSION = 'completed-qualification/1'
+
+# Shared exclusion owner for every source. Lexical degree recognition must never
+# override an explicit unfinished, student or honorary qualification.
+EXCLUSIONS = (r'\b(student|candidate|honorary|honoris causa|pursuing|abd)\b'
+              r'|在读|在讀|肄业|肄業|名誉|名譽|未完成|en cours|en curso|cursando|em andamento|studierend'
+              r'|not completed|not finished|unfinished|incomplete|withdrawn|non.degree'
+              r'|no finalizado|abandonado|interrompido|incompleto|sin terminar|non terminé|non termine')
+
+
+def excluded_qualification(text):
+    return bool(re.search(EXCLUSIONS, normalized(text)))
 
 
 def valid_orcid(value):
@@ -22,8 +34,12 @@ def normalized(text):
     return " ".join(unicodedata.normalize("NFKC", text or "").casefold().split())
 
 
-def classify(kind, role):
+def classify(kind, role, *, completed_only=False):
     text = normalized(role)
+    # Preserve the frozen acquisition/v1 interpretation. Consumers confirming
+    # completed qualifications explicitly apply the stricter derived contract.
+    if completed_only and kind == 'education' and excluded_qualification(text):
+        return kind, None
     if re.search(r"post[ -]?doc|博士后|博士後", text):
         return "training", "postdoc"
     if kind == "education":
