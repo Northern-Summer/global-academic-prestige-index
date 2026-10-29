@@ -1,5 +1,14 @@
 # Data sources, provenance, and licensing
 
+The separate [official Nobel API](https://www.nobelprize.org/about/developer-zone-2/)
+is documented as key-free. Its [service terms](https://www.nobelprize.org/about/terms-of-use-for-api-nobelprize-org-and-data-nobelprize-org/),
+checked 2026-10-29, allow CC0 use subject to those terms, request low server burden,
+and prohibit misleading claims or implied endorsement. The versioned
+`configs/nobel-20261029.json` freezes this source contract. Only award/category and
+institution-label aggregates are exported; original responses and recipient
+trajectories are excluded. Nobel data is independent of ORCID/Wikidata collection,
+but is not an independent confirmation of anyone's education or employment.
+
 ## Source policy
 
 Candidate source tiers are: official institution and award records; official institutional directories; openly licensed structured scholarly data; and constrained public profile APIs. Each source has its own retrieval, retention, attribution, and redistribution rules. Public visibility is not equivalent to redistribution permission.

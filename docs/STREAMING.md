@@ -265,3 +265,32 @@ official institutional evidence, full stage/source/region/discipline/time sensit
 official award attribution and external dual-track review remain required. Parameter
 rank ranges are conditional scenarios, not statistical intervals for unknown missing
 global personnel. No external reviewer has passed this release.
+
+## Independent official award inventory
+
+```powershell
+python -m gapi ingest-nobel --resume --source configs/nobel-20261029.json --max-pages 100 --max-seconds 300
+```
+
+The official developer zone documents a key-free REST API. Its current terms allow
+CC0 use subject to service terms and minimizing server load. This adapter requests
+at most 25 recipients per page, caps responses at 2 MiB, obeys the shared rate,
+deadline and source-pause rules, and stores no original response. A separate frozen
+source specification in the same budgeted task database extends the registry
+without rewriting previous acquisition identities. A single writer still owns
+acquisition; run this after the career collector releases its lock.
+
+Private normalized events retain a source-specific recipient key, award category,
+year, official prize portion and reported award-time affiliations. Page, hash and
+cursor commit atomically. Duplicate recipients/awards, count drift, incorrect
+cursors and malformed pages stop that source without erasing prior pages. Resume
+uses the committed offset; completed selections make no network calls. Multiple
+versions are never silently added together.
+
+The public inventory includes category/type counts, affiliation labels/mentions
+and evidence-index hashes. Labels are not guessed canonical institution IDs:
+historical names may describe the same organization. Multiple affiliations are
+disclosed without invented fractional institutional attribution. Nobel coverage
+alone cannot satisfy the complete award catalogue, and no university award or
+composite score is imputed. A live offset selection has temporal drift limits even
+when its processed unique recipient count equals the API's reported total.
