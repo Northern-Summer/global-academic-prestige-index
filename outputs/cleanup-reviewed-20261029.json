@@ -1,0 +1,46 @@
+{
+  "schema_version": "gapi-cleanup/v1",
+  "status": "held-by-execution-policy",
+  "attempt": "native PowerShell exact-target recursive deletion",
+  "failure": "exec_command CreateProcess rejected: blocked by policy",
+  "targets": [
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-bi2yw57l",
+      "exists": true,
+      "files": 4,
+      "logical_bytes": 138297,
+      "classification": "inactive-reproducible-unittest-fixture",
+      "content_reviewed": true,
+      "reparse_points_detected": false
+    },
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-fpdn1qb8",
+      "exists": true,
+      "files": 4,
+      "logical_bytes": 138297,
+      "classification": "inactive-reproducible-unittest-fixture",
+      "content_reviewed": true,
+      "reparse_points_detected": false
+    },
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-ma9376f8",
+      "exists": true,
+      "files": 0,
+      "logical_bytes": 0,
+      "classification": "inactive-reproducible-unittest-fixture",
+      "content_reviewed": true,
+      "reparse_points_detected": false
+    }
+  ],
+  "logical_deleted_bytes": 0,
+  "remaining_candidate_bytes": 276594,
+  "bypass_attempted": false,
+  "retained": [
+    "historical releases",
+    "private frozen input snapshots",
+    "source and dependencies",
+    "review failure evidence",
+    "legacy policy-rejected raw caches"
+  ],
+  "host_free_space_delta_attributed": false
+}

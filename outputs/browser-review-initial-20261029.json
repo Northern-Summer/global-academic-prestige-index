@@ -1,0 +1,27 @@
+{
+  "tested_url": "http://127.0.0.1:4173/global-academic-prestige-index/",
+  "load": "数据身份已校验 · 来源扫描未完成 · 正式全球排名尚未发布",
+  "table_ready_ms": 4597,
+  "version": {
+    "snapshot": "global-1d7e598d9a659f2c.json",
+    "expected": "1d7e598d9a659f2cfe37f3edb520dd3d9cf8364bb116ec0d5b8a058501ab0121",
+    "actual": "1d7e598d9a659f2cfe37f3edb520dd3d9cf8364bb116ec0d5b8a058501ab0121",
+    "institutions": 2165,
+    "events": 5067,
+    "edges": 165,
+    "people": 1321,
+    "relations": 186,
+    "scored": 217,
+    "award_recipients": 1028
+  },
+  "coverage_counts_match": true,
+  "table_min_font_px": 14,
+  "public_source_isolation": true,
+  "search_filter_sort_keyboard_details": true,
+  "csv_download": true,
+  "official_awards": true,
+  "webgl": true,
+  "direction": "二维列表含当前筛选的全部 39 条关系，可翻页查看。3D 显示 60 个节点、39 条边，上限为 500 / 2,000。",
+  "mobile": true,
+  "webgl_fallback": true
+}

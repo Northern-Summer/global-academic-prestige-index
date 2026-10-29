@@ -1,0 +1,238 @@
+{
+  "schema_version": "gapi-review-acceptance/v1",
+  "implementation_commit": "bdc2244c8d202dbb6930a2528830311cd5710dac",
+  "review_kind": "internal-dual-role-cross-challenge",
+  "independent_external_review": "not-conducted",
+  "snapshot_sha256": "1d7e598d9a659f2cfe37f3edb520dd3d9cf8364bb116ec0d5b8a058501ab0121",
+  "frozen_input_sha256": "78229f01e097d51f1654c4901d6c6366c404be49e3f2f34c4e0771aabf8c6732",
+  "recomputed_twice_identical": true,
+  "recomputed_matches_committed_snapshot": true,
+  "quality": {
+    "sources": [
+      {
+        "source": "orcid-2026-summary",
+        "identity": "44b1859a8f92544c33db378a3e2e7788a17dbb24c06d24ea21020400d21da335",
+        "status": "access_failed",
+        "bytes": 0,
+        "members": 0,
+        "sha256": null,
+        "detail": "RuntimeError: source returned HTTP 202; no usable body"
+      },
+      {
+        "source": "orcid-public-api",
+        "identity": "f1a832880bd2616fc91ca34b8f4cc1f34564a2f2bad68d76108c7e86a113d1bc",
+        "status": "partial",
+        "bytes": 105902683,
+        "members": 556,
+        "sha256": null,
+        "detail": "{\"requested\": 50, \"failures\": [{\"id_hash\": \"442337b7fffef5d50164403e21bd4d5be53f88b79a5bad5c3833e37c6c2d1c8d\", \"reason\": \"HTTP Error 409: Conflict\"}, {\"id_hash\": \"1c106328ac8de5477d10c9a780578556b1eaadf9082589c66271472d4fd82717\", \"reason\": \"source stage time exhausted; work remains pending\"}]}"
+      },
+      {
+        "source": "wikidata",
+        "identity": "8d2aa53de2840fd838eaae71185e92de10f8b7b8d31ab57871d9d96e0787ce59",
+        "status": "partial",
+        "bytes": 46886369,
+        "members": 923,
+        "sha256": null,
+        "detail": "{\"requested\": 50, \"failures\": [{\"entity\": \"Q192703\", \"reason\": \"TimeoutError: retry/rate-limit delay exceeds source stage budget\"}]}"
+      }
+    ],
+    "people": 1321,
+    "events": 5067,
+    "countries": [
+      "AM",
+      "AR",
+      "AT",
+      "AU",
+      "BD",
+      "BE",
+      "BN",
+      "BR",
+      "BY",
+      "CA",
+      "CH",
+      "CI",
+      "CL",
+      "CN",
+      "CO",
+      "CZ",
+      "DE",
+      "DK",
+      "EE",
+      "EG",
+      "ER",
+      "ES",
+      "ET",
+      "FI",
+      "FO",
+      "FR",
+      "GB",
+      "GH",
+      "GL",
+      "GR",
+      "HK",
+      "HR",
+      "HU",
+      "ID",
+      "IE",
+      "IL",
+      "IN",
+      "IQ",
+      "IR",
+      "IS",
+      "IT",
+      "JM",
+      "JO",
+      "JP",
+      "KR",
+      "KZ",
+      "LB",
+      "LK",
+      "LU",
+      "MT",
+      "MW",
+      "MX",
+      "MY",
+      "NL",
+      "NO",
+      "NP",
+      "NZ",
+      "PE",
+      "PH",
+      "PK",
+      "PL",
+      "PT",
+      "QA",
+      "RO",
+      "RS",
+      "RU",
+      "SA",
+      "SE",
+      "SG",
+      "SI",
+      "TH",
+      "TN",
+      "TR",
+      "TW",
+      "TZ",
+      "UA",
+      "UG",
+      "US",
+      "VE",
+      "ZA"
+    ],
+    "event_status": {
+      "observed": 950,
+      "unresolved": 4117
+    },
+    "member_status": {
+      "observed": 1479
+    },
+    "failure_counts": {
+      "orcid-public-api": 43,
+      "wikidata": 27
+    },
+    "source_pauses": [],
+    "task_requests_rolling_day": {
+      "orcid-public-api": 456
+    },
+    "deferred_candidates": {},
+    "discovery_feeds": [
+      {
+        "id": "wikidata-20261026-all",
+        "status": "provisional",
+        "compressed_bytes": 268435456,
+        "lines": 80966,
+        "candidates": 3088,
+        "rejected": 1,
+        "sha256": "6b7530e01c43a5a242c092b5b7b621c618cc2b22e7695e8cac7220f70bd8be71",
+        "detail": "bounded compressed discovery bytes reached; replay required"
+      }
+    ],
+    "storage_bytes": 97705332,
+    "storage_budget": 2147483648,
+    "complete_global_census": false,
+    "sqlite_integrity": "ok",
+    "events_without_member_evidence": 0,
+    "raw_source_files_detected": 0,
+    "raw_source_bytes_detected": 0
+  },
+  "python_tests": {
+    "passed": 129,
+    "log_sha256": "d85a18e6e97267953794922054d4653f8e267056d5a6e261ad21f76559f0cf93"
+  },
+  "node_tests": {
+    "passed": 21,
+    "scope": "frontend contract and build provenance"
+  },
+  "browser_local": {
+    "tested_url": "http://127.0.0.1:4173/global-academic-prestige-index/",
+    "load": "数据身份已校验 · 来源扫描未完成 · 正式全球排名尚未发布",
+    "table_ready_ms": 7440,
+    "version": {
+      "snapshot": "global-1d7e598d9a659f2c.json",
+      "expected": "1d7e598d9a659f2cfe37f3edb520dd3d9cf8364bb116ec0d5b8a058501ab0121",
+      "actual": "1d7e598d9a659f2cfe37f3edb520dd3d9cf8364bb116ec0d5b8a058501ab0121",
+      "institutions": 2165,
+      "events": 5067,
+      "edges": 165,
+      "people": 1321,
+      "relations": 186,
+      "scored": 217,
+      "award_recipients": 1028
+    },
+    "coverage_counts_match": true,
+    "table_min_font_px": 14,
+    "public_source_isolation": true,
+    "search_filter_sort_keyboard_details": true,
+    "csv_download": true,
+    "official_awards": true,
+    "relationship_pagination": true,
+    "webgl": true,
+    "direction": "二维列表含当前筛选的全部 39 条关系，可翻页查看。3D 显示 60 个节点、39 条边，上限为 500 / 2,000。",
+    "mobile": true,
+    "webgl_fallback": true,
+    "hostile_number_rejected": true,
+    "hostile_label_escaped": true,
+    "page_errors": []
+  },
+  "convergence": {
+    "converged": true,
+    "error": 3.5476656334854084e-13,
+    "iterations": 27
+  },
+  "publication": "pending",
+  "global_enumeration": "incomplete",
+  "ood": {
+    "executed": "synthetic fixtures and disclosed parameter/source/boundary scenarios",
+    "not_run": [
+      "discipline",
+      "bootstrap",
+      "english_source_deletion",
+      "official_profile_loss"
+    ]
+  },
+  "usability_experiment": "not-run",
+  "cleanup": {
+    "status": "held-by-execution-policy",
+    "logical_deleted_bytes": 0,
+    "remaining_candidate_bytes": 276594
+  },
+  "evidence_sha256": {
+    "outputs/REVIEW-20261029.md": "dc3c32460c1be8393076e03a0a458db5f54a442533e20bc61b49bce36eb49976",
+    "outputs/browser-review-2026-10-29.json": "9a1d76f57295836b02a5498d184a5a40cc9d7294be9d93f81cbd024e671d2678",
+    "outputs/browser-review-initial-20261029.json": "32d977322e72bd780bfa6b98e24b9fd95d9fd3973e234ac7ebfcea617c9c22cd",
+    "outputs/cleanup-reviewed-20261029.json": "2a5a40779bfa4f688f377be499a86a337f9c840b08d40d7b3ab037522930b63e",
+    "outputs/review-desktop-2026-10-29.png": "2b8da3448bc2a274c571fbc92633285dd1b9e9ed03d145b167d17dde46f6066f",
+    "outputs/review-mobile-2026-10-29.png": "3b480f86e8c2ce3f3f0831d2e9e12894ac325f7f10dc1f98e03d3839f6f86c4e",
+    "outputs/review-detail-2026-10-29.png": "cd870eee334d6880d2684e38c405b27159fdaba8953a510ec50c3c6ff9fdf8a3",
+    "outputs/review-network-2026-10-29.png": "d93a8fd1acd0886c0acaef56bd53cdbef765325e0419e1f0254f0b09fe23f901"
+  },
+  "visual_readback": {
+    "mobile": "observed-final",
+    "detail": "observed-final",
+    "desktop": "observed-in-predecessor-turn",
+    "network": "observed-in-predecessor-turn",
+    "user_study": false
+  }
+}
