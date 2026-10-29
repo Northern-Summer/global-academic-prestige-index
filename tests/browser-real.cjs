@@ -16,7 +16,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => requests.push(request.url()));
     await page.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'networkidle',timeout:30000});
-    await page.waitForFunction(() => /数据身份已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent || ''));
+    await page.waitForFunction(() => /版本已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent || ''));
     const status = await page.locator('#global-status').innerText();
     assert.ok(!status.includes('真实数据暂不可用'),status);
     results.load = status;
@@ -36,6 +36,23 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     const metricText=await page.locator('#global-metrics').innerText();
     for (const value of [results.version.people,results.version.events,results.version.relations,results.version.scored]) assert.ok(metricText.replaceAll(',','').includes(String(value)));
     results.coverage_counts_match=true;
+    await page.evaluate(()=>document.fonts.ready);
+    results.typography=await page.evaluate(()=>({
+      hero_family:getComputedStyle(document.querySelector('#page-title')).fontFamily,
+      hero_italic:getComputedStyle(document.querySelector('#page-title em')).fontStyle,
+      heading_family:getComputedStyle(document.querySelector('#global-title')).fontFamily,
+      heading_weight:getComputedStyle(document.querySelector('#global-title')).fontWeight,
+      fonts:[...document.fonts].map(font=>({family:font.family,style:font.style,status:font.status}))
+    }));
+    assert.match(results.typography.hero_family,/Playfair Display/);
+    assert.equal(results.typography.hero_italic,'italic');
+    assert.match(results.typography.heading_family,/GAPI Song/);
+    assert.equal(results.typography.heading_weight,'400');
+    for(const [family,style]of [['Playfair Display','normal'],['Playfair Display','italic'],['GAPI Song','normal']])
+      assert.ok(results.typography.fonts.some(font=>font.family.replaceAll('"','')===family&&font.style===style&&font.status==='loaded'),`bundled font did not load: ${family} ${style}`);
+    assert.equal(requests.some(url=>/fonts\.(googleapis|gstatic)\.com/.test(url)),false);
+    await page.evaluate(()=>window.scrollTo(0,0));
+    await page.screenshot({path:screenshotPath('hero')});
     const typography=await page.locator('#global-rows td').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
     assert.ok(typography>=14);results.table_min_font_px=typography;
     if (process.env.GAPI_PUBLIC_TEST === '1') {
@@ -56,7 +73,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await page.locator('#global-sort').selectOption('score');
     const pick = page.locator('#global-rows button').first();
     await pick.focus(); await page.keyboard.press('Enter');
-    assert.match(await page.locator('#global-details').innerText(),/正式资格缺口/);
+    assert.match(await page.locator('#global-details').innerText(),/暂未正式排名/);
     assert.ok(await page.locator('#global-details .mini-bars').count()>=1);
     await page.locator('#global-details').screenshot({path:screenshotPath('detail')});
     results.search_filter_sort_keyboard_details = true;
@@ -97,6 +114,8 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
     await page.screenshot({path:screenshotPath('desktop')});
     await page.setViewportSize({width:390,height:844});
+    await page.evaluate(()=>window.scrollTo(0,0));
+    await page.screenshot({path:screenshotPath('hero-mobile')});
     await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
     await page.screenshot({path:screenshotPath('mobile')});
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+2);
@@ -129,7 +148,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       const hostile=await browser.newPage();
       await hostile.route('**/data/global/**',route=>route.fulfill({status:200,contentType:'application/json',body:route.request().url().includes('manifest.json')?JSON.stringify({snapshot:'attack.json',output_sha256:sha}):bytes}));
       await hostile.goto(results.tested_url,{waitUntil:'networkidle'});
-      await hostile.waitForFunction(()=>/数据身份已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent||''));
+      await hostile.waitForFunction(()=>/版本已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent||''));
       if(unsafeNumber)assert.match(await hostile.locator('#global-status').innerText(),/真实数据暂不可用/);
       else{await hostile.locator('#global-search').fill('<img');assert.ok((await hostile.locator('#global-rows').innerText()).includes('<img'));assert.equal(await hostile.locator('#global-rows img').count(),0);}
       assert.equal(await hostile.evaluate(()=>window.__gapiInjected),undefined);

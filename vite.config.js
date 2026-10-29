@@ -22,7 +22,7 @@ export default defineConfig({
       // The US sample is local-only; production has no route or rights to it.
       return html.replace(/<!-- LOCAL_SAMPLE_START -->[\s\S]*?<!-- LOCAL_SAMPLE_END -->/g, '')
         .replace('<a href="#rankings">US sample</a>', '')
-        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">观测版本 · 非正式全球排名</span><p>只公开获许可的机构汇总。来源扫描、独立核验和第三方审查尚未完成，缺失数据不会被算成低分。</p><a href="./docs/STREAMING.md">查看覆盖范围与来源边界 ↘</a></aside>');
+        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">THE CURRENT EDITION</span><p>已接入 ORCID、Wikidata 与官方诺贝尔奖记录。人才数据仍在采集与核验中。</p><a href="./docs/STREAMING.md">数据来源与范围 ↘</a><div class="note-stamp" aria-hidden="true">GAPI</div></aside>');
     },
     configureServer(server) {
       const localScores = fileURLToPath(new URL('./data/real/us-academia-network.json', import.meta.url));

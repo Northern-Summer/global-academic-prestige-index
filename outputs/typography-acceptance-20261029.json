@@ -1,0 +1,21 @@
+{
+  "scope": "restore predecessor editorial typography and simplify interface copy; preserve all data and scoring",
+  "rejected_baseline": "0d2a57eadbd47a056fa408a487569ee1f52703ef",
+  "reference_revision": "8e6eca2",
+  "reference_hero": "Academic influence, measured in movement.",
+  "local_browser_receipt": "outputs/browser-typography-20261029.json",
+  "local_browser_passed": true,
+  "fonts_total_bytes": 138084,
+  "font_license": "OFL-1.1",
+  "remote_font_requests": false,
+  "visual_inspected": [
+    "outputs/typography-hero-2026-10-29.png",
+    "outputs/typography-desktop-2026-10-29.png",
+    "outputs/typography-mobile-2026-10-29.png"
+  ],
+  "frontend_tests": 27,
+  "data_snapshot_sha256": "6137d26d6e557370d00d2db3dcbf4ebe39aefcb0a4928e25e8dfdf369e703f56",
+  "data_and_scoring_changed": false,
+  "human_acceptance": "not-yet-received",
+  "live_deployment": "pending"
+}

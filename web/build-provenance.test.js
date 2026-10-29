@@ -75,6 +75,13 @@ test('code-only and wrong-base builds cannot be published',()=>fixture(({args,ve
   assert.throws(verify,/base/);
 }));
 
+test('bundled font input identity covers binary bytes without UTF-8 replacement',()=>fixture(({put,commit,args,verify})=>{
+  put('web/fonts/test.woff2',Buffer.from([0x77,0x4f,0x46,0x32,0x80]));commit();
+  writeBuildProvenance(args);assert.equal(verify().status,'verified');
+  put('web/fonts/test.woff2',Buffer.from([0x77,0x4f,0x46,0x32,0x81]));
+  assert.throws(verify,/Source inputs changed/);
+}));
+
 test('committed real slices larger than 2 MiB remain verifiable',()=>fixture(({put,commit,args,verify})=>{
   const snapshot=JSON.stringify({dataset_kind:'real/global-public-observations',padding:'x'.repeat(2*1024*1024)});
   const manifest={snapshot:'global-test.json',output_sha256:createHash('sha256').update(snapshot).digest('hex'),publication_status:'public-observations-pending-external-review'};

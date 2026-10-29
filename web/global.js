@@ -13,22 +13,22 @@ const scenarioName = key => key.startsWith('alpha_') ? `阻尼 α = ${key.slice(
 
 const root = document.createElement('section');
 root.className='panel global-panel';root.id='global-observations';root.setAttribute('aria-labelledby','global-title');
-root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">GLOBAL ACADEMIC MOBILITY / 真实公开观测</p><h2 id="global-title">从人才去向，观察学术联系</h2></div><span class="observation-tag">真实数据 · 观测版本</span></div>
+root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">01 / INSTITUTIONS</p><h2 id="global-title">机构与得分</h2></div><span class="observation-tag">公开数据 · 持续更新</span></div>
 <p id="global-status" class="global-status" role="status">正在校验真实数据与版本清单…</p>
 <div id="global-metrics" class="observation-metrics" aria-label="当前切片的实际数据范围"></div>
-<p class="scope-caption">这里是当前来源切片的实际计数，口径各不相同，不是全球覆盖率或就业转化率。未收录，不代表没有影响力。</p>
+<p class="scope-caption">仅统计已收录的公开记录。各项计数的口径不同，不能相除得到全球覆盖率或就业率。</p>
 <div id="global-evidence" class="evidence-summary"></div>
-<details class="reading-note"><summary>怎样读这个表？网络份额不是就业率</summary><p>“网络份额”表示一个机构在本次人才关系网络中分到的影响力，占比合计为 100%。它不是就业率，也不能直接衡量大学整体质量。奖项和综合评分尚未发布。</p></details>
+<details class="reading-note"><summary>分数与排名说明</summary><p>“网络份额”表示一个机构在本次人才关系网络中分到的影响力，占比合计为 100%。它不是就业率，也不能直接衡量大学整体质量。奖项和综合评分尚未发布。</p></details>
 <details id="global-official-awards" class="award-inventory" hidden><summary>官方奖项数据：查看采集范围与归属标签</summary><div id="global-award-content"></div></details>
 <div class="table-tools"><label>查找机构<input type="search" id="global-search" placeholder="输入机构名称，例如 Cambridge" autocomplete="off"></label>
 <label>国家／地区<select id="global-country"><option value="">全部已观测地区</option></select></label>
 <label>排序<select id="global-sort"><option value="score">网络份额</option><option value="relations">可观测关系数</option><option value="name">机构名称</option></select></label>
-<label>对比计算情景<select id="global-scenario"><option value="">参考设置 α = 0.85</option></select></label><button id="global-csv" type="button" class="primary-control">导出筛选结果</button></div>
+<label>计算设置<select id="global-scenario"><option value="">参考设置 α = 0.85</option></select></label><button id="global-csv" type="button" class="primary-control">导出筛选结果</button></div>
 <p id="global-scenario-note" class="scope-caption"></p>
 <div class="table-wrap" tabindex="0" aria-label="真实观测机构分数表"><table class="directory-table"><thead><tr><th scope="col">观测序位</th><th scope="col">机构</th><th scope="col">网络份额</th><th scope="col">去重关系</th><th scope="col">情景名次范围</th><th scope="col">正式排名</th></tr></thead><tbody id="global-rows"></tbody></table></div>
 <div class="directory-pagination"><span id="global-page-status"></span><div><button type="button" id="global-prev" aria-label="上一页机构">←</button><button type="button" id="global-next" aria-label="下一页机构">→</button></div></div>
 <aside id="global-details" aria-live="polite"><p>点击一个机构，查看分数来源、培养阶段和证据缺口。</p></aside>
-<div class="network-heading global-heading"><div><p class="eyebrow">RELATIONSHIPS / 先看关系，再看分数</p><h3>谁聘用了谁培养的人才？</h3></div><div class="table-tools"><label>培养阶段<select id="global-stage"><option value="all">全部阶段</option><option value="doctorate">博士</option><option value="master">硕士</option><option value="bachelor">本科</option><option value="postdoc">博士后训练</option></select></label><button type="button" id="global-show-network">按需打开 3D 网络</button><button type="button" id="global-reset">查看全部观测关系</button></div></div>
+<div class="network-heading global-heading"><div><p class="eyebrow">02 / THE NETWORK</p><h3>人才流动网络</h3></div><div class="table-tools"><label>培养阶段<select id="global-stage"><option value="all">全部阶段</option><option value="doctorate">博士</option><option value="master">硕士</option><option value="bachelor">本科</option><option value="postdoc">博士后训练</option></select></label><button type="button" id="global-show-network">打开 3D 网络</button><button type="button" id="global-reset">全部关系</button></div></div>
 <p class="scope-caption">箭头固定为“聘用机构 → 培养机构”。节点大小表示参考网络份额，颜色表示地区；灰色为未知。位置不代表地理或时间。国家筛选保留至少一端位于该国的关系。</p>
 <div id="global-network" role="region" aria-label="可选三维人才关系网络"></div><p id="global-edge-status" role="status"></p>
 <div class="table-wrap" tabindex="0" aria-label="可分页的有向关系列表"><table class="directory-table"><thead><tr><th scope="col">聘用机构 →</th><th scope="col">培养机构</th><th scope="col">阶段加权关系量</th></tr></thead><tbody id="global-edges"></tbody></table></div>
@@ -52,7 +52,7 @@ function details(id){
   const residual=n.network_score==null ? null : Math.max(0,n.network_score-sources.reduce((sum,row)=>sum+row.value,0));
   $('#global-details').innerHTML=`<div class="detail-heading"><div><p class="eyebrow">INSTITUTION / 机构详情</p><h3>${esc(n.name)}</h3><p>${esc(countryName(n.country))} · 网络份额 <strong>${esc(share(n.network_score))}</strong></p></div><span class="status unranked">正式排名待核验</span></div>
 <div class="detail-charts"><section><h4>哪些聘用机构传来影响力？</h4><p class="scope-caption">按 PageRank 实际传播贡献排序；显示前 8 项。</p>${sources.length ? bars(sources.slice(0,8),share) : '<p>当前没有可计算的聘用机构贡献。</p>'}${residual==null?'':`<p class="scope-caption">另有 ${esc(share(residual))} 来自随机跳转与无出边节点回流。</p>`}</section><section><h4>培养阶段构成</h4><p class="scope-caption">阶段加权的去重关系量，非概率，也非分数占比。</p>${Object.keys(stages).length ? bars(Object.entries(stages).map(([s,w])=>({label:stageNames[s],value:w})),v=>v.toFixed(2)) : '<p>尚无可分层的有效关系。</p>'}</section></div>
-<div class="detail-facts"><p><strong>证据：</strong>${esc(n.source_classes.map(sourceName).join('、')||'暂无合格关系来源')}；独立核验关系 ${esc(n.corroborated_relations)} 条；有溯源记录 ${n.traceability==null?'未知':esc((n.traceability*100).toFixed(0)+'%')}。有来源不等于事实已获独立核实。</p><p><strong>情景范围：</strong>${esc(n.rank_range?.join('—')??'暂不可计算')}，仅针对固定参考网络的参数情景，不是全球缺失数据的置信区间。</p><p><strong>正式资格缺口：</strong>${esc(n.unranked_reasons.map(reason=>reasonNames[reason]??reason).join('；'))}。</p></div>
+<div class="detail-facts"><p><strong>证据：</strong>${esc(n.source_classes.map(sourceName).join('、')||'暂无合格关系来源')}；独立核验关系 ${esc(n.corroborated_relations)} 条；有溯源记录 ${n.traceability==null?'未知':esc((n.traceability*100).toFixed(0)+'%')}。有来源不等于事实已获独立核实。</p><p><strong>情景范围：</strong>${esc(n.rank_range?.join('—')??'暂不可计算')}，仅针对固定参考网络的参数情景，不是全球缺失数据的置信区间。</p><p><strong>暂未正式排名：</strong>${esc(n.unranked_reasons.map(reason=>reasonNames[reason]??reason).join('；'))}。</p></div>
 <details><summary>技术标识与缺失分数</summary><p>${esc(n.institution_id)}；奖项评分：缺失；综合评分：缺失。全部原始数值可通过机构表导出。</p></details>`;
   renderNetwork();
 }
@@ -101,13 +101,13 @@ async function load(){
     const countryCodes=[...new Set(data.nodes.map(n=>n.country).filter(Boolean))].sort();
     $('#global-country').innerHTML+=countryCodes.map(c=>`<option value="${esc(c)}">${esc(countryName(c))} · ${esc(c)}</option>`).join('');
     $('#global-scenario').innerHTML='<option value="">参考设置 α = 0.85</option>'+Object.entries(data.sensitivity??{}).filter(([key])=>key!=='alpha_0.85').map(([key,s])=>`<option value="${esc(key)}">${esc(scenarioName(key))}${s.prior_only?'（仅先验）':''}</option>`).join('');
-    $('#global-status').textContent=`数据身份已校验 · 来源扫描未完成 · 正式全球排名尚未发布`;
+    $('#global-status').textContent=`版本已校验 · 数据持续采集中 · 正式全球排名尚未发布`;
     $('#global-status').dataset.snapshot=manifest.output_sha256;
     const scored=data.nodes.filter(n=>n.network_score!=null).length,relations=data.nodes.reduce((sum,n)=>sum+n.relations,0);
-    const metrics=[['公开履历人数',data.coverage.people,'人'],['已记录履历事件',data.coverage.events,'条'],['可构图去重关系',relations,'条'],['网络中的机构',scored,'个']];
+    const metrics=[['收录人数',data.coverage.people,'人'],['履历记录',data.coverage.events,'条'],['去重人才关系',relations,'条'],['评分机构',scored,'个']];
     $('#global-metrics').innerHTML=metrics.map(([label,value,unit])=>`<div><span>${esc(label)}</span><strong>${esc(integer(value))}<small>${esc(unit)}</small></strong></div>`).join('');
     const observed=(data.coverage.event_status?.observed??0)+(data.coverage.event_status?.corroborated??0),pending=data.coverage.event_status?.unresolved??0;
-    $('#global-evidence').innerHTML=`<div><strong>原始事件状态</strong><span>可识别观测 ${esc(integer(observed))} 条 · 待定 ${esc(integer(pending))} 条</span></div><div class="evidence-track" aria-hidden="true"><span style="width:${data.coverage.events ? Math.min(100,Math.max(0,observed/data.coverage.events*100)).toFixed(3) : 0}%"></span></div><p>原始记录保留不变；另有 ${esc(integer(data.algorithm.normalization_policy?.interpreted_events??0))} 条由版本化规则单独解释。可识别不等于独立证实；不会用零分代替缺失。</p>`;
+    $('#global-evidence').innerHTML=`<div><strong>履历记录</strong><span>已识别 ${esc(integer(observed))} 条 · 待定 ${esc(integer(pending))} 条</span></div><div class="evidence-track" aria-hidden="true"><span style="width:${data.coverage.events ? Math.min(100,Math.max(0,observed/data.coverage.events*100)).toFixed(3) : 0}%"></span></div><p>另有 ${esc(integer(data.algorithm.normalization_policy?.interpreted_events??0))} 条按公开规则识别，原始记录保留。已识别的记录仍需独立核验。</p>`;
     renderAwards();
     for(const id of ['#global-search','#global-country','#global-sort','#global-scenario'])$(id).addEventListener('input',()=>{page=0;edgePage=0;renderTable();renderNetwork();});
     $('#global-prev').onclick=()=>{page--;renderTable();};$('#global-next').onclick=()=>{page++;renderTable();};

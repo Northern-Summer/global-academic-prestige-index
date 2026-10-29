@@ -1,0 +1,51 @@
+{
+  "retrieved_at": "2026-10-29",
+  "license": "OFL-1.1",
+  "fonts": [
+    {
+      "file": "playfair-italic.woff2",
+      "sha256": "54af24bd0f911f0fd7399d5445ea2023ff501d6a69f2d728f1213072f977ab14",
+      "bytes": 38804,
+      "css_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..600&display=swap",
+      "asset_url": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFkD-vYSZviVYUb_rj3ij__anPXDTnogkk7.woff2",
+      "css_sha256": "ec2b32b801d58a96c30ab4b98068d7ae94ee14d67bd83a882e66fa8455baeec9",
+      "style": "italic"
+    },
+    {
+      "file": "playfair.woff2",
+      "sha256": "e0c764a8e9e1cce92163c55bac4b2ad6cd4cf8c696ce2289ab5c41565e65b7e2",
+      "bytes": 38404,
+      "css_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..600;1,400..600&display=swap",
+      "asset_url": "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFiD-vYSZviVYUb_rj3ij__anPXDTzYgA.woff2",
+      "css_sha256": "ec2b32b801d58a96c30ab4b98068d7ae94ee14d67bd83a882e66fa8455baeec9",
+      "style": "normal"
+    },
+    {
+      "file": "sans.woff2",
+      "sha256": "9fea608a947e67020c33cad9a6fe3d60c54119dfb8cff87768a8117a15ed7543",
+      "bytes": 36932,
+      "css_url": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400..700&display=swap",
+      "asset_url": "https://fonts.gstatic.com/s/dmsans/v17/rP2Yp2ywxg089UriI5-g4vlH9VoD8Cmcqbu0-K4.woff2",
+      "css_sha256": "a952281454d45e3b4eee01b8f434589a3a01dca73e093c840be7be0072e92412",
+      "style": "normal"
+    },
+    {
+      "file": "mono.woff2",
+      "sha256": "e1896b13b2b1bb112fac2f9571bd6c40e118746e77a4511edbf43fbb41bf3e1e",
+      "bytes": 14820,
+      "css_url": "https://fonts.googleapis.com/css2?family=DM+Mono:wght@400&display=swap",
+      "asset_url": "https://fonts.gstatic.com/s/dmmono/v16/aFTU7PB1QTsUX8KYthqQBA.woff2",
+      "css_sha256": "ec72f595b6aef45a17865e67f2a68115cf91b096778bdb64dd030cfb370c333d",
+      "style": "normal"
+    },
+    {
+      "file": "song.woff2",
+      "sha256": "e7f54fce9a72f450f14894f6a3041407435a70b2ed3e6d0af7971268e1d66e89",
+      "bytes": 9124,
+      "css_url": "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400&display=swap&text=%E5%85%A8%E7%90%83%E5%AD%A6%E6%9C%AF%E4%BA%BA%E6%89%8D%E6%B5%81%E5%8A%A8%E6%9C%BA%E6%9E%84%E4%B8%8E%E5%BE%97%E5%88%86%E4%BA%BA%E6%89%8D%E6%B5%81%E5%8A%A8%E7%BD%91%E7%BB%9C%E6%95%B0%E6%8D%AE%E4%B8%8E%E6%96%B9%E6%B3%95%E8%AF%84%E5%88%86%E6%96%B9%E6%B3%95%E6%94%B6%E5%BD%95%E8%8C%83%E5%9B%B4%E4%BD%BF%E7%94%A8%E9%A1%BB%E7%9F%A5%E5%9F%B9%E5%85%BB%E9%98%B6%E6%AE%B5%E5%88%86%E6%95%B0%E6%9D%A5%E6%BA%90%E8%81%98%E7%94%A8%E6%9C%BA%E6%9E%84%E8%B4%A1%E7%8C%AE%E5%AD%A6%E6%9C%AF%E5%85%AC%E5%BC%80%E8%AE%B0%E5%BD%95",
+      "asset_url": "https://fonts.gstatic.com/l/font?kit=H4cyBXePl9DZ0Xe7gG9cyOj7uK2-n-D2rd4FY7SCqyWq6_INzaNn-_wuPeQuUE9h5hmMJ-msxej3Y3fv4LWW4XjaHbU1vihtZneHVGSD1d22ApcDIchMhgZ9y56DmgAUZZT3qvJRpDiis8jyrUnfpJUi37PnQcFof2_tYHsSWN0R53dzBmpCfG9Yjrfb-fRD6VuwXQ9Bk0GEXlM&skey=37fe335b8fd815cc&v=v36",
+      "css_sha256": "aa0914fa480c5ee87e1fd56a1017dbf6c8f2edba40d6c6121cf5b7d794387444",
+      "style": "normal"
+    }
+  ]
+}

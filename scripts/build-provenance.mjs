@@ -8,11 +8,12 @@ import {existsSync,lstatSync,readdirSync,readFileSync,writeFileSync} from 'node:
 import {dirname,isAbsolute,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md'];
+export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md','FONTS.md'];
 export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
 export const PROVENANCE = 'build-provenance.json';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceHash = bytes => hash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n')));
+const inputHash = (path,bytes) => path.endsWith('.woff2') ? hash(bytes) : sourceHash(bytes);
 const ordered = value => Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b,'en')));
 const same = (a,b) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
 
@@ -43,7 +44,7 @@ function walk(folder, root) {
 
 export function sourceInputs(root) {
   const paths = [...SOURCE_FILES,...walk(resolve(root,'web'),root).filter(path=>!path.endsWith('.test.js'))];
-  return ordered(Object.fromEntries(paths.map(path=>[path,sourceHash(regular(resolve(root,path)))])));
+  return ordered(Object.fromEntries(paths.map(path=>[path,inputHash(path,regular(resolve(root,path)))])));
 }
 
 export function outputHashes(outDir) {
@@ -116,7 +117,7 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
       let committed;
       try { committed=git(root,'show',`HEAD:${path}`); }
       catch { throw new Error(`Build input is not committed: ${path}`); }
-      if (sourceHash(committed) !== expected) throw new Error(`Build input differs from committed source: ${path}`);
+      if (inputHash(path,committed) !== expected) throw new Error(`Build input differs from committed source: ${path}`);
     }
     for (const [path,expected] of [[proof.selection.manifest,proof.selection.manifest_sha256],[proof.selection.snapshot,proof.selection.snapshot_sha256]]) {
       if (hash(git(root,'show',`HEAD:${path}`)) !== expected) throw new Error(`Release input differs from committed source: ${path}`);

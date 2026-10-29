@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "frozen_input_sha256": "bf75e15157483d10e027b6e5ca9c035c8531ab272d4d0b2783984b4573a08fdb",
+  "repeat_output_sha256": [
+    "6137d26d6e557370d00d2db3dcbf4ebe39aefcb0a4928e25e8dfdf369e703f56",
+    "6137d26d6e557370d00d2db3dcbf4ebe39aefcb0a4928e25e8dfdf369e703f56"
+  ],
+  "byte_identical": true,
+  "budget_used_bytes": 119498042,
+  "budget_limit_bytes": 2147483648,
+  "raw_files_in_external_workdir": 0
+}
