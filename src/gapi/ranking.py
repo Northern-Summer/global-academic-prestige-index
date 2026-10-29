@@ -74,27 +74,38 @@ def _accepted_events(
     return accepted
 
 
-def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float, tolerance: float, max_iterations: int) -> tuple[dict[str, float], dict[str, Any]]:
+def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float, tolerance: float, max_iterations: int, personalization: dict[str, float] | None = None) -> tuple[dict[str, float], dict[str, Any]]:
+    if len(set(nodes)) != len(nodes):
+        raise ValueError("PageRank nodes must be unique")
+    if not 0 <= alpha < 1 or tolerance <= 0 or max_iterations < 1:
+        raise ValueError("invalid PageRank parameters")
+    if any(not math.isfinite(value) or value < 0 for value in edges.values()):
+        raise ValueError("edge weights must be finite and non-negative")
     if not nodes:
         return {}, {"iterations": 0, "error": 0.0, "converged": True}
     n = len(nodes)
     index = {node: i for i, node in enumerate(nodes)}
+    if personalization is not None:
+        if set(personalization) - set(nodes) or any(not math.isfinite(v) or v < 0 for v in personalization.values()) or sum(personalization.values()) <= 0:
+            raise ValueError("invalid personalization vector")
+        total = sum(personalization.values())
+        prior = [personalization.get(node, 0.0) / total for node in nodes]
+    else:
+        prior = [1.0 / n] * n
     outgoing = [0.0] * n
-    for (source, _target), value in edges.items():
+    valid_edges = {(source, target): value for (source, target), value in edges.items()
+                   if source in index and target in index and value > 0}
+    for (source, _target), value in valid_edges.items():
         if source in index:
             outgoing[index[source]] += value
-    rank = [1.0 / n] * n
-    teleport = (1.0 - alpha) / n
+    rank = prior[:]
     error = math.inf
     iterations = 0
     for iterations in range(1, max_iterations + 1):
-        next_rank = [teleport] * n
+        next_rank = [(1.0-alpha)*value for value in prior]
         dangling = sum(rank[i] for i, total in enumerate(outgoing) if total == 0)
-        dangling_share = alpha * dangling / n
-        next_rank = [value + dangling_share for value in next_rank]
-        for (source, target), weight in edges.items():
-            if source not in index or target not in index:
-                continue
+        next_rank = [value + alpha*dangling*prior[i] for i,value in enumerate(next_rank)]
+        for (source, target), weight in valid_edges.items():
             next_rank[index[target]] += alpha * rank[index[source]] * weight / outgoing[index[source]]
         error = sum(abs(a - b) for a, b in zip(next_rank, rank))
         rank = next_rank

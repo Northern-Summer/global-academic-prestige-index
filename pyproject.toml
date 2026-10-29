@@ -12,6 +12,9 @@ license = {text = "Apache-2.0"}
 authors = [{name = "GAPI contributors"}]
 dependencies = []
 
+[project.optional-dependencies]
+analysis = ["duckdb==1.4.1"]
+
 [project.scripts]
 gapi = "gapi.cli:main"
 

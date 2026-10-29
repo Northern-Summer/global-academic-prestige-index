@@ -36,3 +36,15 @@ For each employer `Y` and doctoral origin `X`, source counts are summed across d
 - The data repository's reuse rights are unresolved; do not publish or redistribute the derived snapshot without documented permission.
 
 The separate reference-model defaults and their assumptions are documented in `configs/default.json` and its tests. They must not be presented as validated parameters for this aggregated U.S. sample.
+# Global observation contract (2026-10-29)
+
+The global streaming view is owned by `global_analysis.py` (schema
+`gapi-global-observed/v1`); the earlier reference/demo and US-study contracts below
+remain distinct. All qualifying edge endpoints define its network, regardless of
+formal eligibility. Only valid in-universe edges enter each PageRank row denominator;
+zero edges are dangling. Shared PageRank rejects negative/nonfinite weights.
+The global view retains missing awards/composites, observed rank versus unavailable
+formal rank, and conditional alpha/stage/source/region/time scenarios. Intensity uses
+observed training people as its explicit denominator, never all graduates or jobseekers.
+Independent official-profile corroboration and full OOD review are pending. An observed
+source statement is not a confirmed personal fact. See [STREAMING.md](STREAMING.md).

@@ -57,3 +57,13 @@ The public output should contain institution-level aggregates and source identif
 ## Acquisition status
 
 ROR, OpenAlex, and the U.S. faculty-hiring research connector are implemented. ROR and OpenAlex institution directories provide broad real global organization metadata; neither is a global academic career-history or hiring-flow census. OpenAlex institution import honors rate limits and supports checkpoints when explicitly requested; its default page cache is temporary and removed after processing. Global person-level career-history acquisition remains unimplemented. The current real score is therefore explicitly a scoped U.S.-employer research sample.
+# Streaming career sources (2026-10-29)
+
+Current source, access, license and storage contracts are in [STREAMING.md](STREAMING.md)
+and `configs/streaming.json`. The frozen annual target is ORCID **2026**, not 2025.
+Summary importer exists; the local annual-download route currently returns 202/empty,
+and upstream checksum/bytes remain unknown. Individual ORCID API XML and Wikidata
+EntityData are separate, partially scanned sources. Wikidata statements retain revision,
+qualifiers and references. Publication affiliations are not career facts. ORCID API
+redistribution is disabled by the task registry. Existing directory/US collectors
+below are legacy capabilities, not part of the zero-raw-disk streaming flow.

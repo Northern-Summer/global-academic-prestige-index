@@ -11,6 +11,7 @@ from .demo import generate
 from .openalex import ingest_institutions
 from .ror import ingest_ror
 from .us_faculty import ingest_and_rank
+from .stream_cli import register, execute
 
 
 def _read_json(path: Path):
@@ -20,6 +21,7 @@ def _read_json(path: Path):
 def main() -> None:
     parser = argparse.ArgumentParser(prog="gapi", description="Reproducible academic talent-flow ranking")
     sub = parser.add_subparsers(dest="command", required=True)
+    register(sub)
     rank = sub.add_parser("rank", help="calculate rankings from a dataset")
     rank.add_argument("--input", type=Path, required=True)
     rank.add_argument("--config", type=Path)
@@ -42,6 +44,8 @@ def main() -> None:
     us_faculty.add_argument("--cache-dir", type=Path, help="optional raw-source cache; must be outside the project")
     us_faculty.add_argument("--out", type=Path, default=Path("data/real/us-academia-network.json"))
     args = parser.parse_args()
+    if execute(args):
+        return
     if args.command == "demo":
         generate(args.out_dir)
         return

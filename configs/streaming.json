@@ -1,0 +1,46 @@
+{
+  "schema_version": "gapi-task/v1",
+  "work_dir": "D:/GAPI/global-academic-prestige-index",
+  "budget_bytes": 2147483648,
+  "reserve_bytes": 268435456,
+  "memory_bytes": 536870912,
+  "batch_events": 1000,
+  "max_member_bytes": 16777216,
+  "max_events_per_member": 4096,
+  "rules_version": "career-rules/1",
+  "http_timeout": 30,
+  "request_interval": 1.0,
+  "max_retries": 3,
+  "sources": {
+    "orcid-2026-summary": {
+      "kind": "orcid-summary-tar-gzip",
+      "version": "10.23640/07243.34697766.v1",
+      "landing_url": "https://orcid.figshare.com/articles/dataset/ORCID_Public_Data_File_2026/34697766/1",
+      "url": "https://orcid.figshare.com/ndownloader/files/70342863",
+      "filename": "ORCID_2026_10_summaries.tar.gz",
+      "snapshot_date": "2026-10-13",
+      "license": "CC0-1.0",
+      "policy_url": "https://info.orcid.org/public-data-file-use-policy/",
+      "checksum": null,
+      "size_bytes": null,
+      "access": "pending-download-metadata-and-access",
+      "allow_derivatives": true
+    },
+    "wikidata": {
+      "kind": "wikidata-entity-json",
+      "version": "per-entity-lastrevid",
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/",
+      "license": "CC0-1.0",
+      "policy_url": "https://www.wikidata.org/wiki/Wikidata:Licensing",
+      "allow_derivatives": true
+    },
+    "orcid-public-api": {
+      "kind": "orcid-public-api",
+      "version": "v3.0-per-record-sha256",
+      "url": "https://pub.orcid.org/v3.0/",
+      "license": "public-api-terms-review",
+      "policy_url": "https://info.orcid.org/public-client-terms-of-service/",
+      "allow_derivatives": false
+    }
+  }
+}

@@ -1,4 +1,6 @@
 name: CI
+env:
+  GAPI_CODE_ONLY: '1'
 on:
   push:
   pull_request:
@@ -24,7 +26,7 @@ jobs:
       - run: npm test
       - run: npm run build
   pages:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.GAPI_PAGES_RELEASE_APPROVED == 'true'
     needs: test
     runs-on: ubuntu-latest
     permissions:

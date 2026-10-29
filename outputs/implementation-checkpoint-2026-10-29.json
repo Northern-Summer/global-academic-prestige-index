@@ -1,0 +1,17 @@
+{
+  "checkpoint_commit": "e2a0d8197863bc45d901709c8884813c553d68a4",
+  "baseline": {
+    "python": 35,
+    "frontend": 9
+  },
+  "preserved": {
+    "institutions.json.gz": {
+      "bytes": 8103286,
+      "sha256": "959747b1ee6075d5598cc658d5599051714d4e054e93a706e422c43071f07db6"
+    },
+    "us-academia-network.json": {
+      "bytes": 175854,
+      "sha256": "61f9d6f076b7230ca6017f4a301b3a3229afc47ea146e8025731a100888d07a1"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import './style.css';
 import './scores.css';
+import './global.js';
 import { validateScoreSnapshot, verifySnapshotBytes } from './snapshot.js';
 
 const $ = (selector) => document.querySelector(selector);

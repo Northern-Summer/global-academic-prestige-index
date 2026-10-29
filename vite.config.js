@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite';
-import { readFile } from 'node:fs/promises';
-import { createReadStream, existsSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { dirname, resolve, basename } from 'node:path';
+import { createHash } from 'node:crypto';
+import { validateGlobal } from './web/global-data.js';
 
 const base = process.env.GITHUB_ACTIONS === 'true' ? '/global-academic-prestige-index/' : '/';
 
-const documentation = ['METHODOLOGY.md', 'DATA_SOURCES.md', 'DATA_SCHEMA.md', 'BIAS_AND_LIMITATIONS.md', 'RED_TEAM_REPORT.md'];
+const documentation = ['METHODOLOGY.md', 'DATA_SOURCES.md', 'DATA_SCHEMA.md', 'BIAS_AND_LIMITATIONS.md', 'RED_TEAM_REPORT.md', 'STREAMING.md'];
 
 export default defineConfig({
   base,
@@ -17,6 +20,10 @@ export default defineConfig({
         ['/data/local/us-academia-network.json', localScores],
         ['/data/local/us-academia-network.json.manifest.json', `${localScores}.manifest.json`],
       ]);
+      const taskConfig = JSON.parse(requireTaskConfig());
+      const globalScores = resolve(taskConfig.work_dir, 'global-local.json');
+      scoreRoutes.set('/data/global/manifest.json', `${globalScores}.manifest.json`);
+      scoreRoutes.set('/data/global/global-local.json', globalScores);
       server.middlewares.use((request, response, next) => {
         const filePath = scoreRoutes.get(request.url?.split('?')[0]);
         if (!filePath) return next();
@@ -37,6 +44,26 @@ export default defineConfig({
         const source = await readFile(new URL(`./docs/${filename}`, import.meta.url), 'utf8');
         this.emitFile({ type: 'asset', fileName: `docs/${filename}`, source });
       }
+      if (process.env.GAPI_CODE_ONLY === '1') return;
+      const manifestPath = resolve(process.env.GAPI_RELEASE_MANIFEST || 'outputs/global/manifest.json');
+      if (!existsSync(manifestPath)) throw new Error('A selected real release manifest is required. GAPI_CODE_ONLY=1 builds code/docs without a ranking.');
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.json$/.test(manifest.snapshot)) throw new Error('Unsafe snapshot path in release manifest');
+      const snapshotPath = resolve(dirname(manifestPath), manifest.snapshot);
+      if ((await stat(snapshotPath)).size > 32*1024*1024) throw new Error('Selected snapshot exceeds the 32 MiB browser slice budget');
+      const source = await readFile(snapshotPath);
+      const hash = createHash('sha256').update(source).digest('hex');
+      if (hash !== manifest.output_sha256) throw new Error('Selected release snapshot hash mismatch');
+      const snapshot = validateGlobal(JSON.parse(source));
+      const localOnly = process.env.GAPI_LOCAL_BUILD === '1';
+      if (!localOnly && (manifest.publication_status !== 'public-observations-pending-external-review' || snapshot.publication_status !== manifest.publication_status)) throw new Error('Local/restricted dataset cannot be published');
+      this.emitFile({type:'asset', fileName:`data/global/${basename(manifest.snapshot)}`, source});
+      this.emitFile({type:'asset', fileName:'data/global/manifest.json', source:JSON.stringify(manifest)});
     },
   }],
 });
+
+function requireTaskConfig() {
+  // A task-owned config supplies location; never enumerate arbitrary paths from requests.
+  return readFileSync(new URL('./configs/streaming.json', import.meta.url), 'utf8');
+}
