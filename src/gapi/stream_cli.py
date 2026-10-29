@@ -15,9 +15,13 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
+        if name == 'discover-wikidata-dump':
+            parser.add_argument('--feed', type=Path, default=Path('configs/discovery-dump.json'))
+            parser.add_argument('--max-seconds', type=float, default=300)
+            parser.add_argument('--max-compressed-bytes', type=int)
         if name.startswith("ingest-"):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
@@ -32,7 +36,7 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -54,7 +58,13 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command == "ingest-orcid":
+        if args.command == 'discover-wikidata-dump':
+            from .dump_discovery import discover_dump, load_feed
+            if args.max_compressed_bytes is not None and args.max_compressed_bytes <= 0:
+                raise ValueError('max-compressed-bytes must be positive')
+            result = discover_dump(store,http,load_feed(args.feed),max_seconds=args.max_seconds,
+                max_bytes=args.max_compressed_bytes,progress=lambda r:print(json.dumps(r),flush=True))
+        elif args.command == "ingest-orcid":
             source = "orcid-2026-summary"
             store.start(source)
             try:

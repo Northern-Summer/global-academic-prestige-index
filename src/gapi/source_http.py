@@ -12,7 +12,7 @@ from urllib.robotparser import RobotFileParser
 
 USER_AGENT = "GAPI/0.2 (+https://github.com/global-academic-prestige-index; research)"
 HOSTS = {"orcid.figshare.com", "ndownloader.figshare.com", "api.figshare.com", "s3-eu-west-1.amazonaws.com",
-         "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org"}
+         "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org", "dumps.wikimedia.org"}
 
 
 def safe_url(url: str):

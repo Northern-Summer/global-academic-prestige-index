@@ -69,6 +69,33 @@ Wikidata is CC0. Copies and mirrored declarations are not independent corroborat
 
 ## Local view and publication
 
+### Bulk discovery independent of SPARQL
+
+```powershell
+python -m gapi discover-wikidata-dump --max-seconds 300 --max-compressed-bytes 268435456
+python -m gapi ingest-wikidata --resume --max-members 200 --max-seconds 300
+python -m gapi ingest-orcid-api --resume --max-members 200 --max-seconds 300
+```
+
+`configs/discovery-dump.json` binds the official 2026-10-26 Wikidata JSON dump,
+exact size and upstream SHA-1. HTTP → streaming bzip2/gzip → bounded lines →
+candidate ID queue avoids both SPARQL and search. The official documentation
+describes [line-wise entity processing](https://www.wikidata.org/wiki/Wikidata:Database_download).
+No archive, raw JSON line or person body is saved. The 2 MiB line cap drains larger
+entities, records a rejected count and retains the coverage gap. Queue entries are
+candidate IDs and line hashes; the ordinary adapters fetch their evidence separately.
+Dump/API are still the same source, never independent corroboration.
+
+Replay begins at the start, validates the committed prefix hash and skips previous
+lines; arbitrary compressed-byte resume is not claimed. Only complete decoder EOF,
+framing, compressed size and upstream SHA-1 agreement can mark enumeration verified.
+Bounded scans remain provisional. Metadata is a separate immutable discovery-feed
+record in the same budget/OS-writer boundary; it does not mutate the source lock.
+The first real 32 MiB compressed batch processed 6,475 entity lines and queued 167
+career candidates. This confirms a real bulk ingress, not whole-source completion.
+Wikidata search and unauthenticated ORCID search were refused under current access
+rules; no robots exception, account change or alternate protected host was used.
+
 Discovery uses ordered live Wikidata pages, atomically committing each page's query
 hash, response hash, retrieval time, queue and last person identifier to SQLite.
 Each `--discover --resume` invocation advances one page (at most 200 people) and

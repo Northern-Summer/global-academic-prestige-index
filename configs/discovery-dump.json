@@ -1,0 +1,11 @@
+{
+  "id": "wikidata-20261026-all",
+  "kind": "wikidata-json-discovery/v1",
+  "url": "https://dumps.wikimedia.org/wikidatawiki/entities/20261026/wikidata-20261026-all.json.bz2",
+  "compression": "bz2",
+  "size_bytes": 103565615653,
+  "sha1": "e46332c339451e6a0b16d696ccb63492317f567b",
+  "checksum_url": "https://dumps.wikimedia.org/wikidatawiki/entities/20261026/wikidata-20261026-sha1sums.txt",
+  "license": "CC0-1.0",
+  "purpose": "candidate-discovery-only-not-career-evidence"
+}

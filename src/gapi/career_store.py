@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS discovery_pages(
  source TEXT NOT NULL, cursor_before TEXT NOT NULL, cursor_after TEXT NOT NULL,
  query_sha256 TEXT NOT NULL, response_sha256 TEXT NOT NULL, retrieved_at TEXT NOT NULL,
  row_count INTEGER NOT NULL, PRIMARY KEY(source,cursor_before));
+CREATE TABLE IF NOT EXISTS discovery_feeds(
+ id TEXT PRIMARY KEY, spec TEXT NOT NULL, status TEXT NOT NULL,
+ compressed_bytes INTEGER NOT NULL DEFAULT 0, lines INTEGER NOT NULL DEFAULT 0,
+ candidates INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0,
+ sha256 TEXT, detail TEXT, prefix_sha256 TEXT);
 CREATE TABLE IF NOT EXISTS institution_aliases(
  alias TEXT PRIMARY KEY, institution TEXT NOT NULL, provenance TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS failures(
@@ -144,6 +149,8 @@ class CareerStore:
             "event_status": dict(self.db.execute("SELECT status,count(*) FROM events GROUP BY status")),
             "member_status": dict(self.db.execute("SELECT status,count(*) FROM members GROUP BY status")),
             "failure_counts":dict(self.db.execute("SELECT source,sum(attempts) FROM failures GROUP BY source")),
+            "discovery_feeds":[dict(zip(('id','status','compressed_bytes','lines','candidates','rejected','sha256','detail'), row))
+                for row in self.db.execute('SELECT id,status,compressed_bytes,lines,candidates,rejected,sha256,detail FROM discovery_feeds ORDER BY id')],
             "storage_bytes": self.task.used(), "storage_budget": self.task.config["budget_bytes"],
             "complete_global_census": False,
         }
