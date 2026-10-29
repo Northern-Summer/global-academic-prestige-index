@@ -67,13 +67,14 @@ def execute_task(task, args):
                 result = store.report()
         elif args.command in ("ingest-wikidata", "ingest-orcid-api"):
             ids = args.ids
-            if args.discover:
-                try:
-                    print(json.dumps(enqueue_discovery(store, http, args.command,
-                        limit=args.discovery_limit, scope=args.discovery_scope)), flush=True)
-                except (OSError, RuntimeError, ValueError) as exc:
-                    store.failure('wikidata', 'discovery:'+args.command, str(exc))
-                    print(json.dumps({'discovery_failed': str(exc)[:256], 'continuing_committed_queue': True}), flush=True)
+            if args.discover or args.resume and not ids:
+                if args.discover:
+                    try:
+                        print(json.dumps(enqueue_discovery(store, http, args.command,
+                            limit=args.discovery_limit, scope=args.discovery_scope)), flush=True)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        store.failure('wikidata', 'discovery:'+args.command, str(exc))
+                        print(json.dumps({'discovery_failed': str(exc)[:256], 'continuing_committed_queue': True}), flush=True)
                 source = 'wikidata' if args.command == 'ingest-wikidata' else 'orcid-public-api'
                 ids = [r[0] for r in store.db.execute('''SELECT d.identifier FROM discovery d WHERE d.source=?
                     AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?

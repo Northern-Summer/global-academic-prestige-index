@@ -89,3 +89,24 @@ class DiscoveryTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 discover_wikidata(http, **kwargs)
         self.assertEqual(http.urls, [])
+
+    def test_cli_resume_drains_pending_queue_without_new_discovery(self):
+        from argparse import Namespace
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from gapi.stream_cli import execute_task
+        s = self.store(archive([]))
+        task = s.task
+        s.start('wikidata')
+        with s.db:
+            s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)', [
+                ('ingest-wikidata',qid,'q','r') for qid in ('Q1','Q2')])
+        with s.member('wikidata','Q1@123'):
+            s.finish_member('wikidata','Q1@123','a'*64)
+        s.close()
+        args = Namespace(command='ingest-wikidata',ids=[],resume=True,discover=False,max_members=1,max_seconds=10)
+        with patch('gapi.stream_cli.enqueue_discovery') as discover, patch('gapi.stream_cli.ingest_wikidata',return_value={}) as ingest, redirect_stdout(io.StringIO()):
+            execute_task(task,args)
+            discover.assert_not_called()
+            self.assertEqual(ingest.call_args.args[2], ['Q2'])
