@@ -10,3 +10,5 @@ The user rejected the Chinese redesign: heavy sans-serif headings, loss of the p
 - Actual desktop hero/table and mobile hero/table screenshots inspected. No human preference acceptance or causal performance improvement is claimed. Local table readiness was 843 ms; this is one observation, not a controlled benchmark.
 
 Receipts: `outputs/browser-typography-20261029.json`, `outputs/typography-acceptance-20261029.json`. Remote deployment and public browser settlement will be recorded separately after execution. Source scanning and third-party dual-track review remain incomplete; this is an observation release.
+
+Deployment run `40905490029` passed tests/build/browser and published the expected site manifest, but its asset readback encountered HTTP 503. It remains a failed run. Added bounded retries only for transient public GET errors; 403, oversized content and hash mismatches are not accepted. The follow-up run must establish actual recovery. Original log retained in the external work directory.

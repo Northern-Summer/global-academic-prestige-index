@@ -44,12 +44,26 @@ export async function ensurePagesBuild(api,siteCommit,onPrepared=()=>{}) {
   }
 }
 
-async function fetchBounded(url,maximum) {
-  const response=await fetch(url,{signal:AbortSignal.timeout(20000),headers:{'Cache-Control':'no-cache'}});
-  if(!response.ok)throw new Error(`Public readback HTTP ${response.status}`);
-  const chunks=[];let length=0;
-  for await(const chunk of response.body){length+=chunk.length;if(length>maximum)throw new Error('Public readback exceeds byte bound');chunks.push(chunk);}
-  return Buffer.concat(chunks);
+export async function fetchBounded(url,maximum,{fetchImpl=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),onRetry=()=>{}}={}) {
+  // Only repeat idempotent public reads. Authentication, content bounds and
+  // hash checks never become retryable; writes use their own reconciliation.
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const response=await fetchImpl(url,{signal:AbortSignal.timeout(10000),headers:{'Cache-Control':'no-cache'}});
+      if(!response.ok){
+        await response.body?.cancel();
+        const error=new Error(`Public readback HTTP ${response.status}`);
+        error.transientPublicRead=[429,500,502,503,504].includes(response.status);throw error;
+      }
+      const chunks=[];let length=0;
+      for await(const chunk of response.body){length+=chunk.length;if(length>maximum)throw new Error('Public readback exceeds byte bound');chunks.push(chunk);}
+      return Buffer.concat(chunks);
+    }catch(error){
+      if(attempt===2||!(error.transientPublicRead||['TypeError','TimeoutError','AbortError'].includes(error.name)))throw error;
+      onRetry({attempt:attempt+1,error:String(error.message).slice(0,160)});
+      await sleep((attempt+1)*1000);
+    }
+  }
 }
 
 async function main(){
@@ -105,7 +119,8 @@ async function main(){
       await new Promise(resolve=>setTimeout(resolve,5000));
     }
     if(!readback)throw new Error('Pages manifest has not settled before bounded deadline');
-    for(const [path,bytes]of files){const live=await fetchBounded(SITE+path,Math.max(bytes.length+1,1024));
+    for(const [path,bytes]of files){const live=await fetchBounded(SITE+path,Math.max(bytes.length+1,1024),{
+      onRetry:retry=>{receipt.asset_readback_retries??=[];receipt.asset_readback_retries.push({path,...retry});save();}});
       if(hash(live)!==hash(bytes))throw new Error(`Public asset hash mismatch: ${path}`);}
     receipt.state='live-site-hashes-confirmed';receipt.checked_files=files.size;save();
     console.log(JSON.stringify({state:receipt.state,source_commit:head,checked_files:files.size,site_url:SITE}));

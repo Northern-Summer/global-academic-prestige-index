@@ -4,7 +4,7 @@ import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-import {deploymentIdentity,capture,ensurePagesBuild} from '../scripts/deploy-pages.mjs';
+import {deploymentIdentity,capture,ensurePagesBuild,fetchBounded} from '../scripts/deploy-pages.mjs';
 
 test('automatic deployment only accepts exact trusted push identity',()=>{
   const head='a'.repeat(40),env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'push',
@@ -39,4 +39,25 @@ test('artifact byte capture rejects in-flight replacement and does not mutate si
     assert.deepEqual([...one],[...two]);assert.equal(one.get('index.html').equals(body),true);
     writeFileSync(join(folder,'index.html'),'replacement');assert.throws(()=>capture(proof,folder),/changed/);
   }finally{rmSync(folder,{recursive:true,force:true});}
+});
+
+test('public asset reads survive bounded transient 503 and network errors',async()=>{
+  for(const kind of ['http','network']){
+    let calls=0;const retries=[];
+    const bytes=await fetchBounded('https://example.invalid/site.css',32,{
+      fetchImpl:async()=>{calls++;if(calls===1){if(kind==='network')throw new TypeError('fetch failed');return new Response('temporary',{status:503});}return new Response('verified bytes');},
+      sleep:async()=>{},onRetry:retry=>retries.push(retry)
+    });
+    assert.equal(bytes.toString(),'verified bytes');assert.equal(calls,2);assert.equal(retries.length,1);
+  }
+});
+
+test('public read retry bound preserves permanent and oversized failures',async()=>{
+  for(const mode of ['persistent503','forbidden','oversized']){
+    let calls=0;
+    await assert.rejects(fetchBounded('https://example.invalid/site.css',8,{
+      fetchImpl:async()=>{calls++;return mode==='persistent503'?new Response('',{status:503}):mode==='forbidden'?new Response('',{status:403}):new Response('over the byte bound');},sleep:async()=>{}
+    }),/HTTP|byte bound/);
+    assert.equal(calls,mode==='persistent503'?3:1);
+  }
 });
