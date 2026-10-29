@@ -1,49 +1,38 @@
-# GAPI Methodology v0.1
+# GAPI Methodology
 
-## Measurement target
+## Current page: U.S. aggregate hiring sample preview
 
-GAPI measures observed links in which a person received education or research training at institution X and later held a qualifying role at institution Y. It does not identify the causal effect of education, teaching quality, employment probability, or the complete global mobility network.
+This method applies only to the local real-data view produced by `gapi ingest-us-faculty`. It does not describe the canonical person-event reference implementation, synthetic teaching fixtures, award scoring, or a global university ranking.
 
-## Event and edge construction
+### Source and observation unit
 
-The canonical input stores training and employment as separate events connected by an internal person identifier. The ranking layer emits a directed edge `Y -> X`, so influence from the hiring institution flows to the training institution. Events are deduplicated by person, training stage, training institution, and employer. Duplicate source records should be consolidated before scoring.
+The importer reads the `Academia/Academia` aggregate edge list at the pinned LarremoreLab repository commit recorded in the score snapshot. Rows aggregate faculty counts by employing institution and doctoral institution for a 2011–2020 U.S. employer sample. They are source-published aggregate counts, not GAPI-verified individual people, new hires, or unique-person events. The source research distinguishes current faculty rosters and hiring/retention dynamics; see its paper and repository documentation for the original definitions.
 
-The reference implementation counts one event per person/stage/training institution/employer tuple. A role beginning before a known training completion year is excluded. When either the training year or employment start year is missing, the event is held out of the primary graph because the available record cannot establish the required temporal order. Administrative role categories are excluded; the configured qualifying types are faculty, researcher, research scientist, and postdoc. Postdoctoral training is represented as its own `postdoc` stage; it is not treated as a degree. Joint appointments are included only with an explicit fraction.
+The two input CSV artifacts are pinned to expected SHA-256 digests. The local snapshot records each URL, revision, file size, observed hash, scope, and algorithm settings. The upstream data repository does not declare a reuse license, so generated real scores remain local-only pending rights review.
 
-## Network score
+### Institution universe and edge direction
 
-For employer `y`, training institution `x`, and stage `s`, the weighted edge is:
+The PageRank node universe is the set of U.S. employing institutions listed in the source `Academia/Academia` institution statistics (368 in the inspected snapshot). An observed relation is represented as `employer Y -> doctoral origin X`, so influence from the hiring institution propagates toward the doctoral institution.
 
-`W[y,x] = sum(stage_weight[s] * event_fraction)`
+Edges whose doctoral origin is outside the 368-node employer universe are retained in source-level coverage counters but excluded from the PageRank matrix. The snapshot reports both excluded edge count and excluded aggregate faculty count globally and per employer. Source-recorded doctoral-origin and faculty counts include the source rows outside the ranking matrix; separate `ranking_network_*` values include only edges inside the PageRank universe. These counts must not be compared as if they shared the same denominator.
 
-Rows are normalized by outgoing edge weight. PageRank uses a uniform personalization vector over the institution directory, damping `alpha = 0.85`, L1 convergence tolerance `1e-12`, and a maximum of 200 iterations. Dangling-node mass is redistributed uniformly. The reported network score sums to 1 across all nodes, including nodes that do not qualify for the displayed ranking. Qualification does not alter the underlying graph calculation.
+### Score calculation
 
-Default stage weights are bachelor 0.20, master 0.35, doctorate 1.00, and postdoc 0.60. These are declared policy defaults, not empirically established universal values.
+For each employer `Y` and doctoral origin `X`, source counts are summed across duplicate rows in the selected all-academia taxonomy. The weighted adjacency is row-normalized by employer; PageRank uses `alpha=0.85`, uniform personalization over all employer nodes, L1 tolerance `1e-12`, and at most 200 iterations. Dangling mass is redistributed uniformly by the shared `pagerank` implementation. The reported score is a network centrality value within this sample, not a probability, causal effect, graduate placement rate, or measure of overall university quality.
 
-## Awards and composite score
+`algorithm.edges` is the count of unique nonzero source institution-pair rows after duplicate pair aggregation. `algorithm.within_ranked_network_edges` counts unique pairs whose employer and doctoral origin are both in the ranking universe. `algorithm.external_doctoral_origin_edges` counts pairs from in-universe employers to origins outside it. The associated `external_doctoral_origin_count` sums source aggregate counts over those external pairs.
 
-Awards are separately counted by explicit institutional attribution. The reference categories are personal (1.0), institutional (0.5), and technical history (0.25). An award contributes to the main award score only when the record explicitly names an awarded or producing institution. It is never propagated through the talent-flow graph. Duplicate award identity/year/recipient records count once.
+## Separate reference implementation
 
-Network and award scores are converted to empirical percentiles over eligible institutions. The composite score is `0.80 * network_percentile + 0.20 * award_percentile`. This is a presentation choice and should be tested against alternative weights before any real ranking release.
+`src/gapi/ranking.py` also implements a configurable canonical person-event reference model with education stages, evidence references, eligibility, awards, composite scores, and uncertainty-related contracts. Synthetic files under `data/demo/` exercise that model in automated tests. Neither those rules nor their synthetic values contribute to the current U.S. aggregate score page.
 
-## Eligibility
+## Limits and next validation
 
-Production defaults require at least 10 observed events, two education source classes, a traceability ratio of at least 0.80, and an institution with a stable identifier or explicit confirmation. The current implementation verifies event references, source URLs, hashes, and an approved or synthetic-demo license state. It does not yet implement a real-world entity confirmation workflow. Demo thresholds are relaxed only inside the synthetic fixture generator.
+- The employer universe and hiring observations are U.S.-bounded and cover 2011–2020.
+- Only doctorate-origin relationships are present in this source view; bachelor, master, postdoctoral, award, and complete career-path scores are not available here.
+- The aggregate input prevents person-level duplicate review and independent verification of individual degree, job title, dates, or evidence URLs.
+- One research dataset is not independent multi-source corroboration; its source structure and coverage may shape the score.
+- Sensitivity analysis, OOD subgroup validation, uncertainty intervals, and independent third-party review are outstanding.
+- The data repository's reuse rights are unresolved; do not publish or redistribute the derived snapshot without documented permission.
 
-Institutions outside eligibility remain visible in the directory. Ranking scores are withheld from ineligible rows to avoid making missing coverage look like low measured influence.
-
-The output includes `unranked_reasons` for each ineligible institution. These are mechanical qualification results such as `insufficient_observed_events`, `insufficient_source_classes`, `traceability_below_threshold`, and `missing_stable_institution_identifier`; they describe data readiness, not institutional quality.
-
-The public demo additionally ships `data/demo/scenarios.json`. Its scenarios deliberately change stage weights, award/composite settings, or remove a synthetic hiring hub so a reader can inspect directionality and parameter effects. Every scenario is labeled `synthetic/demo` and must not be interpreted as an observation about real institutions.
-
-## Reproducibility
-
-Inputs and config are JSON. Output ordering is deterministic. The CLI can write a release manifest containing input labels and SHA-256 hashes of the result and release envelope. For a formal release, the manifest must identify immutable input artifact hashes and the exact source revision; the current CLI input label is not a substitute for that release process.
-
-## Current implementation limits
-
-- Network volume, intensity, coverage-aware uncertainty, sensitivity sweeps, and bootstrap intervals are not yet implemented as separate published measures.
-- Geography, discipline, institution-size adjustment, and source-language perturbation are not currently applied to scores.
-- No verified real-world event dataset or award catalog is bundled.
-- The web view applies one shared filtered edge slice to the network and selected-institution detail list; it still uses a small synthetic graph.
-- The current traceability field validates event-to-evidence linkage; it does not prove the source's factual correctness.
+The separate reference-model defaults and their assumptions are documented in `configs/default.json` and its tests. They must not be presented as validated parameters for this aggregated U.S. sample.

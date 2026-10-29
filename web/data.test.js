@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { edgeWeightRange, edgesForInstitution, filterEdges, nodeColor } from './state.js';
+import { validateScoreSnapshot, verifySnapshotBytes } from './snapshot.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -63,10 +64,37 @@ test('scenario node color maps eligibility only and never encodes a score', asyn
   assert.ok(hub && nodeColor(hub.status) === '#d88a70');
 });
 
-test('static HTML exposes scenario, keyboard-selectable nodes, and coverage explanation', async () => {
+test('static HTML exposes a real-score ranking and contains no synthetic-score controls', async () => {
   const html = await readFile(resolve(root, 'index.html'), 'utf8');
-  assert.match(html, /id="scenario-filter"/);
-  assert.match(html, /id="node-picker"/);
-  assert.match(html, /does not mean low academic quality/);
+  assert.match(html, /id="directory-rows"/);
+  assert.match(html, /REAL SAMPLE SCORES/);
+  assert.match(html, /2011–2020/);
+  assert.match(html, /GAPI network score/);
+  assert.doesNotMatch(html, /id="scenario-filter"|id="network-canvas"|demo score|demo ranking/i);
   assert.match(html, /role="status"/);
+});
+
+test('frontend loads only the local real-data score snapshot and has no synthetic fallback', async () => {
+  const source = await readFile(resolve(root, 'web/main.js'), 'utf8');
+  assert.match(source, /data\/local\/us-academia-network\.json/);
+  assert.match(source, /validateScoreSnapshot/);
+  assert.match(source, /verifySnapshotBytes/);
+  assert.match(source, /snapshot\.algorithm\.nodes/);
+  assert.match(source, /Synthetic\/demo scores are never used as a fallback/);
+  assert.doesNotMatch(source, /data\/demo|scenarios\.json/);
+});
+
+test('snapshot validation names missing fields and binds errors to a revision', () => {
+  assert.throws(
+    () => validateScoreSnapshot({ dataset_kind: 'real/derived-research-sample', snapshot_revision: 'test-r4', nodes: [], algorithm: {} }),
+    /Snapshot test-r4 schema invalid: nodes, algorithm\.nodes/,
+  );
+});
+
+test('snapshot hash mismatch fails closed with the pinned revision in its diagnostic', async () => {
+  const bytes = new TextEncoder().encode('{"real":true}');
+  await assert.rejects(
+    verifySnapshotBytes(bytes, { snapshot_revision: 'test-r5', output_sha256: '0'.repeat(64) }),
+    /Snapshot test-r5 integrity mismatch: output_sha256/,
+  );
 });

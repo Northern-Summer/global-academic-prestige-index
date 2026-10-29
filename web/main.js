@@ -1,209 +1,90 @@
-import * as THREE from 'three';
-import data from '../data/demo/rankings.json';
-import scenarioData from '../data/demo/scenarios.json';
-import { edgeWeightRange, edgesForInstitution, filterEdges, nodeColor } from './state.js';
 import './style.css';
+import './scores.css';
+import { validateScoreSnapshot, verifySnapshotBytes } from './snapshot.js';
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const pageSize = 50;
+let records = [];
+let page = 0;
+let searchTimer;
+let snapshot;
 
-document.documentElement.style.setProperty('--gapi-node-ranked', nodeColor('ranked'));
-document.documentElement.style.setProperty('--gapi-node-unranked', nodeColor('unranked'));
-
-const nodesById = new Map(data.nodes.map((node) => [node.institution_id, node]));
-let currentScenario = scenarioData.scenarios[0];
-let currentNodes = currentScenario.result.nodes;
-let currentEdges = currentScenario.result.edges;
-let selected = null;
-let edgeObjects = [];
-const nodeObjects = new Map();
-const labelObjects = new Map();
-const positions = new Map();
-const nodesByCurrentId = () => new Map(currentNodes.map((node) => [node.institution_id, node]));
-
-$('#scenario-filter').innerHTML = scenarioData.scenarios.map((scenario) => `<option value="${esc(scenario.id)}">${esc(scenario.label)}</option>`).join('');
-for (const region of [...new Set(data.nodes.map((node) => node.region))].sort()) {
-  const option = document.createElement('option'); option.value = region; option.textContent = region; $('#region-filter').append(option);
+function roleLabel(record) {
+  if (record.roles.includes('employer') && record.roles.includes('doctoral_origin')) return 'Employer + doctoral origin';
+  if (record.roles.includes('employer')) return 'US faculty employer';
+  return 'Doctoral origin only';
 }
 
-function filteredEdges() {
-  const stage = $('#stage-filter').value;
-  const minFlow = Number($('#flow-filter').value);
-  return filterEdges(currentEdges, { stage, minWeight: minFlow });
-}
-
-function renderTable() {
-  const query = $('#search').value.trim().toLocaleLowerCase();
-  const region = $('#region-filter').value;
-  const currentById = nodesByCurrentId();
-  const rows = currentNodes.filter((node) => (region === 'all' || node.region === region) && `${node.institution_name} ${node.country} ${node.region}`.toLocaleLowerCase().includes(query));
-  const sort = $('#sort-filter').value;
-  rows.sort((a, b) => {
-    if (sort === 'name') return a.institution_name.localeCompare(b.institution_name);
-    if (sort === 'network' || sort === 'awards') {
-      const key = sort === 'network' ? 'network_score' : 'award_score';
-      return (b[key] ?? -1) - (a[key] ?? -1) || a.institution_name.localeCompare(b.institution_name);
-    }
-    if (a.rank === null && b.rank !== null) return 1;
-    if (b.rank === null && a.rank !== null) return -1;
-    return (a.rank ?? 999999) - (b.rank ?? 999999) || a.institution_name.localeCompare(b.institution_name);
+function renderDirectory() {
+  const query = $('#directory-search').value.trim().toLocaleLowerCase();
+  const role = $('#directory-role').value;
+  const sort = $('#directory-sort').value;
+  const filtered = records.filter((record) =>
+    (!query || record.name.toLocaleLowerCase().includes(query))
+    && (role === 'all' || record.roles.includes(role))
+  );
+  filtered.sort((left, right) => {
+    if (sort === 'name') return left.name.localeCompare(right.name);
+    if (sort === 'placements') return right.source_recorded_doctoral_origin_count - left.source_recorded_doctoral_origin_count || left.name.localeCompare(right.name);
+    if (sort === 'hires') return right.source_recorded_faculty_count - left.source_recorded_faculty_count || left.name.localeCompare(right.name);
+    return left.rank - right.rank;
   });
-  $('#ranking-rows').innerHTML = rows.map((node) => `<tr data-id="${esc(node.institution_id)}" class="${node.institution_id === selected ? 'is-selected' : ''}"><td class="rank-cell">${node.rank === null ? '<span class="unranked-rank">—</span>' : `<span class="rank-pill">${node.rank}</span>${currentNodes.filter((item) => item.rank === node.rank).length > 1 ? '<span class="tie-note">TIE</span>' : ''}`}</td><td><button class="institution-select" type="button" data-id="${esc(node.institution_id)}">${esc(node.institution_name)}<small>${esc(node.institution_type.replaceAll('_', ' '))}</small></button></td><td>${esc(node.region)}</td><td class="score">${node.network_score === null ? '—' : node.network_score.toFixed(4)}</td><td class="score">${node.award_score === null ? '—' : node.award_score.toFixed(2)}</td><td class="score composite-score">${node.composite_score === null ? '—' : node.composite_score.toFixed(3)}</td><td>${node.status === 'ranked' ? `<span class="status ranked">${node.coverage.event_count} events</span>` : `<span class="status unranked" title="${esc(node.unranked_reasons.join(', '))}">Not ranked · ${node.coverage.event_count} events</span>`}</td></tr>`).join('') || '<tr><td class="empty-state" colspan="7">No institutions match these filters.</td></tr>';
-  $('#ranking-rows').querySelectorAll('.institution-select').forEach((button) => button.addEventListener('click', () => selectNode(button.dataset.id)));
-  $('#ranked-count').textContent = String(currentNodes.filter((node) => node.status === 'ranked').length);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  page = Math.min(page, pageCount - 1);
+  const visible = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  $('#directory-rows').innerHTML = visible.map((record) => `<tr><td class="rank-cell"><span class="rank-pill">${esc(record.rank)}</span></td><td><strong>${esc(record.name)}</strong><small>${esc(record.institution_id)}</small></td><td class="score composite-score">${record.gapi_network_score.toFixed(8)}</td><td>${record.source_recorded_doctoral_origin_count.toLocaleString('en')}<small>${record.ranking_network_doctoral_origin_count.toLocaleString('en')} in ranking network</small></td><td>${record.source_recorded_faculty_count.toLocaleString('en')}<small>${record.ranking_network_employer_count.toLocaleString('en')} in ranking network</small></td><td><span class="status ranked">${esc(roleLabel(record))}</span>${record.excluded_external_doctoral_origin_edges ? `<small>${record.excluded_external_doctoral_origin_edges.toLocaleString('en')} external-origin relations excluded (${record.excluded_external_doctoral_origin_count.toLocaleString('en')} source records)</small>` : ''}</td></tr>`).join('') || '<tr><td class="empty-state" colspan="6">No real institutions match these filters.</td></tr>';
+  const first = filtered.length ? page * pageSize + 1 : 0;
+  const last = Math.min((page + 1) * pageSize, filtered.length);
+  $('#directory-page-status').textContent = `${first.toLocaleString('en')}–${last.toLocaleString('en')} of ${filtered.length.toLocaleString('en')} real institutions`;
+  $('#directory-prev').disabled = page === 0;
+  $('#directory-next').disabled = page >= pageCount - 1;
 }
 
-function updateSliderRange() {
-  const range = edgeWeightRange(currentEdges, $('#stage-filter').value);
-  const slider = $('#flow-filter');
-  const { min, max } = range;
-  const step = max <= 1 ? 0.1 : Math.max(0.1, Math.round(max / 20 * 10) / 10);
-  slider.min = '0'; slider.max = String(Math.max(0, max)); slider.step = String(step);
-  if (Number(slider.value) > max) slider.value = String(min);
-  $('#flow-range-note').textContent = max ? `Observed range ${min.toFixed(1)}–${max.toFixed(1)} · ${range.count} links` : 'No flow in this stage';
+function setLoadFailure(error) {
+  $('#directory-status').textContent = `Real score snapshot unavailable: ${error.message}`;
+  $('#scope-notice').textContent = 'No score is shown until a versioned real-data snapshot is available.';
+  $('#directory-rows').innerHTML = '<tr><td class="empty-state" colspan="6">The local real score snapshot is unavailable. Run the real-data ingest command first.</td></tr>';
+  $('#source-status').textContent = 'No score data loaded. Synthetic/demo scores are never used as a fallback.';
 }
 
-function updateMetrics() {
-  $('#institution-count').textContent = String(currentNodes.length);
-  $('#link-count').textContent = String(currentEdges.length);
-  $('#visible-edge-count').textContent = String(filteredEdges().length);
-  $('#selected-network-label').textContent = currentScenario.label;
-}
-
-function renderNodePicker() {
-  $('#node-picker').innerHTML = currentNodes.map((node) => `<button type="button" data-id="${esc(node.institution_id)}" class="node-chip ${node.institution_id === selected ? 'is-selected' : ''}" aria-pressed="${node.institution_id === selected}"><span>${node.rank === null ? '—' : String(node.rank).padStart(2, '0')}</span>${esc(node.institution_name.replace(' (DEMO)', ''))}</button>`).join('');
-  $('#node-picker').querySelectorAll('button').forEach((button) => button.addEventListener('click', () => selectNode(button.dataset.id)));
-}
-
-function renderEdgeList(edges) {
-  const currentById = nodesByCurrentId();
-  const directed = edgesForInstitution(edges, selected);
-  const incoming = directed.incoming.sort((a, b) => b.visible_weight - a.visible_weight);
-  const outgoing = directed.outgoing.sort((a, b) => b.visible_weight - a.visible_weight);
-  const items = [...incoming.map((edge) => ({ label: `Hired by ${currentById.get(edge.source)?.institution_name ?? 'unknown institution'}`, edge, direction: 'in' })), ...outgoing.map((edge) => ({ label: `Trained talent hired at ${currentById.get(edge.target)?.institution_name ?? 'unknown institution'}`, edge, direction: 'out' }))];
-  $('#detail-links').innerHTML = items.map(({ label, edge, direction }) => `<li><span class="edge-direction ${direction}" aria-label="${direction === 'in' ? 'Incoming' : 'Outgoing'}">${direction === 'in' ? '←' : '→'}</span><span>${esc(label)}<small>${esc($('#stage-filter').value === 'all' ? Object.keys(edge.stages).join(', ') : $('#stage-filter').value)}</small></span><strong>${edge.visible_weight.toFixed(2)}</strong></li>`).join('') || '<li class="no-links">No visible links for this selection. Adjust the stage or flow threshold.</li>';
-}
-
-function updateEdges() {
-  const visibleEdges = filteredEdges();
-  const visibleKeys = new Set(visibleEdges.map((edge) => `${edge.source}|${edge.target}`));
-  edgeObjects.forEach(({ edge, line, head }) => {
-    const visible = visibleKeys.has(`${edge.source}|${edge.target}`);
-    line.visible = visible; head.visible = visible;
-    if (visible) {
-      const edgeData = visibleEdges.find((item) => item.source === edge.source && item.target === edge.target);
-      line.material.opacity = Math.min(0.9, 0.35 + (edgeData?.visible_weight ?? 0) * 0.045);
-    }
-  });
-  $('#flow-value').textContent = Number($('#flow-filter').value).toFixed(1);
-  $('#visible-edge-count').textContent = String(visibleEdges.length);
-  if (selected) renderEdgeList(visibleEdges);
-}
-
-function selectNode(id) {
-  const currentById = nodesByCurrentId();
-  if (!id || !currentById.has(id)) return;
-  selected = id;
-  const node = currentById.get(id);
-  $('#detail-name').textContent = node.institution_name;
-  $('#detail-index').textContent = `RANK / ${node.rank === null ? '—' : String(node.rank).padStart(2, '0')}`;
-  $('#selected-network-label').textContent = node.institution_name.replace(' (DEMO)', '');
-  $('#detail-copy').textContent = `${node.status === 'ranked' ? `Scenario position ${node.rank}${currentNodes.filter((item) => item.rank === node.rank).length > 1 ? ' (tied)' : ''}. ` : 'Not ranked in this scenario. '}${node.coverage.event_count} constructed events are visible in this fixture. This is not real-world evidence.`;
-  $('#detail-awards').textContent = node.award_categories ? `Separate award signal · ${Object.entries(node.award_categories).map(([category, score]) => `${category.replaceAll('_', ' ')} ${score.toFixed(2)}`).join(' · ') || 'none in this fixture'}` : `Not-ranked reasons · ${(node.unranked_reasons ?? []).map((reason) => reason.replaceAll('_', ' ')).join(' · ') || 'not eligible'}`;
-  renderEdgeList(filteredEdges()); renderNodePicker(); renderTable();
-}
-
-function applyScenario(scenarioId) {
-  currentScenario = scenarioData.scenarios.find((scenario) => scenario.id === scenarioId) ?? scenarioData.scenarios[0];
-  currentNodes = currentScenario.result.nodes;
-  currentEdges = currentScenario.result.edges;
-  selected = currentNodes.some((node) => node.institution_id === selected) ? selected : currentNodes[0]?.institution_id;
-  const scenarioNodes = nodesByCurrentId();
-  for (const [id, object] of nodeObjects) {
-    const node = scenarioNodes.get(id);
-    object.visible = Boolean(node);
-    const label = labelObjects.get(id);
-    if (label) label.visible = Boolean(node);
-    if (node) object.material.color.set(nodeColor(node.status));
+async function loadRanking() {
+  try {
+    const snapshotUrl = `${import.meta.env.BASE_URL}data/local/us-academia-network.json`;
+    const response = await fetch(snapshotUrl, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`snapshot request returned HTTP ${response.status}`);
+    const bytes = await response.arrayBuffer();
+    const manifestResponse = await fetch(`${snapshotUrl}.manifest.json`, { cache: 'no-store' });
+    if (!manifestResponse.ok) throw new Error(`snapshot manifest request returned HTTP ${manifestResponse.status}`);
+    const manifest = await manifestResponse.json();
+    await verifySnapshotBytes(bytes, manifest);
+    snapshot = validateScoreSnapshot(JSON.parse(new TextDecoder().decode(bytes)));
+    if (snapshot.snapshot_revision !== manifest.snapshot_revision) throw new Error(`Snapshot ${snapshot.snapshot_revision} manifest mismatch: snapshot_revision`);
+    records = snapshot.nodes;
+    $('#node-count').textContent = snapshot.algorithm.nodes.toLocaleString('en');
+    $('#edge-count').textContent = snapshot.algorithm.edges.toLocaleString('en');
+    $('#scope-notice').textContent = `US employing institutions, ${snapshot.scope.employment_sample_start}–${snapshot.scope.employment_sample_end}; doctorate only. The score uses ${snapshot.algorithm.within_ranked_network_edges.toLocaleString('en')} internal network edges. ${snapshot.algorithm.external_doctoral_origin_edges.toLocaleString('en')} external doctoral-origin edges (${snapshot.algorithm.external_doctoral_origin_count.toLocaleString('en')} source records) are excluded from PageRank.`;
+    $('#directory-status').textContent = `${snapshot.algorithm.nodes.toLocaleString('en')} real institutions · ${snapshot.algorithm.edges.toLocaleString('en')} observed directed relations · PageRank converged in ${snapshot.algorithm.iterations} iterations.`;
+    const inputDigests = Object.entries(snapshot.input_sha256).map(([name, digest]) => `${name} ${digest}`).join(' · ');
+    $('#source-status').textContent = `Revision ${snapshot.snapshot_revision} · pinned source commit ${snapshot.source.commit.slice(0, 12)} · input SHA-256 ${inputDigests} · ${snapshot.publication_status}.`;
+    const boundary = snapshot.boundary_sensitivity;
+    const comparison = boundary.rank_comparison_among_employer_nodes;
+    $('#boundary-status').textContent = `Boundary sensitivity: Top 10 overlap ${comparison.top_10.overlap_count}/10, Top 25 ${comparison.top_25.overlap_count}/25, Top 50 ${comparison.top_50.overlap_count}/50 after adding ${boundary.all_observed_origins_as_nodes.external_origin_nodes.toLocaleString('en')} external doctoral-origin nodes. Employer rank shifts: median ${comparison.rank_shift_abs_median}, 95th percentile ${comparison.rank_shift_abs_p95}, maximum ${comparison.rank_shift_abs_max}. Raw scores are not directly comparable across node universes.`;
+    renderDirectory();
+  } catch (error) {
+    setLoadFailure(error);
   }
-  $('#scenario-explainer').innerHTML = `<span class="scenario-kicker">${esc(currentScenario.label.toUpperCase())}</span><span>${esc(currentScenario.description)}</span><span class="scenario-disclaimer">Synthetic teaching scenario</span>`;
-  updateSliderRange(); renderTable(); updateMetrics(); renderNodePicker(); selectNode(selected);
-  edgeObjects.forEach(({ line, head }) => { line.visible = false; head.visible = false; });
-  if (scene) rebuildEdges();
 }
 
-$('#search').addEventListener('input', renderTable);
-$('#region-filter').addEventListener('change', renderTable);
-$('#sort-filter').addEventListener('change', renderTable);
-$('#scenario-filter').addEventListener('change', (event) => applyScenario(event.target.value));
-$('#stage-filter').addEventListener('change', () => { updateSliderRange(); updateEdges(); renderEdgeList(filteredEdges()); });
-$('#flow-filter').addEventListener('input', updateEdges);
-
-const container = $('#network-canvas');
-let renderer;
-let scene;
-let camera;
-let raycaster;
-let pointer;
-let hovered = null;
-let dragging = false;
-let previous = { x: 0, y: 0 };
-let rotation = { x: 0, y: 0 };
-const nodeIds = [...nodesById.keys()];
-nodeIds.forEach((id, index) => {
-  const angle = (Math.PI * 2 * index) / nodeIds.length - Math.PI / 2;
-  positions.set(id, new THREE.Vector3(Math.cos(angle) * 3.2, (index % 2 ? 0.65 : -0.45), Math.sin(angle) * 2.4));
-});
-
-function createLabel(text) {
-  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 88;
-  const context = canvas.getContext('2d'); context.fillStyle = '#f7f3e9'; context.font = '600 25px Arial'; context.textAlign = 'center'; context.fillText(text, 256, 52, 490);
-  const texture = new THREE.CanvasTexture(canvas);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false })); sprite.scale.set(2.15, 0.38, 1); return sprite;
-}
-
-function rebuildEdges() {
-  const scenarioNodes = nodesByCurrentId();
-  for (const { line, head } of edgeObjects) { scene.remove(line, head); line.geometry.dispose(); line.material.dispose(); head.geometry.dispose(); head.material.dispose(); }
-  edgeObjects = currentEdges.map((edge) => {
-    if (!scenarioNodes.has(edge.source) || !scenarioNodes.has(edge.target)) return null;
-    const origin = positions.get(edge.source); const destination = positions.get(edge.target);
-    if (!origin || !destination) return null;
-    const direction = destination.clone().sub(origin).normalize();
-    const start = origin.clone().addScaledVector(direction, 0.32); const end = destination.clone().addScaledVector(direction, -0.35);
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([start, end]), new THREE.LineBasicMaterial({ color: '#d7896b', transparent: true, opacity: 0.7 })); scene.add(line);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.22, 10), new THREE.MeshBasicMaterial({ color: '#e0a081' })); head.position.copy(end); head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction); scene.add(head);
-    return { edge, line, head };
-  }).filter(Boolean);
-  updateEdges();
-}
-
-function initializeScene() {
-  try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
-  catch { container.innerHTML = '<div class="webgl-fallback"><strong>3D view unavailable</strong><span>Use the institution list and relationship details to explore the same data.</span></div>'; return; }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(container.clientWidth, container.clientHeight); renderer.outputColorSpace = THREE.SRGBColorSpace; container.appendChild(renderer.domElement);
-  scene = new THREE.Scene(); scene.background = new THREE.Color('#18312f');
-  camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 100); camera.position.set(0, 3.2, 8.7);
-  scene.add(new THREE.HemisphereLight(0xe2f2e9, 0x203c38, 2.1)); const light = new THREE.DirectionalLight(0xffffff, 1.2); light.position.set(-3, 5, 5); scene.add(light);
-  raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-  for (const node of data.nodes) {
-    const position = positions.get(node.institution_id); const geometry = new THREE.SphereGeometry(0.2, 22, 16);
-    const material = new THREE.MeshStandardMaterial({ color: nodeColor(node.status), roughness: 0.45, metalness: 0.08 });
-    const mesh = new THREE.Mesh(geometry, material); mesh.position.copy(position); mesh.userData.id = node.institution_id; scene.add(mesh); nodeObjects.set(node.institution_id, mesh);
-    const label = createLabel(node.institution_name.replace(' (DEMO)', '')); label.position.copy(position).add(new THREE.Vector3(0, 0.45, 0)); scene.add(label); labelObjects.set(node.institution_id, label);
-  }
-  rebuildEdges();
-  renderer.domElement.addEventListener('pointerdown', (event) => { dragging = true; previous = { x: event.clientX, y: event.clientY }; renderer.domElement.setPointerCapture(event.pointerId); });
-  renderer.domElement.addEventListener('pointerup', (event) => { dragging = false; if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId); });
-  renderer.domElement.addEventListener('pointermove', (event) => {
-    const rect = renderer.domElement.getBoundingClientRect(); pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    if (dragging) { rotation.y += (event.clientX - previous.x) * 0.007; rotation.x = Math.max(-0.65, Math.min(0.65, rotation.x + (event.clientY - previous.y) * 0.004)); previous = { x: event.clientX, y: event.clientY }; }
-    raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects([...nodeObjects.values()].filter((object) => object.visible))[0]?.object ?? null; hovered = hit?.userData.id ?? null; renderer.domElement.style.cursor = hit ? 'pointer' : dragging ? 'grabbing' : 'grab';
+for (const event of ['input', 'change']) {
+  $('#directory-search').addEventListener(event, () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => { page = 0; renderDirectory(); }, 80);
   });
-  renderer.domElement.addEventListener('click', () => { if (hovered) selectNode(hovered); });
-  renderer.domElement.addEventListener('wheel', (event) => { camera.position.z = Math.max(5, Math.min(13, camera.position.z + event.deltaY * 0.008)); }, { passive: true });
-  const resize = new ResizeObserver(() => { if (!renderer || !container.clientWidth || !container.clientHeight) return; renderer.setSize(container.clientWidth, container.clientHeight); camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); }); resize.observe(container);
-  const animate = () => { requestAnimationFrame(animate); scene.rotation.y += (rotation.y - scene.rotation.y) * 0.08; scene.rotation.x += (rotation.x - scene.rotation.x) * 0.08; for (const [id, object] of nodeObjects) object.scale.setScalar(id === selected || id === hovered ? 1.22 : 1); renderer.render(scene, camera); }; animate();
 }
+$('#directory-role').addEventListener('change', () => { page = 0; renderDirectory(); });
+$('#directory-sort').addEventListener('change', () => { page = 0; renderDirectory(); });
+$('#directory-prev').addEventListener('click', () => { page = Math.max(0, page - 1); renderDirectory(); });
+$('#directory-next').addEventListener('click', () => { page += 1; renderDirectory(); });
 
-updateSliderRange(); renderTable(); updateMetrics(); initializeScene(); applyScenario(currentScenario.id);
+loadRanking();

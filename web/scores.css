@@ -1,0 +1,8 @@
+.real-badge{display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid #b7d0c1;border-radius:3px;color:#3b765d;background:#eff6f0;font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.real-badge span{width:7px;height:7px;border-radius:50%;background:#43805f;display:inline-block}
+.source-status{margin-top:22px;padding:12px 14px;border:1px solid #e1e0d8;background:#f5f4ee;color:#6c776e;font:10px/1.7 var(--mono);overflow-wrap:anywhere}
+.score-table{min-width:900px}
+.score-table td:nth-child(2) strong{color:var(--ink);font-size:11px}
+.score-table td:nth-child(2) small{display:block;margin-top:4px;color:#96988e;font:9px var(--mono);font-weight:400}
+.score-table .rank-cell{width:72px}
+@media(max-width:700px){.real-badge{max-width:112px;padding:6px 7px;font-size:8px;line-height:1.35}.score-table{min-width:800px}.source-status{font-size:9px}}

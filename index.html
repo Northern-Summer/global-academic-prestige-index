@@ -3,66 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="An evidence-bounded academic talent-flow network measurement prototype." />
+    <meta name="description" content="Real, reproducible academic doctoral hiring network scores computed from a published US faculty hiring dataset." />
     <meta name="theme-color" content="#f4f2eb" />
-    <title>GAPI — Academic Talent Flow</title>
+    <title>GAPI — Real Faculty Hiring Network Scores</title>
   </head>
   <body>
     <div id="app">
       <header class="topbar shell" id="top">
-        <a class="brand" href="#top" aria-label="GAPI home"><span class="brand-mark">G</span><span>GAPI<span class="brand-sub">RESEARCH INDEX</span></span></a>
-        <nav aria-label="Main navigation"><a href="#rankings">Rankings</a><a href="#network">Network</a><a href="#method">Method</a></nav>
-        <span class="demo-badge"><span aria-hidden="true"></span>Synthetic demo</span>
+        <a class="brand" href="#top" aria-label="GAPI home"><span class="brand-mark">G</span><span>GAPI<span class="brand-sub">ACADEMIC MOBILITY</span></span></a>
+        <nav aria-label="Main navigation"><a href="#rankings">Scores</a><a href="#method">Method</a><a href="#source">Source</a></nav>
+        <span class="real-badge"><span aria-hidden="true"></span>Real research data</span>
       </header>
       <main class="shell">
         <section class="intro" aria-labelledby="page-title">
-          <div class="intro-copy"><p class="eyebrow"><span class="eyebrow-mark"></span>ACADEMIC MOBILITY · RESEARCH PROTOTYPE</p><h1 id="page-title">Where academic<br /><em>talent travels.</em></h1><p class="lede">A transparent view of constructed training-to-employment links—and how different assumptions change the network signal.</p></div>
-          <aside class="intro-note"><span class="note-index">READ THIS FIRST</span><p>This is an <strong>algorithm teaching fixture</strong>, not measured university data. Every institution and relationship is synthetic.</p><a href="#method">What the score can tell you <span aria-hidden="true">↘</span></a><div class="note-stamp">GAPI<br />0.1</div></aside>
+          <div class="intro-copy"><p class="eyebrow"><span class="eyebrow-mark"></span>US FACULTY HIRING SAMPLE PREVIEW</p><h1 id="page-title">Academic influence,<br /><em>measured in movement.</em></h1><p class="lede">PageRank scores computed from a published, aggregated U.S. faculty hiring study. The rank network is limited to U.S. employing institutions; it is not a global university ranking.</p></div>
+          <aside class="intro-note"><span class="note-index">SCOPE</span><p id="scope-notice">Loading the pinned research snapshot and its coverage boundaries.</p><a href="#method">How scores work <span aria-hidden="true">↘</span></a><div class="note-stamp">GAPI</div></aside>
         </section>
-        <section class="metric-strip" aria-label="Dataset summary">
-          <div class="metric"><span class="metric-label">INSTITUTIONS IN FIXTURE</span><strong id="institution-count">—</strong></div>
-          <div class="metric"><span class="metric-label">CONSTRUCTED LINKS</span><strong id="link-count">—</strong></div>
-          <div class="metric"><span class="metric-label">ELIGIBLE IN SCENARIO</span><strong id="ranked-count">—</strong></div>
-          <div class="metric metric-date"><span class="metric-label">REFERENCE MODEL</span><strong>PageRank <small>v1</small></strong></div>
+        <section class="metric-strip" aria-label="Real dataset summary">
+          <div class="metric"><span class="metric-label">INSTITUTION NODES</span><strong id="node-count">—</strong></div>
+          <div class="metric"><span class="metric-label">OBSERVED RELATIONS</span><strong id="edge-count">—</strong></div>
+          <div class="metric"><span class="metric-label">EMPLOYMENT SAMPLE</span><strong>2011–2020</strong></div>
+          <div class="metric metric-date"><span class="metric-label">SCORE</span><strong>PageRank</strong></div>
         </section>
-
-        <section class="workspace panel" id="rankings" aria-labelledby="ranking-title">
-          <div class="section-heading">
-            <div><p class="eyebrow">01 / COMPARE</p><h2 id="ranking-title">A ranking is a set of choices.</h2><p class="section-subtitle">Explore how the constructed network and award settings change the displayed order.</p></div>
-            <div class="table-tools">
-              <label class="filter-label scenario-label">Scenario<select id="scenario-filter" aria-label="Choose a synthetic scenario"></select></label>
-              <label class="search"><span>Find an institution</span><input id="search" type="search" placeholder="Name or region" autocomplete="off" /></label>
-              <label class="filter-label"><span>Region</span><select id="region-filter"><option value="all">All regions</option></select></label>
-              <label class="filter-label"><span>Sort by</span><select id="sort-filter"><option value="rank">Composite score</option><option value="network">Network score</option><option value="awards">Award score</option><option value="name">Institution name</option></select></label>
-            </div>
-          </div>
-          <div class="scenario-explainer" id="scenario-explainer" role="status"></div>
-          <div class="table-wrap" tabindex="0" aria-label="Scrollable institution ranking table"><table><thead><tr><th scope="col">Place</th><th scope="col">Institution</th><th scope="col">Region</th><th scope="col">Network</th><th scope="col">Awards</th><th scope="col">Composite</th><th scope="col">Coverage</th></tr></thead><tbody id="ranking-rows"></tbody></table></div>
-          <p class="table-note"><span class="status-dot"></span> Scores and ranks are scenario outputs. A missing rank means the example does not meet the configured data threshold; it does not mean low academic quality.</p>
+        <section class="directory-section panel" id="rankings" aria-labelledby="directory-title">
+          <div class="section-heading"><div><p class="eyebrow">01 / REAL SAMPLE SCORES</p><h2 id="directory-title">Doctoral hiring network</h2><p class="section-subtitle">Ranked by PageRank over employer → doctoral institution edges within the 368 U.S. employer nodes. Counts include source aggregate records, not unique people; the smaller subcount is the portion entering this ranking network.</p></div><a class="method-link" href="https://github.com/LarremoreLab/us-faculty-hiring-networks" target="_blank" rel="noreferrer">Research data source <span aria-hidden="true">↗</span></a></div>
+          <div class="directory-status" id="directory-status" role="status">Loading the real, locally computed ranking…</div>
+          <div class="table-tools directory-tools"><label class="search"><span>Search institutions</span><input id="directory-search" type="search" placeholder="Institution name" autocomplete="off" /></label><label class="filter-label"><span>Directory role</span><select id="directory-role"><option value="all">All institutions</option><option value="employer">US faculty employer</option><option value="doctoral_origin">Doctoral origin</option></select></label><label class="filter-label"><span>Sort by</span><select id="directory-sort"><option value="score">GAPI score</option><option value="name">Institution name</option><option value="placements">Source-recorded doctoral-origin count</option><option value="hires">Source-recorded faculty count</option></select></label></div>
+          <div class="table-wrap" tabindex="0" aria-label="Real academic hiring score table"><table class="directory-table score-table"><thead><tr><th scope="col">Rank</th><th scope="col">Institution</th><th scope="col">GAPI network score</th><th scope="col">Source-recorded doctoral-origin count</th><th scope="col">Source-recorded faculty count</th><th scope="col">Directory role / excluded edges</th></tr></thead><tbody id="directory-rows"><tr><td class="empty-state" colspan="6">Loading real scores…</td></tr></tbody></table></div>
+          <div class="directory-pagination"><span id="directory-page-status">—</span><div><button id="directory-prev" type="button" aria-label="Previous ranking page" disabled>←</button><button id="directory-next" type="button" aria-label="Next ranking page" disabled>→</button></div></div>
+          <p class="table-note"><span class="status-dot" aria-hidden="true"></span><span>This is a computed score over the available sample, not a complete global ranking, employment probability, or causal measure.</span></p>
         </section>
-
-        <section class="network-section panel" id="network" aria-labelledby="network-title">
-          <div class="section-heading network-heading"><div><p class="eyebrow">02 / TRACE THE SIGNAL</p><h2 id="network-title">Hiring sends a signal upstream.</h2><p class="section-subtitle">Each arrow runs from an employer to a training institution.</p></div>
-            <div class="controls">
-              <label class="filter-label"><span>Training stage</span><select id="stage-filter"><option value="all">All stages</option><option value="doctorate">Doctorate</option><option value="master">Master</option><option value="bachelor">Bachelor</option><option value="postdoc">Postdoc training</option></select></label>
-              <label class="range-control" for="flow-filter"><span>Minimum observed weight <strong id="flow-value">0</strong></span><input id="flow-filter" type="range" min="0" max="1" value="0" step="0.1" /><small id="flow-range-note">Showing all positive flows</small></label>
-            </div>
-          </div>
-          <div class="network-summary"><span id="visible-edge-count">—</span> flows visible <span class="summary-divider">·</span> <span id="selected-network-label">Select an institution to inspect its links</span></div>
-          <div class="network-layout"><div class="network-canvas" id="network-canvas" role="region" aria-label="Three-dimensional synthetic network. Arrowheads point from employers to training institutions. Teal nodes are ranked in the current scenario; terracotta nodes are not ranked. Node size does not represent a score. Use the institution list to inspect nodes."></div>
-            <aside class="network-detail" aria-live="polite"><div class="detail-topline"><p class="eyebrow">SELECTED INSTITUTION</p><span class="detail-index" id="detail-index">RANK / —</span></div><h3 id="detail-name">Select a node</h3><p id="detail-copy">Choose a node or institution below. Relationships are synthetic and describe no real person.</p><p id="detail-awards" class="award-breakdown"></p><div class="legend" aria-label="Node color legend"><span><i class="legend-node ranked" aria-hidden="true"></i>Ranked in scenario</span><span><i class="legend-node unranked" aria-hidden="true"></i>Not ranked</span></div><ul id="detail-links" class="link-list"></ul>
-              <div class="node-picker-wrap"><span class="node-picker-label">CHOOSE A NODE</span><div id="node-picker" class="node-picker"></div></div>
-            </aside>
-          </div>
-          <p class="network-caption"><span>EDGE ENCODING</span><span>Arrowhead: employer <b>→</b> training institution</span><span class="caption-note">Opacity reflects the stage-weighted synthetic link count; no time or causal animation is shown.</span></p>
-        </section>
-
-        <section class="method-section panel" id="method" aria-labelledby="method-title"><div class="section-heading"><div><p class="eyebrow">03 / INTERPRETATION</p><h2 id="method-title">What the score means—and what it doesn’t.</h2></div><a class="method-link" href="./docs/METHODOLOGY.md">Full methodology <span aria-hidden="true">↗</span></a></div>
-          <div class="method-grid"><article><span class="method-number">01</span><h3>Observed links</h3><p>The model connects a training institution with an employer where a person later held an academic or research role. This demo uses constructed events only.</p></article><article><span class="method-number">02</span><h3>Network propagation</h3><p>PageRank propagates influence from employers to training institutions. Scores depend on the configured graph and parameters; they are not causal estimates.</p></article><article><span class="method-number">03</span><h3>Visible uncertainty</h3><p>Missing evidence makes an institution unranked in this fixture. Coverage thresholds help prevent false precision, but do not remove selection bias.</p></article></div>
-          <div class="method-footer"><span>REFERENCE SETTINGS</span><code>α 0.85 · doctorate 1.00 · master 0.35 · bachelor 0.20 · postdoc 0.60</code><a href="./docs/BIAS_AND_LIMITATIONS.md">Biases &amp; limitations <span aria-hidden="true">↗</span></a></div>
+        <section class="method-section panel" id="method" aria-labelledby="method-title">
+          <div class="section-heading"><div><p class="eyebrow">02 / METHOD &amp; COVERAGE</p><h2 id="method-title">Read the score in context.</h2></div><a class="method-link" href="./docs/METHODOLOGY.md">Full methodology <span aria-hidden="true">↗</span></a></div>
+          <div class="method-grid"><article><span class="method-number">01</span><h3>What is measured</h3><p>How often institutions in the research sample hire tenure-track faculty whose recorded doctorate came from each origin institution, with influence propagated through PageRank.</p></article><article><span class="method-number">02</span><h3>Sample boundary</h3><p>US faculty hiring relationships from 2011–2020 across academic fields. Doctoral origins can include institutions outside the United States. This is not a census of global academic hiring.</p></article><article><span class="method-number">03</span><h3>Score limits</h3><p>The source provides aggregated counts, not individual career histories or graduate denominators. Scores are not placement probabilities, teaching quality, or causal estimates.</p></article></div>
+          <div class="source-status" id="source-status">Source metadata will appear after the real score snapshot loads.</div>
+          <div class="source-status" id="boundary-status">Network-boundary sensitivity will appear after the real score snapshot loads.</div>
         </section>
       </main>
-      <footer class="shell"><span>GAPI · RESEARCH PROTOTYPE</span><span>Synthetic examples only · no global ranking published</span><a href="./docs/DATA_SOURCES.md">Data sources &amp; licensing</a><a href="./docs/RED_TEAM_REPORT.md">Review status</a></footer>
+      <footer class="shell" id="source"><span>GAPI · REAL COMPUTED SAMPLE</span><span>No synthetic scores published</span><a href="./docs/DATA_SOURCES.md">Sources &amp; rights</a><a href="./docs/RED_TEAM_REPORT.md">Review status</a></footer>
     </div>
     <script type="module" src="/web/main.js"></script>
   </body>
