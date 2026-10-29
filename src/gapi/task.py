@@ -10,6 +10,8 @@ from typing import Any
 
 from .storage import project_root, require_external_cache
 
+_WINDOWS_MEMORY_API = None
+
 
 def canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -88,15 +90,19 @@ class Task:
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
-            class Counters(ctypes.Structure):
-                _fields_ = [("cb",wintypes.DWORD),("PageFaultCount",wintypes.DWORD)] + [(n,ctypes.c_size_t) for n in ("PeakWorkingSetSize","WorkingSetSize","QuotaPeakPagedPoolUsage","QuotaPagedPoolUsage","QuotaPeakNonPagedPoolUsage","QuotaNonPagedPoolUsage","PagefileUsage","PeakPagefileUsage")]
+            global _WINDOWS_MEMORY_API
+            if _WINDOWS_MEMORY_API is None:
+                class Counters(ctypes.Structure):
+                    _fields_ = [("cb",wintypes.DWORD),("PageFaultCount",wintypes.DWORD)] + [(n,ctypes.c_size_t) for n in ("PeakWorkingSetSize","WorkingSetSize","QuotaPeakPagedPoolUsage","QuotaPagedPoolUsage","QuotaPeakNonPagedPoolUsage","QuotaNonPagedPoolUsage","PagefileUsage","PeakPagefileUsage")]
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.GetCurrentProcess.restype = wintypes.HANDLE
+                measure = ctypes.WinDLL("psapi").GetProcessMemoryInfo
+                measure.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+                measure.restype = wintypes.BOOL
+                _WINDOWS_MEMORY_API = (Counters,kernel,measure)
+            Counters,kernel,measure = _WINDOWS_MEMORY_API
             c = Counters()
             c.cb = ctypes.sizeof(c)
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.GetCurrentProcess.restype = wintypes.HANDLE
-            measure = ctypes.WinDLL("psapi").GetProcessMemoryInfo
-            measure.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
-            measure.restype = wintypes.BOOL
             if not measure(kernel.GetCurrentProcess(),ctypes.byref(c),ctypes.sizeof(c)):
                 raise RuntimeError("memory sampling unavailable; expansion stopped")
             if c.WorkingSetSize > self.config["memory_bytes"]:

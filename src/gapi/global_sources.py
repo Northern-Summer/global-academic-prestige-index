@@ -66,12 +66,16 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
     store.start(source)
     failures = []
     started = time.monotonic()
+    previous_bytes=store.db.execute('SELECT bytes FROM runs WHERE source=?',(source,)).fetchone()[0]
+    start_bytes=getattr(http,'bytes_received',0)
     for qid in qids:
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
             break
         if not re.fullmatch(r"Q[1-9]\d*", qid):
             raise ValueError("invalid Wikidata ID")
+        if store.db.execute('SELECT 1 FROM members WHERE source=? AND locator LIKE ? LIMIT 1',(source,qid+'@%')).fetchone():
+            continue
         url = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
         try:
             data, checksum = http.json(url)
@@ -92,7 +96,8 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
         except (KeyError, ValueError, OSError, RuntimeError) as exc:
             store.failure(source,qid,f"{type(exc).__name__}: {exc}")
             failures.append({"entity": qid, "reason": f"{type(exc).__name__}: {exc}"[:256]})
-    store.status(source, "partial", detail=json.dumps({"requested": len(qids), "failures": failures[:20]}))
+    store.status(source, "partial", byte_count=previous_bytes+getattr(http,'bytes_received',0)-start_bytes,
+                 detail=json.dumps({"requested": len(qids), "failures": failures[:20]}))
     return store.report()
 
 

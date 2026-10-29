@@ -23,17 +23,17 @@ unresolved external IDs remain unresolved. A discovered ambiguous ROR/Wikidata
 crosswalk (`Q1636837`) is retained rather than forced. Matching copied statements
 does not count as independently corroborated evidence.
 
-Current normalized local acquisition: **1,769 events, 386 pseudonymous person keys,
-72 observed country/territory codes**, including 612 structurally accepted observations
-and 1,157 unresolved events. These are bounded discovery selections, not representative
-samples or completed enumerations. The local view has **942 institution identifiers**
+Current normalized local acquisition: **1,835 events, 404 pseudonymous person keys,
+72 observed country/territory codes**, including 623 structurally accepted observations
+and 1,212 unresolved events. These are bounded discovery selections, not representative
+samples or completed enumerations. The local view has **968 institution identifiers**
 (including unresolved IDs which may duplicate institutions), **132 scored endpoints**
 and **97 weighted directed edges**. Forty-six committed ORCID records exercised the
 strict XML transport. Predecessor API records used bounded JSON and are not claimed
 as proof of the later SAX implementation.
 
-Source-permitted public view: **731 Wikidata career events, 186 person keys,
-450 institution identifiers, 2 qualifying directed edges, 3 scored endpoints**.
+Source-permitted public view: **797 Wikidata career events, 204 person keys,
+476 institution identifiers, 2 qualifying directed edges, 3 scored endpoints**.
 The other institution IDs have missing scores. Public data exclude restricted ORCID
 API contributions and the US study. This small score-bearing subset is disclosed;
 it is not presented as a completed worldwide ranking.
@@ -47,7 +47,7 @@ Ranges exclude prior-only scenarios and cannot quantify unknown global missingne
 
 ## Executed verification
 
-- 57 Python tests and 3 subtests passed; 13 Node tests passed. Python unittest discovery
+- 60 Python tests and 3 subtests passed; 13 Node tests passed. Python unittest discovery
   is also compatible. Regression cases cover malicious XML/tar, oversize fields/members,
   CRC/truncation/hash errors, source/member changes, replay, privacy/source filtering,
   deterministic bytes, budget refusal, process death rollback, writer recovery,

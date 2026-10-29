@@ -5,7 +5,7 @@ import hashlib
 import ipaddress
 import json
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from urllib.robotparser import RobotFileParser
@@ -38,6 +38,7 @@ class PublicHTTP:
         self.task, self.opener, self.sleep = task, opener or build_opener(PublicRedirect()).open, sleep
         self.robots = {}
         self.last_request = 0.0
+        self.bytes_received = 0
 
     def _open(self, url, accept):
         safe_url(url)
@@ -66,6 +67,10 @@ class PublicHTTP:
                 if delay > 60:
                     raise RuntimeError(f"source requested Retry-After={delay}; paused")
                 self.sleep(delay)
+            except (TimeoutError, URLError, ConnectionError):
+                if attempt == self.task.config['max_retries']:
+                    raise
+                self.sleep(2**attempt)
         raise RuntimeError("source attempts exhausted")
 
     def allowed(self, url):
@@ -120,6 +125,7 @@ class PublicHTTP:
             while chunk := response.read(min(65536, limit + 1 - size)):
                 chunks.append(chunk)
                 size += len(chunk)
+                self.bytes_received += len(chunk)
                 if size > limit:
                     raise ValueError("structured response exceeds bound")
             body = b"".join(chunks)
