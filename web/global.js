@@ -20,7 +20,7 @@ root.innerHTML = `<p class="eyebrow">GLOBAL / REAL PUBLIC OBSERVATIONS</p><h2 id
 <p>Arrows: employer → training institution. Node size: reference network score. Color: region; gray means unknown. Position is a layout, not geography or chronology. At most 500 nodes / 2,000 edges are displayed.</p>
 <div id="global-network" role="region" aria-label="Optional 3D network"></div><p id="global-edge-status" role="status"></p>
 <div class="table-wrap" tabindex="0" aria-label="Directional relationships"><table class="directory-table"><thead><tr><th>Employer →</th><th>Training institution</th><th>Stage-weighted count</th></tr></thead><tbody id="global-edges"></tbody></table></div>`;
-document.querySelector('.metric-strip').before(root);
+document.querySelector('.intro').after(root);
 const $ = selector => root.querySelector(selector);
 let data, page = 0, selected = '', dispose, networkEnabled = false, networkGeneration = 0;
 const fields = () => ({query:$('#global-search').value, country:$('#global-country').value, sort:$('#global-sort').value, scenario:$('#global-scenario').value});

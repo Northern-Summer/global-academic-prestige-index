@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS entities(
 CREATE TABLE IF NOT EXISTS discovery(
  source TEXT NOT NULL, identifier TEXT NOT NULL, query_sha256 TEXT NOT NULL,
  response_sha256 TEXT NOT NULL, PRIMARY KEY(source,identifier));
+CREATE TABLE IF NOT EXISTS discovery_pages(
+ source TEXT NOT NULL, cursor_before TEXT NOT NULL, cursor_after TEXT NOT NULL,
+ query_sha256 TEXT NOT NULL, response_sha256 TEXT NOT NULL, retrieved_at TEXT NOT NULL,
+ row_count INTEGER NOT NULL, PRIMARY KEY(source,cursor_before));
 CREATE TABLE IF NOT EXISTS institution_aliases(
  alias TEXT PRIMARY KEY, institution TEXT NOT NULL, provenance TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS failures(

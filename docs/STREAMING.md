@@ -69,6 +69,21 @@ Wikidata is CC0. Copies and mirrored declarations are not independent corroborat
 
 ## Local view and publication
 
+Discovery uses ordered live Wikidata pages, atomically committing each page's query
+hash, response hash, retrieval time, queue and last person identifier to SQLite.
+Each `--discover --resume` invocation advances one page (at most 200 people) and
+processes only unfinished members. A failed query leaves the cursor and existing
+queue intact. Multiple conflicting ORCIDs for a person are not selected. Repeated
+calls can expand beyond the initial selection; they are not a frozen dump scan:
+upstream changes behind the cursor may be missed, and query exhaustion means only
+that this live query returned no later rows. It never establishes global completeness.
+Full scans and refreshes need a new explicitly versioned source selection.
+Wikidata discovery defaults to explicitly declared university-teacher candidates;
+their occupation is never converted into a job or education fact. The optional
+`--discovery-scope degree-employer` selection has a separate cursor because its
+more expensive join may time out on the public service. ORCID discovery groups
+identifiers per person to avoid splitting a conflicting identity across pages.
+
 `rank-global` creates a compact institution-only local view in the external task
 directory. Its manifest pins the exact JSON bytes. It may contain observed scores
 but never a formal rank without the required evidence and external review. Unknown

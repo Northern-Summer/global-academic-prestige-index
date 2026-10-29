@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .career_store import CareerStore
-from .global_sources import discover_wikidata, ingest_orcid_api, ingest_wikidata
+from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
 from .orcid_stream import stream_archive
 from .source_http import PublicHTTP
 from .task import Task
@@ -25,6 +25,8 @@ def register(sub):
         if name in ("ingest-wikidata", "ingest-orcid-api"):
             parser.add_argument("--ids", nargs="*", default=[])
             parser.add_argument("--discover", action="store_true")
+            parser.add_argument("--discovery-limit", type=int, default=200)
+            parser.add_argument("--discovery-scope", choices=['academic','degree-employer'], default='academic')
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
 
@@ -66,17 +68,17 @@ def execute_task(task, args):
         elif args.command in ("ingest-wikidata", "ingest-orcid-api"):
             ids = args.ids
             if args.discover:
-                existing = [r[0] for r in store.db.execute("SELECT identifier FROM discovery WHERE source=? ORDER BY identifier",(args.command,))]
-                page = None
-                if not existing:
-                    page = discover_wikidata(http, limit=min(args.max_members or 100, 200), degree_employer=args.command == "ingest-wikidata")
-                # Compact discovery cursor/provenance; never saves fetched bodies.
-                    task.check(1024**2)
-                    ids = sorted({row["qid" if args.command == "ingest-wikidata" else "orcid"] for row in page["rows"] if row["qid" if args.command == "ingest-wikidata" else "orcid"]})
-                    with store.db:
-                        store.db.executemany("INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)",[(args.command,i,page["query_sha256"],page["response_sha256"]) for i in ids])
-                else:
-                    ids = existing
+                try:
+                    print(json.dumps(enqueue_discovery(store, http, args.command,
+                        limit=args.discovery_limit, scope=args.discovery_scope)), flush=True)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    store.failure('wikidata', 'discovery:'+args.command, str(exc))
+                    print(json.dumps({'discovery_failed': str(exc)[:256], 'continuing_committed_queue': True}), flush=True)
+                source = 'wikidata' if args.command == 'ingest-wikidata' else 'orcid-public-api'
+                ids = [r[0] for r in store.db.execute('''SELECT d.identifier FROM discovery d WHERE d.source=?
+                    AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
+                    AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) ORDER BY d.identifier LIMIT ?''',
+                    (args.command, source, args.max_members or 200))]
             if args.max_members:
                 ids = ids[:args.max_members]
             result = (ingest_wikidata if args.command == "ingest-wikidata" else ingest_orcid_api)(store, http, ids,

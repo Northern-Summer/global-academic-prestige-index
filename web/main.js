@@ -77,6 +77,7 @@ async function loadRanking() {
   }
 }
 
+if (import.meta.env.DEV) {
 for (const event of ['input', 'change']) {
   $('#directory-search').addEventListener(event, () => {
     window.clearTimeout(searchTimer);
@@ -89,3 +90,4 @@ $('#directory-prev').addEventListener('click', () => { page = Math.max(0, page -
 $('#directory-next').addEventListener('click', () => { page += 1; renderDirectory(); });
 
 loadRanking();
+}

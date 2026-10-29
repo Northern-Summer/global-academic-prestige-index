@@ -14,6 +14,13 @@ export default defineConfig({
   base,
   plugins: [{
     name: 'publish-method-docs',
+    transformIndexHtml(html, context) {
+      if (context.server) return html;
+      // The US sample is local-only; production has no route or rights to it.
+      return html.replace(/<!-- LOCAL_SAMPLE_START -->[\s\S]*?<!-- LOCAL_SAMPLE_END -->/g, '')
+        .replace('<a href="#rankings">US sample</a>', '')
+        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">PUBLIC OBSERVATION RELEASE</span><p>Only licensed institution aggregates are published. Collection, independent corroboration and external review are incomplete.</p><a href="./docs/STREAMING.md">Coverage and source boundaries ↘</a></aside>');
+    },
     configureServer(server) {
       const localScores = fileURLToPath(new URL('./data/real/us-academia-network.json', import.meta.url));
       const scoreRoutes = new Map([

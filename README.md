@@ -21,7 +21,7 @@ python -m gapi rank-global
 npm run dev
 ```
 
-Edit the task's external work location before freezing if needed. Its source lock rejects changes within the same work directory. `--resume` reuses a persisted live discovery queue; it does **not** claim complete global source enumeration. The annual 2026 ORCID summary importer is implemented separately, but download bytes and upstream checksum are currently inaccessible from this execution environment.
+Edit the task's external work location before freezing if needed. Its source lock rejects changes within the same work directory. Repeating `--discover --resume` advances an ordered live discovery page and processes unfinished queue members; it does **not** claim complete global source enumeration. The default Wikidata selection uses university-teacher candidates without converting their occupation into a job fact. The annual 2026 ORCID summary importer is implemented separately, but download bytes and upstream checksum are currently inaccessible from this execution environment.
 
 For strict streaming, failures, snapshot scope, optional DuckDB/Parquet analysis and local/public builds, follow [the streaming guide](docs/STREAMING.md).
 

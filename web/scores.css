@@ -8,7 +8,8 @@
 @media(max-width:700px){.real-badge{max-width:112px;padding:6px 7px;font-size:8px;line-height:1.35}.score-table{min-width:800px}.source-status{font-size:9px}}
 .global-panel { padding: 2rem; margin: 2rem 0; }
 .global-panel .table-tools { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; margin: 1.5rem 0; }
-.global-panel label { display: grid; gap: .4rem; }
+.global-panel label { display: grid; gap: .4rem; min-width: 0; max-width: 100%; }
+.global-panel input,.global-panel select { min-width: 0; max-width: 100%; }
 .global-panel input,.global-panel select,.global-panel button { padding: .65rem; font: inherit; }
 .institution-link { border: 0; color: #245e4f; background: transparent; cursor: pointer; text-align: left; }
 .institution-link:focus-visible { outline: 3px solid #ad623c; }

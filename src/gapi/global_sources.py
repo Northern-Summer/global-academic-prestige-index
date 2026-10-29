@@ -187,19 +187,56 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
     return store.report()
 
 
-def discover_wikidata(http, *, after="", limit=100, degree_employer=False):
-    """Keyset enumeration, never claimed as a frozen global census of people."""
+def discover_wikidata(http, *, after="", limit=100, degree_employer=False, academic=False):
+    """Ordered live keyset selection; changes upstream can still cause omissions."""
     if after and not re.fullmatch(r"Q[1-9]\d*", after):
         raise ValueError("invalid cursor")
     if not 1 <= limit <= 200:
         raise ValueError("enumeration page bound is 200")
-    if after:
-        raise ValueError("live query discovery has no stable cursor; use persisted discovery queue")
     query = ('''SELECT DISTINCT ?person WHERE { ?person p:P69 ?s; wdt:P108 ?employer .
-        ?s pq:P512 ?degree . VALUES ?degree { wd:Q752297 wd:Q849697 } }'''
-        if degree_employer else '''SELECT DISTINCT ?person ?orcid WHERE { ?person wdt:P496 ?orcid; wdt:P69 ?school; wdt:P108 ?employer }''') + f" LIMIT {limit}"
+        ?s pq:P512 ?degree . VALUES ?degree { wd:Q752297 wd:Q849697 }'''
+        if degree_employer else '''SELECT ?person (GROUP_CONCAT(DISTINCT STR(?id); separator="|") AS ?orcids) WHERE { ?person wdt:P496 ?id; wdt:P69 ?school; wdt:P108 ?employer''')
+    if academic:
+        # Candidate selection only. P106 never creates a job/degree event.
+        query = 'SELECT DISTINCT ?person WHERE { ?person wdt:P106 wd:Q1622272'
+    if after:
+        query += f' FILTER(STR(?person) > "http://www.wikidata.org/entity/{after}")'
+    query += ' }' + ('' if degree_employer or academic else ' GROUP BY ?person') + ' ORDER BY STR(?person)' + f' LIMIT {limit}'
     data, checksum = http.json("https://query.wikidata.org/sparql?format=json&query=" + quote(query))
     rows = data["results"]["bindings"]
-    return {"query_sha256": digest(query), "response_sha256": checksum,
-            "rows": [{"qid": r["person"]["value"].rsplit("/", 1)[-1], "orcid": r.get("orcid",{}).get("value")} for r in rows],
-            "enumeration": "bounded-live-query-selection-not-global-enumeration"}
+    result = [{"qid": r["person"]["value"].rsplit("/", 1)[-1],
+               "orcid": r.get("orcids", {}).get("value") if '|' not in r.get("orcids", {}).get("value", '') else None} for r in rows]
+    if len(result) > limit or any(not re.fullmatch(r"Q[1-9]\d*", r['qid']) or after and r['qid'] <= after for r in result):
+        raise ValueError('invalid or non-advancing discovery page')
+    if [r['qid'] for r in result] != sorted(r['qid'] for r in result):
+        raise ValueError('discovery response is not ordered')
+    return {"query_sha256": digest(query), "response_sha256": checksum, "rows": result,
+            "enumeration": "ordered-live-selection-not-frozen-global-enumeration"}
+
+
+def enqueue_discovery(store, http, command, *, limit=200, scope='academic'):
+    """Atomically persist a page and its queue before advancing its live cursor."""
+    if command not in ('ingest-wikidata', 'ingest-orcid-api'):
+        raise ValueError('unsupported discovery source')
+    if scope not in ('academic', 'degree-employer'):
+        raise ValueError('unsupported discovery scope')
+    page_source = command+':'+scope if command == 'ingest-wikidata' else command+':orcid'
+    previous = store.db.execute('SELECT cursor_after,row_count FROM discovery_pages WHERE source=? ORDER BY rowid DESC LIMIT 1', (page_source,)).fetchone()
+    if previous and previous[1] == 0:
+        return {'status': 'live-query-exhausted-not-global-complete', 'cursor': previous[0]}
+    cursor = previous[0] if previous else ''
+    page = discover_wikidata(http, after=cursor, limit=limit, degree_employer=command == 'ingest-wikidata',
+        academic=command == 'ingest-wikidata' and scope == 'academic')
+    ids = set()
+    for row in page['rows']:
+        value = row['qid'] if command == 'ingest-wikidata' else row['orcid']
+        if value and (command == 'ingest-wikidata' or re.fullmatch(ORCID, value)):
+            ids.add(value)
+    end = page['rows'][-1]['qid'] if page['rows'] else cursor
+    store.task.check(1024**2)
+    with store.db:
+        store.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
+            [(command, identifier, page['query_sha256'], page['response_sha256']) for identifier in sorted(ids)])
+        store.db.execute('INSERT INTO discovery_pages VALUES(?,?,?,?,?,?,?)',
+            (page_source, cursor, end, page['query_sha256'], page['response_sha256'], datetime.now(timezone.utc).isoformat(), len(page['rows'])))
+    return {'status': page['enumeration'], 'cursor': end, 'rows': len(page['rows']), 'queued': len(ids)}
