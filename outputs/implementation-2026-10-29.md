@@ -33,7 +33,7 @@ strict XML transport. Predecessor API records used bounded JSON and are not clai
 as proof of the later SAX implementation.
 
 Source-permitted public view: **797 Wikidata career events, 204 person keys,
-476 institution identifiers, 2 qualifying directed edges, 3 scored endpoints**.
+478 institution identifiers, 2 qualifying directed edges, 3 scored endpoints**.
 The other institution IDs have missing scores. Public data exclude restricted ORCID
 API contributions and the US study. This small score-bearing subset is disclosed;
 it is not presented as a completed worldwide ranking.
