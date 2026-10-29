@@ -1,0 +1,16 @@
+{
+  "schema_version": "gapi-orcid-archive/v1",
+  "status": "metadata-only; archive not downloaded or activated",
+  "active_ingestion_route": "finite-response-public-apis",
+  "source": "orcid-2026-summary",
+  "version": "10.23640/07243.34697766.v1",
+  "filename": "ORCID_2026_10_summaries.tar.gz",
+  "file_id": 70342863,
+  "url": "https://ndownloader.figshare.com/files/70342863",
+  "size_bytes": 57290954546,
+  "checksum": "md5:a55a16fe0b292bda03cc6016546c8984",
+  "license": "CC0-1.0",
+  "metadata_url": "https://api.figshare.com/v2/articles/34697766/versions/1",
+  "metadata_observed_at": "2026-10-29",
+  "metadata_last_modified": "2026-10-27T19:39:02Z"
+}

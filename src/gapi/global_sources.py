@@ -122,6 +122,14 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
                     store.event(event)
                 # Revision, references and member hash remain internal.
                 store.finish_member(source, locator, checksum)
+                # Follow a single explicit stable ID into a genuinely separate
+                # public source. Discovery remains a lead, not corroboration.
+                ids = {wd_value(claim['mainsnak']) for claim in entity.get('claims',{}).get('P496',[])
+                       if claim.get('rank')!='deprecated' and valid_orcid(wd_value(claim['mainsnak']))}
+                if len(ids)==1:
+                    query_hash=digest({'rule':'wikidata-explicit-orcid-followup/1','locator':locator})
+                    store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
+                        ('ingest-orcid-api',next(iter(ids)),query_hash,checksum))
             if progress:
                 progress({"source":source,"committed_entity":qid,"events":store.db.execute("SELECT count(*) FROM events").fetchone()[0]})
         except (KeyError, ValueError, OSError, RuntimeError) as exc:

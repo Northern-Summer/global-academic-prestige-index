@@ -72,3 +72,24 @@ formal rank, and conditional alpha/stage/source/region/time scenarios. Intensity
 observed training people as its explicit denominator, never all graduates or jobseekers.
 Independent official-profile corroboration and full OOD review are pending. An observed
 source statement is not a confirmed personal fact. See [STREAMING.md](STREAMING.md).
+
+## Official award-time label attribution
+
+The Nobel-only view is owned by `award_projection.py`, policy
+`nobel-label-attribution/2`. An official personal award's prize portion is counted
+in the main label attribution only when exactly one official award-time affiliation
+is listed. A separate equal-split scenario divides that portion across all listed
+affiliations. This division is an explicit scenario, not an official allocation.
+Institutional recipients remain separate. No award is propagated through PageRank.
+Rational numerators/denominators are JSON strings, retaining exact arithmetic.
+
+Exact normalized ROR names/aliases plus country produce candidates. Ambiguous,
+unmatched and historically inconsistent identities stay visible; candidates never
+write canonical institution aliases. These are Nobel award-time label measurements,
+not a complete academic-award score. Missing other families or unresolved institution
+identity does not become a zero university award/composite score.
+
+`python scripts/verify-public-release.py` independently implements public
+graph-to-score replay using only the standard library. It checks the public bytes,
+edges, scores, mass and ordering; personal facts and unknown global missingness
+remain outside its verification scope. See [OOD.md](OOD.md) for pressure fixtures.

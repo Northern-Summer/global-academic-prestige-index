@@ -8,8 +8,8 @@ import {existsSync,lstatSync,readdirSync,readFileSync,writeFileSync} from 'node:
 import {dirname,isAbsolute,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md'];
-export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs',...DOCUMENTATION.map(name=>`docs/${name}`)];
+export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md'];
+export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
 export const PROVENANCE = 'build-provenance.json';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceHash = bytes => hash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n')));
@@ -104,6 +104,7 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     if (hash(regular(resolve(outDir,'data/global',built.snapshot))) !== current.snapshot_sha256) throw new Error('Built snapshot mismatch');
   }
   if (publish) {
+    if ('site-manifest.json' in outputs) throw new Error('Reserved deployment manifest already exists in build');
     if (proof.base !== '/global-academic-prestige-index/') throw new Error('Public deployment base is incorrect');
     if (proof.selection.publication_status !== 'public-observations-pending-external-review') throw new Error('Unapproved data publication status');
     if (proof.selection.manifest !== 'outputs/global/manifest.json' || !proof.selection.snapshot.startsWith('outputs/global/')) throw new Error('Public release must use the reviewed aggregate directory');
@@ -119,10 +120,19 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
       if (hash(git(root,'show',`HEAD:${path}`)) !== expected) throw new Error(`Release input differs from committed source: ${path}`);
     }
   }
-  return {status:'verified',mode:proof.mode,files:Object.keys(outputs).length,
+  const result = {status:'verified',mode:proof.mode,files:Object.keys(outputs).length,
     source_commit:git(root,'rev-parse','HEAD').toString().trim(),
     source_commit_at_build:proof.source_commit_at_build,outputs,
     provenance_sha256:hash(regular(resolve(outDir,PROVENANCE)))};
+  if (publish) {
+    if (Object.keys(outputs).some(path=>path.startsWith('data/local/'))) throw new Error('Private data in public site');
+    const bytes=Object.keys(outputs).reduce((sum,path)=>sum+regular(resolve(outDir,path)).length,0);
+    if (bytes+regular(resolve(outDir,PROVENANCE)).length>8*1024*1024) throw new Error('Public site exceeds reviewed byte bound');
+    result.site_manifest={source_commit:result.source_commit,build_provenance_sha256:result.provenance_sha256,
+      ranking_status:'observations-only-pending-independent-review',
+      files:ordered({...outputs,[PROVENANCE]:result.provenance_sha256,'.nojekyll':hash(Buffer.alloc(0))})};
+  }
+  return result;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

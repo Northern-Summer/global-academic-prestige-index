@@ -22,6 +22,20 @@ establishes only those declared cases. External reviewer independence, conflict
 disclosures, complete OOD/discipline analysis and global enumeration remain open.
 No formal global ranking is approved.
 
+Continuation adds a runnable offline OOD module (9 scenarios/26 invariants in the
+executed report), a stdlib-only public aggregate replay using an independently
+implemented PageRank iteration, and conservative Nobel label attribution. Exact
+ROR candidates remain unconfirmed. See docs/OOD.md and the continuation receipts.
+These are internal executable checks, not external reviewer acceptance.
+
+The automatic deployment increment received a bounded internal read-only review.
+That review flagged the GITHUB_TOKEN/legacy-Pages trigger restriction; deployment
+now explicitly requests the existing Pages build using a narrow pages:write token.
+Source freshness across distinct refs remains best effort, with pre-push checking
+and superseded workflow cancellation; no global atomic-release claim is made.
+Real Actions and public readback receipts, not the presence of workflow YAML,
+determine whether the automatic path has actually succeeded.
+
 Before a real ranking release, two independent review tracks are required:
 
 1. Research validity and data governance: measurement claims, direction, coverage, entity resolution, attribution, rights, privacy, and OOD behavior.

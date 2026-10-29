@@ -4,6 +4,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const {createHash}=require('node:crypto');
 const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
+const screenshotPath=name=>`${process.env.GAPI_TEST_SCREENSHOT_PREFIX || 'outputs/review'}-${name}-2026-10-29.png`;
+const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-10-29.json';
 
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.GAPI_BROWSER, args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
@@ -27,7 +29,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
       const bytes = await response.arrayBuffer();
       const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
       const data = JSON.parse(new TextDecoder().decode(bytes));
-      return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,institutions:data.nodes.length,events:data.coverage.events,edges:data.edges.length,people:data.coverage.people,relations:data.nodes.reduce((sum,n)=>sum+n.relations,0),scored:data.nodes.filter(n=>n.network_score!=null).length,award_recipients:data.official_award_inventory?.processed_recipients};
+      return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,institutions:data.nodes.length,events:data.coverage.events,edges:data.edges.length,people:data.coverage.people,relations:data.nodes.reduce((sum,n)=>sum+n.relations,0),scored:data.nodes.filter(n=>n.network_score!=null).length,award_recipients:data.official_award_inventory?.processed_recipients,award_attribution_labels:data.official_award_attribution?.label_count};
     });
     assert.equal(results.version.actual,results.version.expected);
     assert.match(status,/正式全球排名尚未发布/);
@@ -56,7 +58,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
     await pick.focus(); await page.keyboard.press('Enter');
     assert.match(await page.locator('#global-details').innerText(),/正式资格缺口/);
     assert.ok(await page.locator('#global-details .mini-bars').count()>=1);
-    await page.locator('#global-details').screenshot({path:'outputs/review-detail-2026-10-29.png'});
+    await page.locator('#global-details').screenshot({path:screenshotPath('detail')});
     results.search_filter_sort_keyboard_details = true;
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#global-csv').click();
@@ -68,6 +70,11 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
       await page.locator('#global-official-awards summary').click();
       await page.locator('#global-award-search').fill('Cambridge');
       assert.match(await page.locator('#global-award-rows').innerText(),/Cambridge/);
+      if(results.version.award_attribution_labels){
+        assert.match(await page.locator('#global-award-content').innerText(),/单机构.*份额/);
+        assert.match(await page.locator('#global-award-rows').innerText(),/待确认|待核验|待解析/);
+        results.official_award_attribution=true;
+      }
       await page.locator('#global-official-awards summary').click();
       results.official_awards=true;
     }
@@ -82,16 +89,16 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
     await page.locator('#global-show-network').click();
     await page.waitForFunction(() => document.querySelector('#global-network canvas') || /暂不可用/.test(document.querySelector('#global-network')?.textContent || ''));
     results.webgl = await page.locator('#global-network canvas').count() === 1;
-    if (results.webgl) await page.locator('#global-network').screenshot({path:'outputs/review-network-2026-10-29.png'});
+    if (results.webgl) await page.locator('#global-network').screenshot({path:screenshotPath('network')});
     await page.locator('#global-stage').selectOption('postdoc');
     results.direction = await page.locator('#global-edge-status').innerText();
     await page.locator('#global-stage').selectOption('all');
     await page.locator('#global-observations').scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
-    await page.screenshot({path:'outputs/review-desktop-2026-10-29.png'});
+    await page.screenshot({path:screenshotPath('desktop')});
     await page.setViewportSize({width:390,height:844});
     await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
-    await page.screenshot({path:'outputs/review-mobile-2026-10-29.png'});
+    await page.screenshot({path:screenshotPath('mobile')});
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+2);
     if (overflow) results.overflow_elements = await page.evaluate(() => [...document.querySelectorAll('body *')]
       .filter(el => el.getBoundingClientRect().right > innerWidth+2 && !el.closest('.table-wrap'))
@@ -133,7 +140,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
     results.page_errors = errors;
   } finally {
     await browser.close();
-    fs.writeFileSync('outputs/browser-review-2026-10-29.json',JSON.stringify(results,null,2));
+    fs.writeFileSync(receiptPath,JSON.stringify(results,null,2));
   }
   console.log(JSON.stringify(results));
 })().catch(error => {console.error(error.stack);process.exitCode=1;});

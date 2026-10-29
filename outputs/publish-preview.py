@@ -92,9 +92,12 @@ def main():
     if hashlib.sha256(files['data/global/'+built['snapshot']]).hexdigest() != built['output_sha256']:
         raise RuntimeError('site snapshot identity mismatch')
     files['.nojekyll'] = b''
-    manifest = {'source_commit':head, 'build_provenance_sha256':provenance['provenance_sha256'],
-        'ranking_status':'observations-only-pending-independent-review',
-        'files':{path:hashlib.sha256(body).hexdigest() for path,body in sorted(files.items())}}
+    # The shared verifier owns publication eligibility and the public manifest;
+    # local API transport and automatic Actions transport use identical policy.
+    manifest = provenance['site_manifest']
+    if manifest['source_commit'] != head or manifest['files'] != {
+            path:hashlib.sha256(body).hexdigest() for path,body in sorted(files.items())}:
+        raise RuntimeError('captured site differs from shared publication contract')
     files['site-manifest.json'] = json.dumps(manifest,sort_keys=True,separators=(',',':')).encode()
     expected_tree = tree_sha(files)
     receipt.write_text(json.dumps({'state':'prepared','source_commit':head,'site_tree':expected_tree}),encoding='utf-8')

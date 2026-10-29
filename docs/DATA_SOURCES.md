@@ -106,3 +106,16 @@ API data CC0, grant rights to linked works, publish individual histories or asse
 independent legal certification. The policy records retrieval time, official URLs
 and hashes of the reviewed live Markdown sections; its own hash enters the release
 manifest. Without explicit selection of this policy, the default remains restrictive.
+# API-only continuation and official Nobel attribution
+
+The active continuation uses bounded public API responses, never a local archive.
+`configs/orcid-archive-20261029.json` records only the official 2026 archive metadata
+observed from https://api.figshare.com/v2/articles/34697766 : the 57,290,954,546-byte
+upstream size and `md5:a55a16fe0b292bda03cc6016546c8984` do not imply a download,
+full checksum verification, or source completion. This metadata is not an active
+task configuration and does not modify the frozen source registry.
+
+Nobel-only award-time label attributions use the existing official page hashes.
+The fixed normalized ROR directory hash is independently checked before exact
+name/alias-and-country candidate matching. No fuzzy or LLM identity decisions are
+made, and those candidates are not canonical merges or a complete award score.

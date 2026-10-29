@@ -316,6 +316,10 @@ def rank_global(store, *, public=False, publication_policy=None):
     if awards is not None:
         result['official_award_inventory'] = awards
         result['limitations'][1] = 'Formal ranking, complete canonical award scoring and composite data are unavailable.'
+    from .award_projection import public_projection
+    projection = public_projection(store)
+    if projection is not None:
+        result['official_award_attribution'] = projection
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     if has_interpretations(store) and (allowed is None or 'orcid-public-api' in allowed):
         interpreted = store.db.execute('SELECT count(*) FROM event_interpretations WHERE rule_version=? AND policy_sha256=?', (VERSION, POLICY_SHA256)).fetchone()[0]

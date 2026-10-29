@@ -294,3 +294,24 @@ disclosed without invented fractional institutional attribution. Nobel coverage
 alone cannot satisfy the complete award catalogue, and no university award or
 composite score is imputed. A live offset selection has temporal drift limits even
 when its processed unique recipient count equals the API's reported total.
+# Primary continuation: finite-response APIs
+
+The active `collect-global` route uses Crossref/OpenAlex/Wikidata as independent
+candidate-discovery queues and ORCID education/employment XML endpoints plus
+Wikidata EntityData for career observations. Each response is read in bounded
+chunks, normalized immediately and discarded; only selected events, evidence
+hashes and checkpoints persist. A single explicit Wikidata ORCID also queues a
+separate-source fetch atomically. Conflicting identifiers do not trigger a fetch
+or an entity merge. A discovery lead is never corroboration by itself.
+
+No large compressed archive is a prerequisite for this route. The upstream 2026
+summary's known 57,290,954,546-byte size/MD5 is metadata, not a local download or
+a completed scan. Optional old archive code is not invoked by the active API loop.
+Raw XML/archive files stay absent from the external task directory. The 2 GiB
+budget includes normalized databases, journals, frozen inputs and release outputs.
+
+After a finite collection batch, run `normalize-careers`, `corroborate`,
+`project-awards`, `quality`, and freeze/export a new institution-only release.
+`project-awards` is deterministic and does not fetch/download source material.
+Only a verified committed manifest goes to the automatic deployment route in
+[CI_CD.md](CI_CD.md). Full source enumeration and world coverage remain distinct.

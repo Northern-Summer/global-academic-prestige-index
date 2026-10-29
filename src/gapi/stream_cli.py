@@ -16,7 +16,7 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name in ('discover-wikidata-dump','collect-global'):
@@ -53,7 +53,7 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -75,7 +75,10 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command == 'normalize-careers':
+        if args.command == 'project-awards':
+            from .award_projection import project_awards
+            result = project_awards(store)
+        elif args.command == 'normalize-careers':
             from .career_normalization import normalize_careers
             result = normalize_careers(store)
         elif args.command == 'ingest-nobel':

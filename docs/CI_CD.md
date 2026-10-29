@@ -13,7 +13,8 @@ The normal default is `outputs/global/manifest.json`; a manual workflow run can
 select a committed aggregate manifest. These jobs have read-only repository access,
 bounded timeouts and no source acquisition or personal database access.
 
-The optional `workflow_dispatch` browser job builds the same selection and runs
+The production browser job is required for trusted source pushes before deployment;
+it is also available as an optional `workflow_dispatch` check. It builds the same selection and runs
 the existing production browser acceptance against its preview base. On the hosted
 Linux runner only, it installs pinned Playwright 1.56.1 without changing the lockfile,
 and reuses hosted Chrome; it never downloads a browser. A missing browser is a
@@ -61,16 +62,33 @@ non-force remote ref update, immutable release tag and remote readback remain.
 This is content-addressed provenance, not cryptographic signing or proof that an
 attacker who controls the source and proof generator cannot forge both.
 
-## CD boundary
+## Automatic CD and fallback
 
-The deployed project currently uses legacy GitHub Pages from `gh-pages`. The old
-automatic Actions deployment path inherited code-only mode and conflicted with
-that route; it is removed. CI produces verified artifacts and never changes Pages
-configuration. The existing reviewed publisher remains the sole deployment path:
-it validates a selected real observation build, makes a new prerelease, keeps old
-tags, and reads back refs. Public HTTP asset hashes and browser acceptance are
-separate post-deployment gates. Remote CI jobs and deployment must actually run
-before their results can be described as passed.
+The user explicitly authorized automatic deployment on 2026-10-29. Pages retains
+the existing legacy `gh-pages` mode. A push to `codex/global-streaming`, after the
+test, real-observation build and production-browser jobs succeed, downloads that exact build artifact.
+The deploy job alone receives `contents:write`; pull requests and manual browser
+runs cannot deploy. `deploy-pages.mjs` uses the same `verifyBuild` policy and site
+manifest as the local publisher, captures and rechecks all bytes, confirms the
+source revision is current, and performs a non-force sibling commit/push. Source
+freshness checks before preparation and push are best effort across distinct refs;
+non-force push protects the Pages predecessor, not an atomic source+site snapshot.
+Workflow concurrency cancels superseded same-branch runs. The script does
+not rebuild, fetch personal sources, change Pages configuration or retarget tags.
+
+An ambiguous push is reconciled by the exact commit, never blindly repeated.
+Because a `GITHUB_TOKEN` push does not implicitly trigger Pages, the deploy job
+has `pages:write` and explicitly requests the existing legacy build using the
+[official Pages builds endpoint](https://docs.github.com/en/rest/pages/pages#request-a-github-pages-build).
+It first checks the existing configuration and latest build; an ambiguous POST
+is reconciled without a second automatic POST. It never changes the site mode. A
+bounded Pages propagation check then verifies every public file hash. Its receipt
+is uploaded even on failure. A changed source/asset, oversized or private artifact,
+wrong repository/ref/event, stale source, or stale public asset fails the job.
+This is automatic observation deployment, never formal-ranking approval. The
+existing local publisher is an explicitly run fallback and prerelease creator,
+sharing the same proof and public-manifest owner. Neither route bypasses failed
+data/source gates. A successful source push alone is not successful deployment.
 
 Local regression fixtures use small temporary repositories under the task's
 D-drive budget on Windows. They cover unchanged repeated verification, data-only

@@ -25,7 +25,17 @@ the supplied hostile-input fixtures and rebuild from an explicitly selected real
 release manifest. Run tests/browser-real.cjs with an existing Playwright/browser.
 Compare byte hashes in the release manifest, not screenshots or the CI badge.
 
-Known remaining gates include inaccessible annual summary bytes/checksum, incomplete
-source enumeration, no completed official-profile corroboration, unresolved identity
-crosswalks, missing official awards and missing full OOD/discipline/English deletion
-analyses. Any formal-global-ranking approval is withheld.
+Use `python scripts/verify-public-release.py` for a stdlib-only independent
+implementation of the public graph-to-score replay. It imports no canonical GAPI
+ranking code and needs no personal database. It checks hashes, probability mass,
+scores and stored ordering. It does not validate the underlying personal facts.
+`python -m gapi.ood` executes bounded deidentified pressure fixtures; see docs/OOD.md.
+
+Known remaining gates are incomplete global source enumeration, independent
+official-profile corroboration, unresolved identity crosswalks, other award
+families, and full real-data discipline/English deletion analyses. Nobel official
+award-time label shares are separately observable, while ROR identity matches stay
+candidates. Annual archive metadata is available but no large archive is required
+or downloaded; the active pipeline is finite-response API ingestion. Two external
+reviewers, their identities/conflicts and independent retests have not been supplied.
+Any formal-global-ranking approval is withheld.

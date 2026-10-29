@@ -59,3 +59,22 @@ test('share and contribution charts require conserved scores and valid damping',
     assert.throws(()=>validateGlobal(data));
   }
 });
+
+test('official attribution keeps rational shares exact and identity candidates unpromoted',()=>{
+  const make=()=>{
+    const d=dataset();d.official_award_inventory={processed_recipients:1,expected_recipients:1,award_events:1,categories:{Physics:1},affiliations:[{name:'University',award_mentions:1}]};
+    d.official_award_attribution={label_count:1,unique_candidate_labels:0,ambiguous_candidate_labels:0,unresolved_labels:1,
+      canonical_identity_promotions:0,network_and_composite_scores_imputed:false,official_label_attributions:[{
+        name:'University',official_label_id:'label',identity_status:'unresolved',ror_candidates:[],award_mentions:1,
+        personal_single_affiliation_events:1,personal_multi_affiliation_events:0,institutional_events:0,
+        nobel_share_single_affiliation:{numerator:'1',denominator:'3'},
+        nobel_share_equal_split_sensitivity:{numerator:'1',denominator:'3'}}]};return d;
+  };
+  assert.equal(validateGlobal(make()).official_award_attribution.label_count,1);
+  for(const value of [{numerator:'<img>',denominator:'1'},{numerator:'1',denominator:'0'},
+    {numerator:'2',denominator:'1'},{numerator:1,denominator:3}]){
+    const d=make();d.official_award_attribution.official_label_attributions[0].nobel_share_single_affiliation=value;
+    assert.throws(()=>validateGlobal(d));
+  }
+  const d=make();d.official_award_attribution.canonical_identity_promotions=1;assert.throws(()=>validateGlobal(d));
+});

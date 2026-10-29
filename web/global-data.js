@@ -50,6 +50,32 @@ export function validateGlobal(data) {
       if (typeof affiliation.name !== 'string' || !Number.isSafeInteger(affiliation.award_mentions) || affiliation.award_mentions < 0) throw new Error('Invalid official award affiliation');
     }
   }
+  const projection=data.official_award_attribution;
+  if(projection!=null){
+    const labels=projection.official_label_attributions;
+    if(!awards||!Array.isArray(labels)||labels.length>25000||projection.label_count!==labels.length
+        ||projection.canonical_identity_promotions!==0||projection.network_and_composite_scores_imputed!==false)throw new Error('Invalid award attribution contract');
+    for(const field of ['label_count','unique_candidate_labels','ambiguous_candidate_labels','unresolved_labels'])
+      if(!Number.isSafeInteger(projection[field])||projection[field]<0)throw new Error('Invalid award mapping count');
+    if(projection.unique_candidate_labels+projection.ambiguous_candidate_labels+projection.unresolved_labels!==labels.length)throw new Error('Award mapping totals mismatch');
+    const seen=new Set();
+    for(const label of labels){
+      if(typeof label.name!=='string'||typeof label.official_label_id!=='string'||seen.has(label.official_label_id)
+          ||!['candidate-requires-confirmation','ambiguous-candidate','unresolved'].includes(label.identity_status)
+          ||!Array.isArray(label.ror_candidates)||label.ror_candidates.length>1000)throw new Error('Invalid award label identity');
+      seen.add(label.official_label_id);
+      for(const field of ['award_mentions','personal_single_affiliation_events','personal_multi_affiliation_events','institutional_events'])
+        if(!Number.isSafeInteger(label[field])||label[field]<0)throw new Error('Invalid award attribution count');
+      for(const field of ['nobel_share_single_affiliation','nobel_share_equal_split_sensitivity']){
+        const value=label[field];
+        if(!value||typeof value.numerator!=='string'||typeof value.denominator!=='string'
+            ||!/^(0|[1-9]\d{0,511})$/.test(value.numerator)||!/^[1-9]\d{0,511}$/.test(value.denominator))throw new Error('Invalid exact award share');
+        if(BigInt(value.numerator)>BigInt(label.award_mentions)*BigInt(value.denominator))throw new Error('Award share exceeds observed mentions');
+      }
+      const main=label.nobel_share_single_affiliation,split=label.nobel_share_equal_split_sensitivity;
+      if(BigInt(main.numerator)*BigInt(split.denominator)>BigInt(split.numerator)*BigInt(main.denominator))throw new Error('Award scenario omits main attribution');
+    }
+  }
   return data;
 }
 
