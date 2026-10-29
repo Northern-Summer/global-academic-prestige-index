@@ -13,12 +13,12 @@ const scenarioName = key => key.startsWith('alpha_') ? `阻尼 α = ${key.slice(
 
 const root = document.createElement('section');
 root.className='panel global-panel';root.id='global-observations';root.setAttribute('aria-labelledby','global-title');
-root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">GLOBAL ACADEMIC MOBILITY / 真实公开观测</p><h2 id="global-title">从人才去向，观察学术联系</h2></div><span class="observation-tag">真实数据 · 持续采集中</span></div>
+root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">GLOBAL ACADEMIC MOBILITY / 真实公开观测</p><h2 id="global-title">从人才去向，观察学术联系</h2></div><span class="observation-tag">真实数据 · 观测版本</span></div>
 <p id="global-status" class="global-status" role="status">正在校验真实数据与版本清单…</p>
 <div id="global-metrics" class="observation-metrics" aria-label="当前切片的实际数据范围"></div>
 <p class="scope-caption">这里是当前来源切片的实际计数，口径各不相同，不是全球覆盖率或就业转化率。未收录，不代表没有影响力。</p>
 <div id="global-evidence" class="evidence-summary"></div>
-<div class="reading-note"><strong>怎样读这个表？</strong><span>“网络份额”表示一个机构在本次人才关系网络中分到的影响力，占比合计为 100%。它不是就业率，也不能直接衡量大学整体质量。奖项和综合评分尚未发布。</span></div>
+<details class="reading-note"><summary>怎样读这个表？网络份额不是就业率</summary><p>“网络份额”表示一个机构在本次人才关系网络中分到的影响力，占比合计为 100%。它不是就业率，也不能直接衡量大学整体质量。奖项和综合评分尚未发布。</p></details>
 <details id="global-official-awards" class="award-inventory" hidden><summary>官方奖项数据：查看采集范围与归属标签</summary><div id="global-award-content"></div></details>
 <div class="table-tools"><label>查找机构<input type="search" id="global-search" placeholder="输入机构名称，例如 Cambridge" autocomplete="off"></label>
 <label>国家／地区<select id="global-country"><option value="">全部已观测地区</option></select></label>

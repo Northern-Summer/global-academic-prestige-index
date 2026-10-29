@@ -56,6 +56,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
     await pick.focus(); await page.keyboard.press('Enter');
     assert.match(await page.locator('#global-details').innerText(),/正式资格缺口/);
     assert.ok(await page.locator('#global-details .mini-bars').count()>=1);
+    await page.locator('#global-details').screenshot({path:'outputs/review-detail-2026-10-29.png'});
     results.search_filter_sort_keyboard_details = true;
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#global-csv').click();
@@ -70,6 +71,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
       await page.locator('#global-official-awards summary').click();
       results.official_awards=true;
     }
+    await page.locator('#global-reset').click();
     if(await page.locator('#global-edge-next').isEnabled()){
       const first=await page.locator('#global-edges tr').first().innerText();
       await page.locator('#global-edge-next').click();
@@ -88,6 +90,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
     await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
     await page.screenshot({path:'outputs/review-desktop-2026-10-29.png'});
     await page.setViewportSize({width:390,height:844});
+    await page.evaluate(() => window.scrollTo(0,document.querySelector('#global-observations').offsetTop-12));
     await page.screenshot({path:'outputs/review-mobile-2026-10-29.png'});
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+2);
     if (overflow) results.overflow_elements = await page.evaluate(() => [...document.querySelectorAll('body *')]
@@ -121,7 +124,7 @@ const { chromium } = require(process.env.GAPI_PLAYWRIGHT || 'playwright');
       await hostile.goto(results.tested_url,{waitUntil:'networkidle'});
       await hostile.waitForFunction(()=>/数据身份已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent||''));
       if(unsafeNumber)assert.match(await hostile.locator('#global-status').innerText(),/真实数据暂不可用/);
-      else{assert.ok((await hostile.locator('#global-rows').innerText()).includes('<img'));assert.equal(await hostile.locator('#global-rows img').count(),0);}
+      else{await hostile.locator('#global-search').fill('<img');assert.ok((await hostile.locator('#global-rows').innerText()).includes('<img'));assert.equal(await hostile.locator('#global-rows img').count(),0);}
       assert.equal(await hostile.evaluate(()=>window.__gapiInjected),undefined);
       await hostile.close();
     }
