@@ -56,6 +56,17 @@ class ResourceTests(unittest.TestCase):
                 if path==journal:raise FileNotFoundError('journal committed during scan')
                 return original(path,*args,**kwargs)
             with patch.object(Path,'stat',stat):self.assertEqual(s.task.used(),baseline-32)
+            original_link = Path.is_symlink
+            def missing_link(path):
+                if path==journal:raise FileNotFoundError('journal vanished during link probe')
+                return original_link(path)
+            with patch.object(Path,'is_symlink',missing_link),patch.object(Path,'stat',stat):
+                self.assertEqual(s.task.used(),baseline-32)
+            def forbidden_link(path):
+                if path==journal:raise PermissionError('link observation denied')
+                return original_link(path)
+            with patch.object(Path,'is_symlink',forbidden_link),self.assertRaises(PermissionError):
+                s.task.used()
             def forbidden(path,*args,**kwargs):
                 if path==journal:raise PermissionError('cannot observe budget')
                 return original(path,*args,**kwargs)

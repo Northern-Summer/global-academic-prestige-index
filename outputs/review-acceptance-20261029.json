@@ -219,7 +219,7 @@
     "remaining_candidate_bytes": 276594
   },
   "evidence_sha256": {
-    "outputs/REVIEW-20261029.md": "dc3c32460c1be8393076e03a0a458db5f54a442533e20bc61b49bce36eb49976",
+    "outputs/REVIEW-20261029.md": "0a773ff0e5379ac214c5d19207fed77e925d7732841a6e81ab038541938e7e0d",
     "outputs/browser-review-2026-10-29.json": "9a1d76f57295836b02a5498d184a5a40cc9d7294be9d93f81cbd024e671d2678",
     "outputs/browser-review-initial-20261029.json": "32d977322e72bd780bfa6b98e24b9fd95d9fd3973e234ac7ebfcea617c9c22cd",
     "outputs/cleanup-reviewed-20261029.json": "2a5a40779bfa4f688f377be499a86a337f9c840b08d40d7b3ab037522930b63e",
@@ -234,5 +234,18 @@
     "desktop": "observed-in-predecessor-turn",
     "network": "observed-in-predecessor-turn",
     "user_study": false
+  },
+  "python_tests_after_ci_repair": {
+    "passed": 129,
+    "focused_passed": 6,
+    "log_sha256": "d397ecea0ac9ee57f69c39b8abcaf45e0ed1030121f9cd38badb502bba4e7377"
+  },
+  "ci_first_remote": {
+    "id": 40886715553,
+    "status": "failure",
+    "root_cause": "Python 3.12 missing file during Path.is_symlink link probe",
+    "fixed_locally": true,
+    "remote_retest": "pending",
+    "log_sha256": "63074501803dec2e89042470da8568351f8067217c877e4c677cdcb95fced555"
   }
 }

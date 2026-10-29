@@ -76,7 +76,14 @@ class Task:
         for folder, dirs, files in os.walk(self.root, followlinks=False):
             for name in [*dirs, *files]:
                 path = Path(folder) / name
-                if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+                try:
+                    linked = path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+                except FileNotFoundError:
+                    # Python/OS versions differ on whether a missing link probe
+                    # returns false or raises. A committed journal may disappear
+                    # at either the link check or the subsequent size check.
+                    continue
+                if linked:
                     raise ValueError("links are forbidden in the task storage tree")
             total += sum(size_if_present(Path(folder) / name) for name in files)
         # Count new release/build outputs too; existing real input snapshots are not copied.

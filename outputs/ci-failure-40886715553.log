@@ -1,0 +1,383 @@
+﻿2026-10-29T13:57:16.9919854Z Current runner version: '2.338.0'
+2026-10-29T13:57:16.9947154Z ##[group]Runner Image Provisioner
+2026-10-29T13:57:16.9948101Z Hosted Compute Agent
+2026-10-29T13:57:16.9948867Z Version: 20261021.618
+2026-10-29T13:57:16.9949663Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-29T13:57:16.9950919Z Build Date: 2026-10-21T00:45:21Z
+2026-10-29T13:57:16.9951877Z Worker ID: {e427f5e8-1675-4bdc-ae62-d914f65e000e}
+2026-10-29T13:57:16.9952920Z Region: eastus
+2026-10-29T13:57:16.9953633Z Cloud: Azure
+2026-10-29T13:57:16.9954351Z ##[endgroup]
+2026-10-29T13:57:16.9955909Z ##[group]Operating System
+2026-10-29T13:57:16.9956829Z Ubuntu
+2026-10-29T13:57:16.9957452Z 24.04.5
+2026-10-29T13:57:16.9958131Z LTS
+2026-10-29T13:57:16.9958754Z ##[endgroup]
+2026-10-29T13:57:16.9959398Z ##[group]Runner Image
+2026-10-29T13:57:16.9960237Z Image: ubuntu-24.04
+2026-10-29T13:57:16.9960931Z Version: 20261025.353.1
+2026-10-29T13:57:16.9962556Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261025.353/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-29T13:57:16.9964764Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261025.353
+2026-10-29T13:57:16.9966016Z ##[endgroup]
+2026-10-29T13:57:16.9967412Z ##[group]GITHUB_TOKEN Permissions
+2026-10-29T13:57:16.9969656Z Contents: read
+2026-10-29T13:57:16.9970452Z Metadata: read
+2026-10-29T13:57:16.9971189Z ##[endgroup]
+2026-10-29T13:57:16.9973702Z Secret source: Actions
+2026-10-29T13:57:16.9974856Z Cache mode: write
+2026-10-29T13:57:16.9975905Z Prepare workflow directory
+2026-10-29T13:57:17.0396398Z Prepare all required actions
+2026-10-29T13:57:17.0450938Z Getting action download info
+2026-10-29T13:57:17.2223998Z Download action repository 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-29T13:57:17.3051751Z Download action repository 'actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-10-29T13:57:17.3996018Z Download action repository 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-10-29T13:57:17.5885388Z Complete job name: test
+2026-10-29T13:57:17.6588502Z ##[group]Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+2026-10-29T13:57:17.6589725Z with:
+2026-10-29T13:57:17.6590422Z   repository: Northern-Summer/global-academic-prestige-index
+2026-10-29T13:57:17.6596707Z   token: ***
+2026-10-29T13:57:17.6597274Z   ssh-strict: true
+2026-10-29T13:57:17.6597824Z   ssh-user: git
+2026-10-29T13:57:17.6598386Z   persist-credentials: true
+2026-10-29T13:57:17.6598986Z   clean: true
+2026-10-29T13:57:17.6599530Z   sparse-checkout-cone-mode: true
+2026-10-29T13:57:17.6600170Z   fetch-depth: 1
+2026-10-29T13:57:17.6600699Z   fetch-tags: false
+2026-10-29T13:57:17.6601257Z   show-progress: true
+2026-10-29T13:57:17.6601812Z   lfs: false
+2026-10-29T13:57:17.6602309Z   submodules: false
+2026-10-29T13:57:17.6603084Z   set-safe-directory: true
+2026-10-29T13:57:17.6603759Z   allow-unsafe-pr-checkout: false
+2026-10-29T13:57:17.6604664Z env:
+2026-10-29T13:57:17.6605173Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:17.6605706Z ##[endgroup]
+2026-10-29T13:57:17.9137774Z Syncing repository: Northern-Summer/global-academic-prestige-index
+2026-10-29T13:57:17.9140329Z ##[group]Getting Git version info
+2026-10-29T13:57:17.9141213Z Working directory is '/home/runner/work/global-academic-prestige-index/global-academic-prestige-index'
+2026-10-29T13:57:17.9142744Z [command]/usr/bin/git version
+2026-10-29T13:57:17.9219081Z git version 2.56.0
+2026-10-29T13:57:17.9235369Z ##[endgroup]
+2026-10-29T13:57:17.9246687Z Temporarily overriding HOME='/home/runner/work/_temp/988161d3-ae8c-4eb0-be61-84c4cb53326a' before making global git config changes
+2026-10-29T13:57:17.9248638Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-29T13:57:17.9251288Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/global-academic-prestige-index/global-academic-prestige-index
+2026-10-29T13:57:17.9309462Z Deleting the contents of '/home/runner/work/global-academic-prestige-index/global-academic-prestige-index'
+2026-10-29T13:57:17.9318492Z ##[group]Initializing the repository
+2026-10-29T13:57:17.9319539Z [command]/usr/bin/git init /home/runner/work/global-academic-prestige-index/global-academic-prestige-index
+2026-10-29T13:57:17.9406146Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-29T13:57:17.9407798Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-29T13:57:17.9408664Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-29T13:57:17.9409333Z hint: call:
+2026-10-29T13:57:17.9409682Z hint:
+2026-10-29T13:57:17.9410152Z hint: 	git config --global init.defaultBranch <name>
+2026-10-29T13:57:17.9410688Z hint:
+2026-10-29T13:57:17.9411187Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-29T13:57:17.9411967Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-29T13:57:17.9412628Z hint:
+2026-10-29T13:57:17.9413178Z hint: 	git branch -m <name>
+2026-10-29T13:57:17.9413596Z hint:
+2026-10-29T13:57:17.9414127Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-29T13:57:17.9425879Z Initialized empty Git repository in /home/runner/work/global-academic-prestige-index/global-academic-prestige-index/.git/
+2026-10-29T13:57:17.9435885Z [command]/usr/bin/git remote add origin https://github.com/Northern-Summer/global-academic-prestige-index
+2026-10-29T13:57:17.9480353Z ##[endgroup]
+2026-10-29T13:57:17.9481201Z ##[group]Disabling automatic garbage collection
+2026-10-29T13:57:17.9484671Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-29T13:57:17.9516666Z ##[endgroup]
+2026-10-29T13:57:17.9517357Z ##[group]Setting up auth
+2026-10-29T13:57:17.9523732Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-29T13:57:17.9557539Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-29T13:57:17.9953786Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-29T13:57:17.9992597Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-29T13:57:18.0213983Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-29T13:57:18.0252903Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-29T13:57:18.0481911Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-29T13:57:18.0525706Z ##[endgroup]
+2026-10-29T13:57:18.0526904Z ##[group]Fetching the repository
+2026-10-29T13:57:18.0537381Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +1d5cd5ab62614dd798d55a3c1437afb96c61dbca:refs/remotes/origin/codex/global-streaming
+2026-10-29T13:57:18.3969681Z From https://github.com/Northern-Summer/global-academic-prestige-index
+2026-10-29T13:57:18.3971224Z  * [new ref]         1d5cd5ab62614dd798d55a3c1437afb96c61dbca -> origin/codex/global-streaming
+2026-10-29T13:57:18.3974301Z ##[endgroup]
+2026-10-29T13:57:18.3975448Z ##[group]Determining the checkout info
+2026-10-29T13:57:18.3976754Z ##[endgroup]
+2026-10-29T13:57:18.3981680Z [command]/usr/bin/git sparse-checkout disable
+2026-10-29T13:57:18.4042063Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-29T13:57:18.4078894Z ##[group]Checking out the ref
+2026-10-29T13:57:18.4082499Z [command]/usr/bin/git checkout --progress --force -B codex/global-streaming refs/remotes/origin/codex/global-streaming
+2026-10-29T13:57:18.4289765Z Switched to a new branch 'codex/global-streaming'
+2026-10-29T13:57:18.4293430Z branch 'codex/global-streaming' set up to track 'origin/codex/global-streaming'.
+2026-10-29T13:57:18.4299909Z ##[endgroup]
+2026-10-29T13:57:18.4344540Z [command]/usr/bin/git log -1 --format=%H
+2026-10-29T13:57:18.4372949Z 1d5cd5ab62614dd798d55a3c1437afb96c61dbca
+2026-10-29T13:57:18.4745263Z ##[group]Run actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+2026-10-29T13:57:18.4746490Z with:
+2026-10-29T13:57:18.4747125Z   python-version: 3.12
+2026-10-29T13:57:18.4747856Z   check-latest: false
+2026-10-29T13:57:18.4755425Z   token: ***
+2026-10-29T13:57:18.4756113Z   update-environment: true
+2026-10-29T13:57:18.4756920Z   allow-prereleases: false
+2026-10-29T13:57:18.4757690Z   freethreaded: false
+2026-10-29T13:57:18.4758382Z env:
+2026-10-29T13:57:18.4758982Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:18.4759642Z ##[endgroup]
+2026-10-29T13:57:18.5877919Z ##[group]Installed versions
+2026-10-29T13:57:18.5965019Z (node:2106) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-29T13:57:18.5967556Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-29T13:57:18.5969120Z Successfully set up CPython (3.12.15)
+2026-10-29T13:57:18.5970966Z ##[endgroup]
+2026-10-29T13:57:18.6237433Z ##[group]Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+2026-10-29T13:57:18.6239118Z with:
+2026-10-29T13:57:18.6240032Z   node-version: 22
+2026-10-29T13:57:18.6240999Z   cache: npm
+2026-10-29T13:57:18.6241960Z   always-auth: false
+2026-10-29T13:57:18.6243106Z   check-latest: false
+2026-10-29T13:57:18.6264479Z   token: ***
+2026-10-29T13:57:18.6265134Z env:
+2026-10-29T13:57:18.6265709Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:18.6266521Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:18.6267779Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-10-29T13:57:18.6269032Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:18.6270203Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:18.6271396Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:18.6272538Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-10-29T13:57:18.6273827Z ##[endgroup]
+2026-10-29T13:57:18.7488765Z Found in cache @ /opt/hostedtoolcache/node/22.23.4/x64
+2026-10-29T13:57:18.7492302Z (node:2114) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-29T13:57:18.7495467Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-29T13:57:18.7497917Z ##[group]Environment details
+2026-10-29T13:57:19.1068298Z node: v22.23.4
+2026-10-29T13:57:19.1069154Z npm: 10.9.9
+2026-10-29T13:57:19.1069753Z yarn: 1.22.22
+2026-10-29T13:57:19.1071322Z ##[endgroup]
+2026-10-29T13:57:19.1085477Z [command]/opt/hostedtoolcache/node/22.23.4/x64/bin/npm config get cache
+2026-10-29T13:57:19.2028536Z /home/runner/.npm
+2026-10-29T13:57:19.3046688Z Cache hit for: node-cache-Linux-x64-npm-e546358fb9af87fbef14986075618828175f6a5a861585bf468ba889c005e003
+2026-10-29T13:57:19.3132312Z (node:2114) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-29T13:57:19.4967531Z Received 16366357 of 16366357 (100.0%), 101.4 MBs/sec
+2026-10-29T13:57:19.4968995Z Cache Size: ~16 MB (16366357 B)
+2026-10-29T13:57:19.4990549Z [command]/usr/bin/tar -xf /home/runner/work/_temp/64d09429-016e-47c7-916f-f047fb83a9a9/cache.tzst -P -C /home/runner/work/global-academic-prestige-index/global-academic-prestige-index --use-compress-program unzstd
+2026-10-29T13:57:19.5275234Z Cache restored successfully
+2026-10-29T13:57:19.5286716Z Cache restored from key: node-cache-Linux-x64-npm-e546358fb9af87fbef14986075618828175f6a5a861585bf468ba889c005e003
+2026-10-29T13:57:19.5482483Z ##[group]Run python -m pip install --no-deps -e .
+2026-10-29T13:57:19.5483944Z [36;1mpython -m pip install --no-deps -e .[0m
+2026-10-29T13:57:19.5514848Z shell: /usr/bin/bash -e {0}
+2026-10-29T13:57:19.5515661Z env:
+2026-10-29T13:57:19.5516309Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:19.5517194Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:19.5518629Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-10-29T13:57:19.5519961Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:19.5521150Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:19.5522334Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:19.5523645Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-10-29T13:57:19.5524670Z ##[endgroup]
+2026-10-29T13:57:20.2922292Z Obtaining file:///home/runner/work/global-academic-prestige-index/global-academic-prestige-index
+2026-10-29T13:57:20.2930959Z   Installing build dependencies: started
+2026-10-29T13:57:20.8804855Z   Installing build dependencies: finished with status 'done'
+2026-10-29T13:57:20.8809051Z   Checking if build backend supports build_editable: started
+2026-10-29T13:57:21.1543666Z   Checking if build backend supports build_editable: finished with status 'done'
+2026-10-29T13:57:21.1550439Z   Getting requirements to build editable: started
+2026-10-29T13:57:21.4325086Z   Getting requirements to build editable: finished with status 'done'
+2026-10-29T13:57:21.4332112Z   Preparing editable metadata (pyproject.toml): started
+2026-10-29T13:57:21.5904842Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+2026-10-29T13:57:21.5933207Z Building wheels for collected packages: gapi
+2026-10-29T13:57:21.5940675Z   Building editable for gapi (pyproject.toml): started
+2026-10-29T13:57:21.7664580Z   Building editable for gapi (pyproject.toml): finished with status 'done'
+2026-10-29T13:57:21.7669749Z   Created wheel for gapi: filename=gapi-0.2.0-0.editable-py3-none-any.whl size=8418 sha256=c93b39064dec1b84fe58e76c7cfb52e54020380fd5373b4e8972b5bd3216e32a
+2026-10-29T13:57:21.7671269Z   Stored in directory: /tmp/pip-ephem-wheel-cache-skc56pxx/wheels/44/33/31/dee25d683bb5dff989f6c17a385bfc1561d6f035d7c1bf0bff
+2026-10-29T13:57:21.7689720Z Successfully built gapi
+2026-10-29T13:57:21.7781427Z Installing collected packages: gapi
+2026-10-29T13:57:21.7890590Z Successfully installed gapi-0.2.0
+2026-10-29T13:57:21.8370085Z ##[group]Run python -m gapi demo --out-dir data/demo
+2026-10-29T13:57:21.8370438Z [36;1mpython -m gapi demo --out-dir data/demo[0m
+2026-10-29T13:57:21.8389754Z shell: /usr/bin/bash -e {0}
+2026-10-29T13:57:21.8389969Z env:
+2026-10-29T13:57:21.8390138Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:21.8390384Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.8390742Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-10-29T13:57:21.8391081Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.8391403Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.8391707Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.8392004Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-10-29T13:57:21.8392261Z ##[endgroup]
+2026-10-29T13:57:21.9723415Z ##[group]Run python -m unittest discover -s tests -v
+2026-10-29T13:57:21.9723753Z [36;1mpython -m unittest discover -s tests -v[0m
+2026-10-29T13:57:21.9742369Z shell: /usr/bin/bash -e {0}
+2026-10-29T13:57:21.9742583Z env:
+2026-10-29T13:57:21.9742745Z   GAPI_CODE_ONLY: 1
+2026-10-29T13:57:21.9743167Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.9743533Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+2026-10-29T13:57:21.9743881Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.9744184Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.9744764Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+2026-10-29T13:57:21.9745075Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+2026-10-29T13:57:21.9745336Z ##[endgroup]
+2026-10-29T13:57:22.2527293Z test_multilingual_explicit_labels_and_ambiguous_counterexamples (test_career_normalization.NormalizationTests.test_multilingual_explicit_labels_and_ambiguous_counterexamples) ... ok
+2026-10-29T13:57:22.2981235Z test_new_interpretation_keeps_raw_events_immutable_and_denominator_consistent (test_career_normalization.NormalizationTests.test_new_interpretation_keeps_raw_events_immutable_and_denominator_consistent) ... ok
+2026-10-29T13:57:22.3473265Z test_normalization_requires_a_new_version_when_policy_is_changed (test_career_normalization.NormalizationTests.test_normalization_requires_a_new_version_when_policy_is_changed) ... ok
+2026-10-29T13:57:22.3746383Z test_backoff_survives_reopen_and_new_work_has_priority (test_collection.CollectionTests.test_backoff_survives_reopen_and_new_work_has_priority) ... ok
+2026-10-29T13:57:22.4002078Z test_budget_refusal_propagates_and_preserves_pending_work (test_collection.CollectionTests.test_budget_refusal_propagates_and_preserves_pending_work) ... ok
+2026-10-29T13:57:22.4245721Z test_due_retry_gets_reserved_capacity_with_many_new_candidates (test_collection.CollectionTests.test_due_retry_gets_reserved_capacity_with_many_new_candidates) ... ok
+2026-10-29T13:57:22.4527504Z test_empty_sources_try_dump_once_and_do_not_loop_forever (test_collection.CollectionTests.test_empty_sources_try_dump_once_and_do_not_loop_forever) ... ok
+2026-10-29T13:57:22.4899949Z test_failed_first_candidate_cannot_starve_later_candidates (test_collection.CollectionTests.test_failed_first_candidate_cannot_starve_later_candidates) ... ok
+2026-10-29T13:57:22.5426615Z test_malformed_discovery_response_does_not_stop_other_source (test_collection.CollectionTests.test_malformed_discovery_response_does_not_stop_other_source) ... ok
+2026-10-29T13:57:22.5768572Z test_one_source_failure_does_not_stop_another_or_erase_queue (test_collection.CollectionTests.test_one_source_failure_does_not_stop_another_or_erase_queue) ... ok
+2026-10-29T13:57:22.6186112Z test_queue_refills_more_than_one_page_in_one_invocation (test_collection.CollectionTests.test_queue_refills_more_than_one_page_in_one_invocation) ... ok
+2026-10-29T13:57:22.6423868Z test_bad_orcid_not_queued_and_partial_last_page_is_exhausted (test_crossref_discovery.CrossrefDiscoveryTests.test_bad_orcid_not_queued_and_partial_last_page_is_exhausted) ... ok
+2026-10-29T13:57:22.6682215Z test_multiple_pages_resume_no_personal_payload_or_career_inference (test_crossref_discovery.CrossrefDiscoveryTests.test_multiple_pages_resume_no_personal_payload_or_career_inference) ... ok
+2026-10-29T13:57:22.6936609Z test_network_failure_does_not_advance_or_remove_existing_work (test_crossref_discovery.CrossrefDiscoveryTests.test_network_failure_does_not_advance_or_remove_existing_work) ... ok
+2026-10-29T13:57:22.7380958Z test_nonadvancing_full_page_and_malformed_envelope_rejected (test_crossref_discovery.CrossrefDiscoveryTests.test_nonadvancing_full_page_and_malformed_envelope_rejected) ... ok
+2026-10-29T13:57:22.7618854Z test_server_pause_prevents_next_invocation_without_mutating_cursor (test_crossref_discovery.CrossrefDiscoveryTests.test_server_pause_prevents_next_invocation_without_mutating_cursor) ... ok
+2026-10-29T13:57:22.7854025Z test_transaction_failure_keeps_cursor_and_queue_together (test_crossref_discovery.CrossrefDiscoveryTests.test_transaction_failure_keeps_cursor_and_queue_together) ... ok
+2026-10-29T13:57:22.8210293Z test_advancing_atomic_pages_survive_reopen_and_keep_legacy_queue (test_discovery.DiscoveryTests.test_advancing_atomic_pages_survive_reopen_and_keep_legacy_queue) ... ok
+2026-10-29T13:57:22.8630062Z test_cli_resume_drains_pending_queue_without_new_discovery (test_discovery.DiscoveryTests.test_cli_resume_drains_pending_queue_without_new_discovery) ... ok
+2026-10-29T13:57:22.8633830Z test_conflicting_orcid_not_selected_and_boundary_is_per_person (test_discovery.DiscoveryTests.test_conflicting_orcid_not_selected_and_boundary_is_per_person) ... ok
+2026-10-29T13:57:22.8963417Z test_failed_network_does_not_advance_or_remove_queue (test_discovery.DiscoveryTests.test_failed_network_does_not_advance_or_remove_queue) ... ok
+2026-10-29T13:57:22.8966873Z test_injection_and_page_size_rejected_before_http (test_discovery.DiscoveryTests.test_injection_and_page_size_rejected_before_http) ... ok
+2026-10-29T13:57:22.9347337Z test_page_commit_failure_rolls_back_queue_and_cursor_together (test_discovery.DiscoveryTests.test_page_commit_failure_rolls_back_queue_and_cursor_together) ... ok
+2026-10-29T13:57:22.9354053Z test_rejects_non_advancing_and_unordered_pages (test_discovery.DiscoveryTests.test_rejects_non_advancing_and_unordered_pages) ... ok
+2026-10-29T13:57:22.9611792Z test_changed_feed_identity_refuses_resume (test_dump_discovery.DumpTests.test_changed_feed_identity_refuses_resume) ... ok
+2026-10-29T13:57:23.0227877Z test_changed_replay_prefix_is_rejected_repeatedly_without_rebasing (test_dump_discovery.DumpTests.test_changed_replay_prefix_is_rejected_repeatedly_without_rebasing) ... ok
+2026-10-29T13:57:23.0621555Z test_compressed_budget_stops_without_promotion (test_dump_discovery.DumpTests.test_compressed_budget_stops_without_promotion) ... ok
+2026-10-29T13:57:23.0631116Z test_exact_official_feed_validation (test_dump_discovery.DumpTests.test_exact_official_feed_validation) ... ok
+2026-10-29T13:57:23.1140720Z test_hash_mismatch_and_truncation_never_verify_or_create_events (test_dump_discovery.DumpTests.test_hash_mismatch_and_truncation_never_verify_or_create_events) ... ok
+2026-10-29T13:57:23.1948019Z test_interruption_replay_deduplicates_and_checks_prefix (test_dump_discovery.DumpTests.test_interruption_replay_deduplicates_and_checks_prefix) ... ok
+2026-10-29T13:57:23.1993277Z test_oversized_line_is_drained_and_next_line_retained (test_dump_discovery.DumpTests.test_oversized_line_is_drained_and_next_line_retained) ... ok
+2026-10-29T13:57:23.2340506Z test_realistic_bulk_discovery_no_raw_or_canonical_events (test_dump_discovery.DumpTests.test_realistic_bulk_discovery_no_raw_or_canonical_events) ... ok
+2026-10-29T13:57:23.2599014Z test_mutated_snapshot_and_path_traversal_are_rejected (test_frozen_input.FrozenInputTests.test_mutated_snapshot_and_path_traversal_are_rejected) ... ok
+2026-10-29T13:57:23.3173269Z test_old_release_reproduces_after_live_ingest_and_reader_is_read_only (test_frozen_input.FrozenInputTests.test_old_release_reproduces_after_live_ingest_and_reader_is_read_only) ... ok
+2026-10-29T13:57:23.3396047Z test_snapshot_growth_is_part_of_same_budget (test_frozen_input.FrozenInputTests.test_snapshot_growth_is_part_of_same_budget) ... ok
+2026-10-29T13:57:23.3750967Z test_access_denial_pauses_one_source_without_requesting_other_people (test_global_analysis.AnalysisTests.test_access_denial_pauses_one_source_without_requesting_other_people) ... ok
+2026-10-29T13:57:23.3755376Z test_affiliation_identity_and_wrong_section_fail_closed (test_global_analysis.AnalysisTests.test_affiliation_identity_and_wrong_section_fail_closed) ... ok
+2026-10-29T13:57:23.4051474Z test_boundary_only_scenario_does_not_claim_fixed_universe_evidence (test_global_analysis.AnalysisTests.test_boundary_only_scenario_does_not_claim_fixed_universe_evidence) ... ok
+2026-10-29T13:57:23.4053790Z test_candidate_and_honorary_degrees_are_not_promoted (test_global_analysis.AnalysisTests.test_candidate_and_honorary_degrees_are_not_promoted) ... ok
+2026-10-29T13:57:23.4383663Z test_intensity_denominator_resolves_aliases_and_deduplicates_people (test_global_analysis.AnalysisTests.test_intensity_denominator_resolves_aliases_and_deduplicates_people) ... ok
+2026-10-29T13:57:23.4977816Z test_process_exit_releases_writer_and_rolls_back_current_member (test_global_analysis.AnalysisTests.test_process_exit_releases_writer_and_rolls_back_current_member) ... ok
+2026-10-29T13:57:23.5450952Z test_public_filter_excludes_unapproved_source_in_all_fields (test_global_analysis.AnalysisTests.test_public_filter_excludes_unapproved_source_in_all_fields) ... ok
+2026-10-29T13:57:23.6074127Z test_repeat_output_is_byte_identical_and_probabilities_conserve (test_global_analysis.AnalysisTests.test_repeat_output_is_byte_identical_and_probabilities_conserve) ... ok
+2026-10-29T13:57:23.6367139Z test_second_affiliation_failure_rolls_back_all_events_and_parts (test_global_analysis.AnalysisTests.test_second_affiliation_failure_rolls_back_all_events_and_parts) ... ok
+2026-10-29T13:57:23.6866412Z test_server_pause_survives_reopen_and_prevents_all_source_requests (test_global_analysis.AnalysisTests.test_server_pause_survives_reopen_and_prevents_all_source_requests) ... ok
+2026-10-29T13:57:23.7250566Z test_source_deletion_rejoins_surviving_alternative_evidence (test_global_analysis.AnalysisTests.test_source_deletion_rejoins_surviving_alternative_evidence) ... ok
+2026-10-29T13:57:23.7582493Z test_source_deletion_reports_filtered_edges_and_expanded_universe (test_global_analysis.AnalysisTests.test_source_deletion_reports_filtered_edges_and_expanded_universe) ... ok
+2026-10-29T13:57:23.7825460Z test_strict_api_uses_xml_incremental_reads_without_person_tree (test_global_analysis.AnalysisTests.test_strict_api_uses_xml_incremental_reads_without_person_tree) ... ok
+2026-10-29T13:57:23.8159293Z test_versioned_noncommercial_publication_policy_allows_only_aggregate_fields (test_global_analysis.AnalysisTests.test_versioned_noncommercial_publication_policy_allows_only_aggregate_fields) ... ok
+2026-10-29T13:57:23.8165003Z test_award_types_and_unattributed_awards_are_not_guessed (test_nobel.NobelTests.test_award_types_and_unattributed_awards_are_not_guessed) ... ok
+2026-10-29T13:57:23.8484939Z test_complete_inventory_is_deduplicated_private_and_idempotent (test_nobel.NobelTests.test_complete_inventory_is_deduplicated_private_and_idempotent) ... ok
+2026-10-29T13:57:23.9135400Z test_drift_duplicate_and_malformed_pages_do_not_advance (test_nobel.NobelTests.test_drift_duplicate_and_malformed_pages_do_not_advance) ... ok
+2026-10-29T13:57:23.9445083Z test_failed_page_preserves_previous_cursor_and_resume (test_nobel.NobelTests.test_failed_page_preserves_previous_cursor_and_resume) ... ok
+2026-10-29T13:57:23.9640168Z test_old_frozen_input_has_no_new_inventory_and_keeps_scores (test_nobel.NobelTests.test_old_frozen_input_has_no_new_inventory_and_keeps_scores) ... ok
+2026-10-29T13:57:23.9899203Z test_page_transaction_rolls_back_awards_and_cursor (test_nobel.NobelTests.test_page_transaction_rolls_back_awards_and_cursor) ... ok
+2026-10-29T13:57:24.0160595Z test_short_nonterminal_page_is_not_accepted_as_complete (test_nobel.NobelTests.test_short_nonterminal_page_is_not_accepted_as_complete) ... ok
+2026-10-29T13:57:24.0623705Z test_source_identity_and_rate_limit_are_persistent (test_nobel.NobelTests.test_source_identity_and_rate_limit_are_persistent) ... ok
+2026-10-29T13:57:24.0632647Z test_incremental_exact_sections_skip_scripts_and_biography (test_official_profiles.OfficialTests.test_incremental_exact_sections_skip_scripts_and_biography) ... ok
+2026-10-29T13:57:24.0889499Z test_official_underlying_confirmation_never_promotes_copied_origin (test_official_profiles.OfficialTests.test_official_underlying_confirmation_never_promotes_copied_origin) ... ok
+2026-10-29T13:57:24.0892677Z test_page_reference_routes_only_exact_official_profile_paths (test_official_profiles.OfficialTests.test_page_reference_routes_only_exact_official_profile_paths) ... ok
+2026-10-29T13:57:24.0896987Z test_wrong_year_or_institution_does_not_confirm (test_official_profiles.OfficialTests.test_wrong_year_or_institution_does_not_confirm) ... ok
+2026-10-29T13:57:24.0904827Z test_default_page_cache_is_temporary_and_removed (test_openalex.OpenAlexIngestionTests.test_default_page_cache_is_temporary_and_removed) ... ok
+2026-10-29T13:57:24.0934583Z test_import_is_resumable_and_emits_a_verifiable_compressed_snapshot (test_openalex.OpenAlexIngestionTests.test_import_is_resumable_and_emits_a_verifiable_compressed_snapshot) ... ok
+2026-10-29T13:57:24.0938300Z test_persistent_raw_cache_inside_project_is_rejected (test_openalex.OpenAlexIngestionTests.test_persistent_raw_cache_inside_project_is_rejected) ... ok
+2026-10-29T13:57:24.0940015Z test_retries_rate_limit_using_retry_after (test_openalex.OpenAlexIngestionTests.test_retries_rate_limit_using_retry_after) ... ok
+2026-10-29T13:57:24.1164637Z test_access_failure_does_not_advance_cursor_or_erase_queue (test_openalex_discovery.OpenAlexDiscoveryTests.test_access_failure_does_not_advance_cursor_or_erase_queue) ... ok
+2026-10-29T13:57:24.1393796Z test_cursor_resume_minimal_fields_dedup_and_no_career_inference (test_openalex_discovery.OpenAlexDiscoveryTests.test_cursor_resume_minimal_fields_dedup_and_no_career_inference) ... ok
+2026-10-29T13:57:24.1613868Z test_malformed_containers_rejected_without_queue_or_cursor (test_openalex_discovery.OpenAlexDiscoveryTests.test_malformed_containers_rejected_without_queue_or_cursor) ... ok
+2026-10-29T13:57:24.1831286Z test_nonadvancing_cursor_and_bad_orcid_are_not_accepted (test_openalex_discovery.OpenAlexDiscoveryTests.test_nonadvancing_cursor_and_bad_orcid_are_not_accepted) ... ok
+2026-10-29T13:57:24.1833764Z test_orcid_check_digit_and_ascii_format (test_openalex_discovery.OpenAlexDiscoveryTests.test_orcid_check_digit_and_ascii_format) ... ok
+2026-10-29T13:57:24.1841927Z test_administrative_roles_and_unresolved_joint_appointments_are_excluded (test_ranking.RankingTests.test_administrative_roles_and_unresolved_joint_appointments_are_excluded) ... ok
+2026-10-29T13:57:24.1849615Z test_award_duplicate_is_counted_once (test_ranking.RankingTests.test_award_duplicate_is_counted_once) ... ok
+2026-10-29T13:57:24.1854662Z test_config_rejects_invalid_alpha (test_ranking.RankingTests.test_config_rejects_invalid_alpha) ... ok
+2026-10-29T13:57:24.1861896Z test_default_policy_is_stricter_than_demo (test_ranking.RankingTests.test_default_policy_is_stricter_than_demo) ... ok
+2026-10-29T13:57:24.1870512Z test_demo_contains_multiple_stages_and_asymmetric_edges (test_ranking.RankingTests.test_demo_contains_multiple_stages_and_asymmetric_edges) ... ok
+2026-10-29T13:57:24.1928374Z test_demo_generator_writes_explanatory_scenarios (test_ranking.RankingTests.test_demo_generator_writes_explanatory_scenarios) ... ok
+2026-10-29T13:57:24.1937094Z test_demo_is_synthetic_and_low_coverage_is_unranked (test_ranking.RankingTests.test_demo_is_synthetic_and_low_coverage_is_unranked) ... ok
+2026-10-29T13:57:24.1946752Z test_duplicate_sources_do_not_duplicate_edges (test_ranking.RankingTests.test_duplicate_sources_do_not_duplicate_edges) ... ok
+2026-10-29T13:57:24.1952545Z test_edge_direction_rewards_training_institution (test_ranking.RankingTests.test_edge_direction_rewards_training_institution) ... ok
+2026-10-29T13:57:24.1959136Z test_equal_composite_scores_receive_a_shared_rank (test_ranking.RankingTests.test_equal_composite_scores_receive_a_shared_rank) ... ok
+2026-10-29T13:57:24.1967308Z test_event_without_evidence_is_rejected (test_ranking.RankingTests.test_event_without_evidence_is_rejected) ... ok
+2026-10-29T13:57:24.1976396Z test_manifest_binds_hashes_not_paths (test_ranking.RankingTests.test_manifest_binds_hashes_not_paths) ... ok
+2026-10-29T13:57:24.1981670Z test_missing_temporal_order_is_not_accepted (test_ranking.RankingTests.test_missing_temporal_order_is_not_accepted) ... ok
+2026-10-29T13:57:24.1988085Z test_overflowing_row_or_prior_sum_never_claims_convergence (test_ranking.RankingTests.test_overflowing_row_or_prior_sum_never_claims_convergence) ... ok
+2026-10-29T13:57:24.1992382Z test_tied_scores_receive_tied_percentiles (test_ranking.RankingTests.test_tied_scores_receive_tied_percentiles) ... ok
+2026-10-29T13:57:24.2000306Z test_unlicensed_accepted_event_is_rejected (test_ranking.RankingTests.test_unlicensed_accepted_event_is_rejected) ... ok
+2026-10-29T13:57:24.2007544Z test_unranked_rows_explain_eligibility_reasons (test_ranking.RankingTests.test_unranked_rows_explain_eligibility_reasons) ... ok
+2026-10-29T13:57:24.2014553Z test_default_import_uses_and_removes_temporary_raw_cache (test_ror.RorNormalizationTests.test_default_import_uses_and_removes_temporary_raw_cache) ... ok
+2026-10-29T13:57:24.2016506Z test_normalizes_real_registry_contract_without_inventing_a_score (test_ror.RorNormalizationTests.test_normalizes_real_registry_contract_without_inventing_a_score) ... ok
+2026-10-29T13:57:24.2018662Z test_persistent_raw_cache_inside_project_is_rejected (test_ror.RorNormalizationTests.test_persistent_raw_cache_inside_project_is_rejected) ... ok
+2026-10-29T13:57:24.2019894Z test_rejects_invalid_registry_ids (test_ror.RorNormalizationTests.test_rejects_invalid_registry_ids) ... ok
+2026-10-29T13:57:24.2027720Z test_body_read_obeys_expired_stage_and_closes_response (test_source_http.HTTPTests.test_body_read_obeys_expired_stage_and_closes_response) ... ok
+2026-10-29T13:57:24.2036271Z test_long_and_date_retry_after_pause_entire_source (test_source_http.HTTPTests.test_long_and_date_retry_after_pause_entire_source) ... ok
+2026-10-29T13:57:24.2037451Z test_no_retry_on_access_denial (test_source_http.HTTPTests.test_no_retry_on_access_denial) ... ok
+2026-10-29T13:57:24.2038795Z test_oversized_response_rejected (test_source_http.HTTPTests.test_oversized_response_rejected) ... ok
+2026-10-29T13:57:24.2040377Z test_rate_limit_honors_retry_after (test_source_http.HTTPTests.test_rate_limit_honors_retry_after) ... ok
+2026-10-29T13:57:24.2043918Z test_robots_disallow_and_unusable_202_block_crawling (test_source_http.HTTPTests.test_robots_disallow_and_unusable_202_block_crawling) ... ok
+2026-10-29T13:57:24.2049542Z test_stage_deadline_bounds_retries_and_restores_outer_runtime (test_source_http.HTTPTests.test_stage_deadline_bounds_retries_and_restores_outer_runtime) ... ok
+2026-10-29T13:57:24.2051432Z test_truncated_chunked_body_is_normalized_and_closed_without_retry (test_source_http.HTTPTests.test_truncated_chunked_body_is_normalized_and_closed_without_retry) ... ok
+2026-10-29T13:57:24.2053122Z test_untrusted_and_credentialed_urls_are_rejected (test_source_http.HTTPTests.test_untrusted_and_credentialed_urls_are_rejected) ... ok
+2026-10-29T13:57:24.2061852Z test_configured_project_scratch_is_rejected (test_storage.RawCacheBoundaryTests.test_configured_project_scratch_is_rejected) ... ok
+2026-10-29T13:57:24.2072431Z test_configured_scratch_directory_is_used_and_cleaned (test_storage.RawCacheBoundaryTests.test_configured_scratch_directory_is_used_and_cleaned) ... ok
+2026-10-29T13:57:24.2110616Z test_each_importer_cleans_partial_raw_files_on_failure (test_storage.RawCacheBoundaryTests.test_each_importer_cleans_partial_raw_files_on_failure) ... ok
+2026-10-29T13:57:24.2114149Z test_external_directory_is_accepted (test_storage.RawCacheBoundaryTests.test_external_directory_is_accepted) ... ok
+2026-10-29T13:57:24.2117515Z test_project_tree_is_rejected_as_persistent_raw_cache (test_storage.RawCacheBoundaryTests.test_project_tree_is_rejected_as_persistent_raw_cache) ... ok
+2026-10-29T13:57:24.2121408Z test_bounded_parser_and_stage (test_streaming.StreamingTests.test_bounded_parser_and_stage) ... ok
+2026-10-29T13:57:24.2335154Z test_budget_and_version_changes_rejected (test_streaming.StreamingTests.test_budget_and_version_changes_rejected) ... ok
+2026-10-29T13:57:24.2821155Z test_checksum_and_gzip_trailer_fail_closed (test_streaming.StreamingTests.test_checksum_and_gzip_trailer_fail_closed) ... ok
+2026-10-29T13:57:24.2823883Z test_educated_at_does_not_infer_doctorate (test_streaming.StreamingTests.test_educated_at_does_not_infer_doctorate) ... ok
+2026-10-29T13:57:24.3085237Z test_malicious_paths_and_entities_are_rejected_without_events (test_streaming.StreamingTests.test_malicious_paths_and_entities_are_rejected_without_events) ... ok
+2026-10-29T13:57:24.3087292Z test_nonfinite_and_negative_weights_rejected (test_streaming.StreamingTests.test_nonfinite_and_negative_weights_rejected) ... ok
+2026-10-29T13:57:24.3396794Z test_oversized_member_is_consumed_and_rejected_without_raw_disk (test_streaming.StreamingTests.test_oversized_member_is_consumed_and_rejected_without_raw_disk) ... ok
+2026-10-29T13:57:24.3400139Z test_pagerank_boundary_conserves_probability_and_zero_edges (test_streaming.StreamingTests.test_pagerank_boundary_conserves_probability_and_zero_edges) ... ok
+2026-10-29T13:57:24.3684553Z test_partial_resume_does_not_promote (test_streaming.StreamingTests.test_partial_resume_does_not_promote) ... ok
+2026-10-29T13:57:24.4017459Z test_process_member_change_rolls_back_without_duplication (test_streaming.StreamingTests.test_process_member_change_rolls_back_without_duplication) ... ok
+2026-10-29T13:57:24.4459391Z test_realistic_stream_complete_and_idempotent_replay (test_streaming.StreamingTests.test_realistic_stream_complete_and_idempotent_replay) ... ok
+2026-10-29T13:57:24.4907802Z test_wrong_upstream_hash_never_promotes (test_streaming.StreamingTests.test_wrong_upstream_hash_never_promotes) ... ok
+2026-10-29T13:57:24.5148609Z test_disappearing_journal_does_not_turn_budget_probe_into_source_failure (test_task_resources.ResourceTests.test_disappearing_journal_does_not_turn_budget_probe_into_source_failure) ... ERROR
+2026-10-29T13:57:24.5385429Z test_disk_free_space_refusal_preserves_prior_progress (test_task_resources.ResourceTests.test_disk_free_space_refusal_preserves_prior_progress) ... ok
+2026-10-29T13:57:24.5613467Z test_http_request_reservation_settles_and_survives_reopen (test_task_resources.ResourceTests.test_http_request_reservation_settles_and_survives_reopen) ... ok
+2026-10-29T13:57:24.6260084Z test_memory_probe_reuses_native_structure_without_per_chunk_class_growth (test_task_resources.ResourceTests.test_memory_probe_reuses_native_structure_without_per_chunk_class_growth) ... ok
+2026-10-29T13:57:24.6533728Z test_process_temp_settings_are_restored (test_task_resources.ResourceTests.test_process_temp_settings_are_restored) ... ok
+2026-10-29T13:57:24.6740582Z test_request_reservation_is_conservative_for_an_uninstrumented_transport (test_task_resources.ResourceTests.test_request_reservation_is_conservative_for_an_uninstrumented_transport) ... ok
+2026-10-29T13:57:24.6744649Z test_corrupt_pinned_edge_cache_fails_closed (test_us_faculty.PublishedFacultyHiringImportTests.test_corrupt_pinned_edge_cache_fails_closed) ... ok
+2026-10-29T13:57:24.6750327Z test_default_ingest_removes_temporary_raw_cache_after_success (test_us_faculty.PublishedFacultyHiringImportTests.test_default_ingest_removes_temporary_raw_cache_after_success) ... ok
+2026-10-29T13:57:24.6753246Z test_persistent_raw_cache_inside_project_is_rejected (test_us_faculty.PublishedFacultyHiringImportTests.test_persistent_raw_cache_inside_project_is_rejected) ... ok
+2026-10-29T13:57:24.6763245Z test_rejects_negative_counts_and_conflicting_source_names (test_us_faculty.PublishedFacultyHiringImportTests.test_rejects_negative_counts_and_conflicting_source_names) ... ok
+2026-10-29T13:57:24.6770933Z test_same_pinned_input_produces_identical_scores (test_us_faculty.PublishedFacultyHiringImportTests.test_same_pinned_input_produces_identical_scores) ... ok
+2026-10-29T13:57:24.6778861Z test_uses_only_all_academia_rows_and_employer_to_degree_direction (test_us_faculty.PublishedFacultyHiringImportTests.test_uses_only_all_academia_rows_and_employer_to_degree_direction) ... ok
+2026-10-29T13:57:24.6779635Z 
+2026-10-29T13:57:24.6779871Z ======================================================================
+2026-10-29T13:57:24.6780987Z ERROR: test_disappearing_journal_does_not_turn_budget_probe_into_source_failure (test_task_resources.ResourceTests.test_disappearing_journal_does_not_turn_budget_probe_into_source_failure)
+2026-10-29T13:57:24.6782254Z ----------------------------------------------------------------------
+2026-10-29T13:57:24.6782628Z Traceback (most recent call last):
+2026-10-29T13:57:24.6783659Z   File "/home/runner/work/global-academic-prestige-index/global-academic-prestige-index/tests/test_task_resources.py", line 58, in test_disappearing_journal_does_not_turn_budget_probe_into_source_failure
+2026-10-29T13:57:24.6784486Z     with patch.object(Path,'stat',stat):self.assertEqual(s.task.used(),baseline-32)
+2026-10-29T13:57:24.6784891Z                                                          ^^^^^^^^^^^^^
+2026-10-29T13:57:24.6785436Z   File "/home/runner/work/global-academic-prestige-index/global-academic-prestige-index/src/gapi/task.py", line 79, in used
+2026-10-29T13:57:24.6786227Z     if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+2026-10-29T13:57:24.6786530Z        ^^^^^^^^^^^^^^^^^
+2026-10-29T13:57:24.6786934Z   File "/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py", line 914, in is_symlink
+2026-10-29T13:57:24.6787336Z     return S_ISLNK(self.lstat().st_mode)
+2026-10-29T13:57:24.6787576Z                    ^^^^^^^^^^^^
+2026-10-29T13:57:24.6787963Z   File "/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/pathlib.py", line 847, in lstat
+2026-10-29T13:57:24.6788351Z     return self.stat(follow_symlinks=False)
+2026-10-29T13:57:24.6788600Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-10-29T13:57:24.6789153Z   File "/home/runner/work/global-academic-prestige-index/global-academic-prestige-index/tests/test_task_resources.py", line 56, in stat
+2026-10-29T13:57:24.6789755Z     if path==journal:raise FileNotFoundError('journal committed during scan')
+2026-10-29T13:57:24.6790134Z                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-10-29T13:57:24.6790466Z FileNotFoundError: journal committed during scan
+2026-10-29T13:57:24.6790638Z 
+2026-10-29T13:57:24.6790831Z ----------------------------------------------------------------------
+2026-10-29T13:57:24.6791122Z Ran 129 tests in 2.428s
+2026-10-29T13:57:24.6791245Z 
+2026-10-29T13:57:24.6791337Z FAILED (errors=1)
+2026-10-29T13:57:24.6958860Z ##[error]Process completed with exit code 1.
+2026-10-29T13:57:24.7089801Z Post job cleanup.
+2026-10-29T13:57:24.7802501Z [command]/usr/bin/git version
+2026-10-29T13:57:24.7839233Z git version 2.56.0
+2026-10-29T13:57:24.7870661Z Temporarily overriding HOME='/home/runner/work/_temp/a86d525a-56ec-40f5-ae77-37cf7b08a527' before making global git config changes
+2026-10-29T13:57:24.7871769Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-29T13:57:24.7875425Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/global-academic-prestige-index/global-academic-prestige-index
+2026-10-29T13:57:24.7911078Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-29T13:57:24.7943026Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-29T13:57:24.8166685Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-29T13:57:24.8194971Z http.https://github.com/.extraheader
+2026-10-29T13:57:24.8205379Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-29T13:57:24.8238113Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-29T13:57:24.8457353Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-29T13:57:24.8498498Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-29T13:57:24.8847727Z Cleaning up orphan processes
+2026-10-29T13:57:24.9152952Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@11d5960a326750d5838078e36cf38b85af677262, actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020, actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
