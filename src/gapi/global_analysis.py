@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from .ranking import DEFAULT_CONFIG, pagerank
+from .career_rules import classify
 from .storage import project_root
 from .task import BudgetStop, canonical, digest
 
@@ -142,6 +143,8 @@ def relation_rows(store, *, allowed_sources=None):
             continue
         row = json.loads(payload)
         row["institution"], row["status"] = institution, status
+        if source.startswith('orcid-'):
+            row['kind'], row['stage'] = classify(row['kind'],row.get('role'))
         events.append(row)
     if events:
         yield from relations(events)
@@ -154,7 +157,9 @@ def rank_global(store, *, public=False):
     corroborated = Counter()
     by_source = defaultdict(lambda: defaultdict(float))
     recent_edges = defaultdict(float)
+    relation_count = 0
     for (employer, training, stage), train, job in relation_rows(store, allowed_sources=allowed):
+        relation_count += 1
         key = employer, training
         counts[training] += 1
         source_counts[training].update((train["source"], job["source"]))
@@ -170,7 +175,7 @@ def rank_global(store, *, public=False):
         # Bound Python sparse graph size; do not silently sample beyond this limit.
         if len(edges) > 200000:
             raise BudgetStop("sparse graph exceeds bounded in-memory analysis; use partitioned graph backend")
-        if sum(counts.values()) % 1000 == 0:
+        if relation_count % 1000 == 0:
             store.task.check_memory()
     nodes = sorted({endpoint for edge in edges for endpoint in edge})
     network, convergence = pagerank(nodes, dict(sorted(edges.items())), .85, 1e-12, 200)
@@ -283,10 +288,14 @@ def export_release(store, out: Path):
     for row in store.db.execute("SELECT source,locator,sha256,status FROM members ORDER BY source,locator"):
         if row[0] in allowed:
             member_hash.update(canonical(row))
+    events_hash = hashlib.sha256()
+    for row in store.db.execute('SELECT id,institution,status,payload,source FROM events ORDER BY id'):
+        if row[-1] in allowed:
+            events_hash.update(canonical(row))
     manifest = {"schema_version":"gapi-public-release/v1", "snapshot":filename, "output_sha256":checksum,
-        "sources":inputs,"member_index_sha256":member_hash.hexdigest(),"config_sha256":digest(store.task.config),
+        "sources":inputs,"member_index_sha256":member_hash.hexdigest(),"normalized_event_index_sha256":events_hash.hexdigest(),"config_sha256":digest(store.task.config),
         "code_commit":subprocess.check_output(["git","rev-parse","HEAD"],cwd=project_root(),text=True).strip(),
-        "code_tree_sha256":digest({str(p.relative_to(project_root())).replace('\\','/'):hashlib.sha256(p.read_bytes()).hexdigest()
+        "code_tree_sha256":digest({str(p.relative_to(project_root())).replace('\\','/'):hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest()
             for p in sorted((project_root()/'src/gapi').glob('*.py'))}),
         "environment":{"python":platform.python_version()},"review_status":"pending-independent-dual-track",
         "publication_status":result["publication_status"]}
