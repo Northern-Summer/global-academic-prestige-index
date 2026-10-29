@@ -58,7 +58,9 @@ export function outputHashes(outDir) {
 }
 
 function git(root,...args) {
-  return execFileSync('git',args,{cwd:root,maxBuffer:2*1024*1024,stdio:['ignore','pipe','pipe']});
+  // Committed snapshots have the same 32 MiB bound as local inputs. A smaller
+  // subprocess buffer would reject a legitimate release above 2 MiB.
+  return execFileSync('git',args,{cwd:root,maxBuffer:32*1024*1024+1,stdio:['ignore','pipe','pipe']});
 }
 
 function selection(root,manifestPath) {
