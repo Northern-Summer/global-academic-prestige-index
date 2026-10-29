@@ -270,7 +270,7 @@ def rank_global(store, *, public=False, publication_policy=None):
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
 
 
-def export_release(store, out: Path, *, publication_policy=None):
+def export_release(store, out: Path, *, publication_policy=None, frozen_input=None):
     """Public, licensed institution aggregates only; no individual trajectories."""
     if out.resolve() != (project_root()/"outputs/global").resolve():
         raise ValueError("public release output must use the budget-accounted outputs/global directory")
@@ -310,6 +310,8 @@ def export_release(store, out: Path, *, publication_policy=None):
     if publication_policy is not None:
         manifest['publication_policy']=publication_policy
         manifest['publication_policy_sha256']=digest(publication_policy)
+    if frozen_input is not None:
+        manifest['private_normalized_input']=frozen_input
     (out/"manifest.json").write_bytes(canonical(manifest))
     (out/"SHA256SUMS").write_text(f"{checksum}  {filename}\n",encoding="ascii")
     return manifest

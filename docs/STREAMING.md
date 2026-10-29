@@ -219,7 +219,7 @@ $env:GAPI_LOCAL_BUILD='1'
 npm run build
 
 # A public eligible observation release (refuses no-edge/unlicensed inputs):
-python -m gapi export-release --publication-policy configs/publication-20261029.json
+python -m gapi export-release --publication-policy configs/publication-20261029.json --freeze-input
 # Unset GAPI_LOCAL_BUILD and select outputs/global/manifest.json before public build.
 ```
 
@@ -232,6 +232,25 @@ fail the ranking build. The optional 3D module loads on demand and has a complet
 table-based entry point; its displayed subset is explicitly limited.
 
 ## Remaining acceptance gates
+
+For historical reproduction, `--freeze-input` creates a content-addressed private
+SQLite copy of normalized events/evidence/crosswalks in the external task's
+`frozen-inputs` directory. These are structured computation inputs, not original
+XML or archives. The copy is admitted against the same 2 GiB cap with write reserve;
+if it cannot fit, freezing stops rather than silently increasing storage. Existing
+snapshots are hash-verified and reused. They contain controlled personal inputs
+and must never be uploaded as release assets. The manifest contains only the
+snapshot filename/hash/size and its private status. Authorized reviewers need
+controlled access to these inputs for exact numerical reconstruction.
+
+```powershell
+python -m gapi export-release --publication-policy configs/publication-20261029.json --frozen-input HASH.sqlite
+```
+
+The reader rejects hash mismatches, paths and writes. Later ingestion can change the
+live database while an older selected input still reconstructs its original output.
+The frozen copy is useful for the current bounded release; repeated copies remain
+subject to the same budget and are not claimed to scale to unlimited version retention.
 
 The explicit `--publication-policy configs/publication-20261029.json` release
 selection permits noncommercial ORCID public-record institution derivatives under

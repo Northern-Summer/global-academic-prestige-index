@@ -41,6 +41,9 @@ def register(sub):
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
             parser.add_argument('--publication-policy',type=Path)
+            group=parser.add_mutually_exclusive_group()
+            group.add_argument('--freeze-input',action='store_true')
+            group.add_argument('--frozen-input',help='private normalized snapshot filename, never a public file')
         if name == 'corroborate':
             parser.add_argument('--official',action='store_true')
             parser.add_argument('--max-pages',type=int,default=20)
@@ -127,11 +130,24 @@ def execute_task(task, args):
             result["pending_discovery"] = dict(store.db.execute('''SELECT d.source,count(*) FROM discovery d
                 WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=CASE WHEN d.source='ingest-wikidata' THEN 'wikidata' ELSE 'orcid-public-api' END
                 AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) GROUP BY d.source'''))
+        elif args.command=='export-release':
+            from .global_analysis import export_release
+            from .frozen_input import freeze_input, frozen_reader
+            from contextlib import nullcontext
+            policy=json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None
+            snapshot=freeze_input(store) if args.freeze_input else None
+            if args.frozen_input:
+                import re
+                if not re.fullmatch(r'[a-f0-9]{64}\.sqlite',args.frozen_input):
+                    raise ValueError('frozen input requires a content-addressed filename')
+                path=task.root/'frozen-inputs'/args.frozen_input
+                snapshot={'sha256':args.frozen_input.removesuffix('.sqlite'),'filename':args.frozen_input,
+                    'bytes':path.stat().st_size,'contains_personal_input':True,'publicly_bundled':False}
+            with frozen_reader(store,snapshot['filename']) if snapshot else nullcontext():
+                result=export_release(store,args.out,publication_policy=policy,frozen_input=snapshot)
         else:
             from .global_analysis import corroborate, export_release, export_local
-            result = {"corroborate": corroborate, "rank-global": export_local,
-                      "export-release": lambda s: export_release(s, args.out,publication_policy=
-                          json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None)}[args.command](store)
+            result = {"corroborate": corroborate, "rank-global": export_local}[args.command](store)
             if args.command=='corroborate' and args.official:
                 from .official_profiles import check_official_profiles
                 result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)

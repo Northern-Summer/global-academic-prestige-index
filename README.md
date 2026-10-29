@@ -37,7 +37,7 @@ npm run build
 A score-bearing production build requires an explicitly selected real release manifest. Hash/path errors, missing inputs and restricted datasets fail closed. `export-release` exports only source-permitted institution aggregates. The reviewed noncommercial ORCID aggregate policy is explicit:
 
 ```powershell
-python -m gapi export-release --publication-policy configs/publication-20261029.json
+python -m gapi export-release --publication-policy configs/publication-20261029.json --freeze-input
 npm run build
 ```
 

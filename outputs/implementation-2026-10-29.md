@@ -209,3 +209,11 @@ linked works, the US study, missing awards and formal ranking remain excluded.
 The global-design target remains open: complete frozen enumeration, substantially
 wider independent official corroboration, official awards, full OOD analysis and
 external dual-track review are not achieved by these implementation tests.
+
+Historical reproduction now supports a budget-admitted private normalized SQLite
+snapshot. It freezes the input events/member hashes/crosswalks without preserving
+original source XML or copying personal inputs into the project. A regression
+changes live event statuses after freezing and confirms the original public score
+bytes reproduce from the read-only snapshot. Tampering, path traversal, write
+attempts and insufficient budget are rejected. This adds one small private input
+copy for the current release, not unlimited snapshot retention outside the cap.
