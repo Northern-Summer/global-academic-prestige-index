@@ -1,0 +1,11 @@
+# Routing only; enforced review/branch protection require repository settings.
+# This owner is an implementation reviewer, not an independent auditor.
+/.github/ @Northern-Summer
+/src/gapi/ @Northern-Summer
+/configs/ @Northern-Summer
+/docs/ @Northern-Summer
+/web/ @Northern-Summer
+/vite.config.js @Northern-Summer
+/scripts/ @Northern-Summer
+/outputs/publish-preview.py @Northern-Summer
+/outputs/global/manifest.json @Northern-Summer

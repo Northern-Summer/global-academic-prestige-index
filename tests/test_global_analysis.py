@@ -103,6 +103,72 @@ class AnalysisTests(unittest.TestCase):
             self.assertEqual(result['sensitivity']['delete_source_orcid-public-api']['edges'],1)
         finally:s.close()
 
+    def seed_conflicting_jobs(self, store, *, include_reference=True):
+        for source in ('wikidata','orcid-public-api'):
+            store.start(source)
+        facts = [
+            ('orcid-public-api','conflicted-person','X','education','doctorate',1990,1995,'PhD'),
+            ('wikidata','conflicted-person','Y','employment','academic',2000,None,'Professor'),
+            ('orcid-public-api','conflicted-person','Z','employment','academic',2000,None,'Professor'),
+        ]
+        if include_reference:
+            facts += [
+                ('orcid-public-api','reference-person','V','education','doctorate',1990,1995,'PhD'),
+                ('orcid-public-api','reference-person','W','employment','academic',2000,None,'Professor'),
+            ]
+        for source in ('wikidata','orcid-public-api'):
+            with store.member(source,'conflict-fixture'):
+                for fact_source,person,institution,kind,stage,start,end,role in facts:
+                    if fact_source != source:continue
+                    store.event(dict(source=source,person=person,institution=institution,kind=kind,
+                        stage=stage,year_start=start,year_end=end,role=role,locator='conflict-fixture',
+                        status='observed',country='CN'))
+                store.finish_member(source,'conflict-fixture','d'*64)
+
+    def test_source_deletion_reports_filtered_edges_and_expanded_universe(self):
+        s=self.store(archive([]))
+        try:
+            self.seed_conflicting_jobs(s)
+            result=rank_global(s)
+            self.assertEqual(result['algorithm']['network_universe'],['V','W'])
+            self.assertEqual(result['algorithm']['method_version'],'gapi-observed-network/2')
+            fixed=result['sensitivity']['delete_source_wikidata']
+            self.assertEqual((fixed['available_edges'],fixed['edges'],fixed['filtered_boundary_edges']),(2,1,1))
+            self.assertEqual(fixed['new_endpoints'],['X','Z'])
+            self.assertEqual(set(fixed['ranks']),{'V','W'})
+            self.assertAlmostEqual(fixed['probability_mass'],1,places=12)
+            expanded=result['expanded_universe_sensitivity']['delete_source_wikidata']
+            self.assertEqual((expanded['available_edges'],expanded['edges'],expanded['filtered_boundary_edges']),(2,2,0))
+            self.assertEqual(set(expanded['ranks']),{'V','W','X','Z'})
+            self.assertAlmostEqual(expanded['probability_mass'],1,places=12)
+            self.assertEqual(expanded['universe_kind'],'reference-plus-new-endpoints')
+            self.assertIn('fixed-reference-universe',result['uncertainty']['rank_range_scope'])
+            by_id={node['institution_id']:node for node in result['nodes']}
+            self.assertIsNone(by_id['X']['rank_range'])
+            for node in ('V','W'):
+                fixed_ranks=[scenario['ranks'][node] for scenario in result['sensitivity'].values()
+                             if not scenario['prior_only']]
+                self.assertEqual(by_id[node]['rank_range'],[min(fixed_ranks),max(fixed_ranks)])
+            self.assertEqual(result,rank_global(s))
+        finally:s.close()
+
+    def test_boundary_only_scenario_does_not_claim_fixed_universe_evidence(self):
+        s=self.store(archive([]))
+        try:
+            self.seed_conflicting_jobs(s,include_reference=False)
+            result=rank_global(s)
+            self.assertEqual(result['algorithm']['network_universe'],[])
+            fixed=result['sensitivity']['delete_source_wikidata']
+            self.assertEqual((fixed['available_edges'],fixed['edges'],fixed['filtered_boundary_edges']),(1,0,1))
+            self.assertTrue(fixed['prior_only'])
+            self.assertEqual(fixed['probability_mass'],0)
+            expanded=result['expanded_universe_sensitivity']['delete_source_wikidata']
+            self.assertFalse(expanded['prior_only'])
+            self.assertEqual(expanded['new_endpoints'],['X','Z'])
+            self.assertAlmostEqual(expanded['probability_mass'],1,places=12)
+            self.assertGreater(expanded['ranks']['Z'],expanded['ranks']['X'])
+        finally:s.close()
+
     def test_process_exit_releases_writer_and_rolls_back_current_member(self):
         s=self.store(archive([]));s.close()
         code='''import os,sys

@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { validateGlobal } from './web/global-data.js';
+import {DOCUMENTATION,sourceInputs,writeBuildProvenance} from './scripts/build-provenance.mjs';
 
 const base = process.env.GITHUB_ACTIONS === 'true' ? '/global-academic-prestige-index/' : '/';
 
-const documentation = ['METHODOLOGY.md', 'DATA_SOURCES.md', 'DATA_SCHEMA.md', 'BIAS_AND_LIMITATIONS.md', 'RED_TEAM_REPORT.md', 'STREAMING.md'];
+const documentation = DOCUMENTATION;
+const buildRoot = dirname(fileURLToPath(import.meta.url));
+const buildInputs = sourceInputs(buildRoot);
 
 export default defineConfig({
   base,
@@ -19,7 +22,7 @@ export default defineConfig({
       // The US sample is local-only; production has no route or rights to it.
       return html.replace(/<!-- LOCAL_SAMPLE_START -->[\s\S]*?<!-- LOCAL_SAMPLE_END -->/g, '')
         .replace('<a href="#rankings">US sample</a>', '')
-        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">PUBLIC OBSERVATION RELEASE</span><p>Only licensed institution aggregates are published. Collection, independent corroboration and external review are incomplete.</p><a href="./docs/STREAMING.md">Coverage and source boundaries ↘</a></aside>');
+        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">观测版本 · 非正式全球排名</span><p>只公开获许可的机构汇总。来源扫描、独立核验和第三方审查尚未完成，缺失数据不会被算成低分。</p><a href="./docs/STREAMING.md">查看覆盖范围与来源边界 ↘</a></aside>');
     },
     configureServer(server) {
       const localScores = fileURLToPath(new URL('./data/real/us-academia-network.json', import.meta.url));
@@ -66,6 +69,11 @@ export default defineConfig({
       if (!localOnly && (manifest.publication_status !== 'public-observations-pending-external-review' || snapshot.publication_status !== manifest.publication_status)) throw new Error('Local/restricted dataset cannot be published');
       this.emitFile({type:'asset', fileName:`data/global/${basename(manifest.snapshot)}`, source});
       this.emitFile({type:'asset', fileName:'data/global/manifest.json', source:JSON.stringify(manifest)});
+    },
+    writeBundle(options) {
+      writeBuildProvenance({root:buildRoot,outDir:resolve(options.dir || 'dist'),base,expectedInputs:buildInputs,
+        mode:process.env.GAPI_CODE_ONLY === '1' ? 'code-only' : process.env.GAPI_LOCAL_BUILD === '1' ? 'local-only' : 'public-observations',
+        manifestPath:process.env.GAPI_RELEASE_MANIFEST || 'outputs/global/manifest.json'});
     },
   }],
 });

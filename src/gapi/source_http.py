@@ -20,7 +20,7 @@ USER_AGENT = "GAPI/0.2 (+https://github.com/Northern-Summer/global-academic-pres
 ORCID_ANONYMOUS_DAILY_READS = 25000
 HOSTS = {"orcid.figshare.com", "ndownloader.figshare.com", "api.figshare.com", "s3-eu-west-1.amazonaws.com",
          "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org", "dumps.wikimedia.org",
-         "www.tamucc.edu", "api.openalex.org", "api.crossref.org"}
+         "www.tamucc.edu", "api.openalex.org", "api.crossref.org", "api.nobelprize.org"}
 
 
 class SourcePause(RuntimeError):
@@ -188,6 +188,8 @@ class PublicHTTP:
             p.hostname == "pub.orcid.org" and re.fullmatch(r"/v3\.0/\d{4}-\d{4}-\d{4}-\d{3}[\dX]/(record|educations|employments)", p.path)
             or p.hostname == "www.wikidata.org" and re.fullmatch(r"/wiki/Special:EntityData/Q[1-9]\d*\.json", p.path)
             or p.hostname == "query.wikidata.org" and p.path == "/sparql"
+            # The official developer zone explicitly documents this free public API.
+            or p.hostname == "api.nobelprize.org" and p.path == "/2.1/laureates"
         )
         if not documented_api:
             self.allowed(url)

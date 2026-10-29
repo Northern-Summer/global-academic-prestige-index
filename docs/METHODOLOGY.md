@@ -1,5 +1,29 @@
 # GAPI Methodology
 
+## Current global observation method
+
+The global pipeline uses `gapi-observed-network/2`: fixed-reference parameter
+ranges exclude prior-only and expanded-universe scenarios. If source deletion
+reveals new endpoints (for example by removing conflicting concurrent jobs),
+`expanded_universe_sensitivity` computes the wider graph. Scenario edge counts
+report edges admitted to the matrix; available/boundary-filtered edges are
+separate. Historical bytes require their recorded code revision and frozen input;
+new methodology does not silently preserve a defect to manufacture matching hashes.
+
+`normalize-careers` writes separately versioned deterministic interpretations,
+preserving original events. `career-interpretation/3` recognizes a narrow
+full-label vocabulary and marks explicitly unfinished/nondegree studies
+unresolved. It does not promote observations to independent corroboration. Its
+hash/count enter the output; intensity uses the same interpreted training
+population. A vocabulary cannot resolve all languages or prove a person's claim.
+
+Reference scores appear as shares of the frozen network, not employment rates.
+Direct contributions are `alpha * r_y * W_yx / sum_x W_yx`; the remainder is uniform
+teleportation and dangling-node return. Stage charts show weighted relation
+amounts, not causal effects. The chart shows the top eight direct contributors;
+the 2D relationship table paginates the complete filtered edge set independently
+of Three.js's explicit 500-node/2,000-edge display cap.
+
 ## Current page: U.S. aggregate hiring sample preview
 
 This method applies only to the local real-data view produced by `gapi ingest-us-faculty`. It does not describe the canonical person-event reference implementation, synthetic teaching fixtures, award scoring, or a global university ranking.

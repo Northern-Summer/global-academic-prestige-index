@@ -16,7 +16,7 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name in ('discover-wikidata-dump','collect-global'):
@@ -26,6 +26,9 @@ def register(sub):
             parser.add_argument('--max-compressed-bytes', type=int)
         if name == 'collect-global':
             parser.add_argument('--batch-members',type=int,default=50)
+        if name == 'ingest-nobel':
+            parser.add_argument('--source', type=Path, default=Path('configs/nobel-20261029.json'))
+            parser.add_argument('--max-pages', type=int, default=100)
         if name in ('discover-openalex','discover-crossref'):
             parser.add_argument('--pages',type=int,default=1)
             parser.add_argument('--per-page',type=int,default=50 if name=='discover-crossref' else 200)
@@ -50,7 +53,7 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -72,7 +75,14 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command in ('discover-openalex','discover-crossref'):
+        if args.command == 'normalize-careers':
+            from .career_normalization import normalize_careers
+            result = normalize_careers(store)
+        elif args.command == 'ingest-nobel':
+            from .nobel import ingest_nobel, load_source
+            result = ingest_nobel(store, http, load_source(args.source), max_pages=args.max_pages,
+                max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r), flush=True))
+        elif args.command in ('discover-openalex','discover-crossref'):
             if args.command=='discover-openalex':
                 from .openalex_discovery import discover_openalex as discover
             else:
@@ -152,6 +162,8 @@ def execute_task(task, args):
                 from .official_profiles import check_official_profiles
                 result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)
         print(json.dumps(result, indent=2, sort_keys=True))
+        if args.command == 'ingest-nobel' and result and result.get('status') == 'resumable-source-boundary':
+            raise SystemExit(2)
         if args.command == 'ingest-orcid' and any(r['source']=='orcid-2026-summary' and r['status'] in ('access_failed','failed') for r in result['sources']):
             raise SystemExit(2)
     finally:

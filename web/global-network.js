@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 export function showNetwork(container, slice, onPick) {
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
-  catch { container.textContent = 'WebGL unavailable. Use the complete relationship table below.'; return () => {}; }
+  catch { container.textContent = '3D 暂不可用；请使用下方可分页的有向关系列表。'; return () => {}; }
   const width = Math.max(240, container.clientWidth), height = 360;
   renderer.setSize(width, height); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.domElement.setAttribute('aria-label', '3D employer to training network. Equivalent directional edges are listed below.');

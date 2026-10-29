@@ -17,6 +17,7 @@ python -m gapi collect-global --max-seconds 900 --batch-members 50
 python -m gapi ingest-wikidata --discover --resume --max-members 200 --max-seconds 300
 python -m gapi ingest-orcid-api --discover --resume --max-members 200 --max-seconds 300
 python -m gapi corroborate
+python -m gapi ingest-nobel --resume --max-pages 100 --max-seconds 300
 python -m gapi quality
 python -m gapi rank-global
 npm run dev
@@ -50,7 +51,9 @@ excluded from public export.
 
 Implemented: source/config freezes; bounded SAX/gzip/tar processing; affiliation-only ORCID XML with atomic two-section evidence; independent OpenAlex/Crossref/Wikidata candidate discovery; repeated page refill; persistent source backoff and fair retry queues; rolling-day ORCID request reservations; atomic member transactions, OS writer lock and replay; Wikidata revisions/references; conservative stage and stable-ID rules; unresolved queues; probability-conserving PageRank; observed qualification reasons; source-deletion scenarios rebuilt from surviving evidence; hash-bound institution exports; accessible table/details/CSV and on-demand Three.js.
 
-Remaining: complete frozen global source enumeration, independent official-profile corroboration, fuller entity crosswalks, official award data and attribution, discipline/English-coverage OOD analysis, and independent dual-track red-team review. Awards and composite scores stay missing without evidence. Matching source statements does not alone establish independent confirmation. No employment probability or causal training effect is claimed.
+The separate official Nobel API importer supplies a resumable, hash-bound inventory of award events and award-time affiliation labels. It never infers education, joins people by name, or assigns prizes to every past employer. Public summaries exclude recipient records. A completed live API selection does not establish a frozen historical census or complete coverage of all academic awards.
+
+Remaining: complete frozen global source enumeration, independent official-profile corroboration, fuller entity crosswalks, canonical award attribution and additional official award families, discipline/English-coverage OOD analysis, and independent dual-track red-team review. University award and composite scores stay missing without evidence. Matching source statements does not alone establish independent confirmation. No employment probability or causal training effect is claimed.
 
 The existing ROR/OpenAlex directory collectors and US study importer are preserved legacy commands. They use external temporary raw caches and **do not** satisfy the new zero-raw-disk acquisition contract. Do not run them as part of the strict streaming flow. The preserved normalized ROR directory supplies verified identity crosswalks; its directory size is never presented as career-flow coverage.
 

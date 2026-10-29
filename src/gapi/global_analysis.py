@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import os
 import platform
 import subprocess
@@ -106,12 +107,16 @@ def corroborate(store):
 
 def relation_rows(store, *, allowed_sources=None):
     """Read one person's bounded events at a time. No population-sized JSON/list."""
+    from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
+    enriched = has_interpretations(store)
     statuses = {r[0]: r[1] for r in store.db.execute("SELECT source,status FROM runs")}
-    cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source
-        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+    columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
+    join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
+    cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source""" + columns + """
+        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution""" + join + """
         WHERE EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
           AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
-        ORDER BY e.person,e.id""")
+        ORDER BY e.person,e.id""", (VERSION, POLICY_SHA256) if enriched else ())
     person, events = None, []
     def relations(items):
         trainings = [e for e in items if e["kind"] in ("education", "training") and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
@@ -129,13 +134,15 @@ def relation_rows(store, *, allowed_sources=None):
                     continue
                 seen.add(key)
                 yield key, train, job
-    for pid, payload, institution, status, source in cursor:
+    for pid, payload, institution, status, source, interpreted_kind, interpreted_stage, interpreted_status in cursor:
         if person is not None and pid != person:
             yield from relations(events)
             events = []
         person = pid
         if len(events) >= 4096:
             raise BudgetStop("person event fanout exceeds bounded relation analysis")
+        if interpreted_status is not None:
+            status = interpreted_status
         if status not in ("observed", "corroborated") or not institution:
             continue
         if allowed_sources is not None and source not in allowed_sources:
@@ -146,6 +153,8 @@ def relation_rows(store, *, allowed_sources=None):
         row["institution"], row["status"] = institution, status
         if source.startswith('orcid-'):
             row['kind'], row['stage'] = classify(row['kind'],row.get('role'))
+        if interpreted_status is not None:
+            row['kind'], row['stage'] = interpreted_kind, interpreted_stage
         events.append(row)
     if events:
         yield from relations(events)
@@ -190,12 +199,29 @@ def rank_global(store, *, public=False, publication_policy=None):
                      if allowed is None or r[1] in allowed}
     ordering = sorted(network, key=lambda node: (-network[node], node))
     order = {node: i+1 for i, node in enumerate(ordering)}
-    scenarios = {}
+    scenarios, expanded_scenarios = {}, {}
+    reference_nodes = set(nodes)
     def scenario(label, changed_edges, alpha=.85, personalization=None):
-        scores, conv = pagerank(nodes, dict(sorted(changed_edges.items())), alpha, 1e-12, 1000, personalization)
-        scenarios[label] = {"converged":conv["converged"], "edges":len(changed_edges),
-            "prior_only":not any(changed_edges.values()),
-            "ranks":{node:i+1 for i,node in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))}}
+        if len(changed_edges) > 200000:
+            raise BudgetStop('sensitivity graph exceeds bounded sparse analysis')
+        store.task.check_memory()
+        positive_edges = {edge:weight for edge,weight in changed_edges.items() if weight > 0}
+        new_endpoints = sorted({endpoint for edge in positive_edges for endpoint in edge} - reference_nodes)
+        fixed_edges = {edge:weight for edge,weight in positive_edges.items()
+                       if edge[0] in reference_nodes and edge[1] in reference_nodes}
+        def evaluate(universe, valid_edges, boundary):
+            scores, conv = pagerank(universe, dict(sorted(valid_edges.items())), alpha, 1e-12, 1000, personalization)
+            return {"converged":conv["converged"], "edges":len(valid_edges),
+                "available_edges":len(positive_edges), "filtered_boundary_edges":len(positive_edges)-len(valid_edges),
+                "new_endpoints":new_endpoints, "universe_kind":boundary, "node_count":len(universe),
+                "probability_mass":math.fsum(scores.values()), "prior_only":not bool(valid_edges),
+                "ranks":{node:i+1 for i,node in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))}}
+        scenarios[label] = evaluate(nodes, fixed_edges, 'fixed-reference-universe')
+        if new_endpoints:
+            # Removing conflicting evidence can reveal previously excluded jobs.
+            # Keep this expanded comparison separate from the fixed-universe rank range.
+            expanded_scenarios[label] = evaluate(sorted(reference_nodes | set(new_endpoints)),
+                                                  positive_edges, 'reference-plus-new-endpoints')
     for alpha in (.65, .85, .95):
         scenario(f"alpha_{alpha}",edges,alpha)
     for stage in DEFAULT_CONFIG["stage_weights"]:
@@ -215,14 +241,28 @@ def rank_global(store, *, public=False, publication_policy=None):
     if nodes:
         scenario("region_balanced_prior",edges,personalization={node:1/groups[directory.get(node,(None,None,{}))[2].get("region") or "unknown"] for node in nodes})
     # Conditional intensity: denominator is observed training people, never graduates at risk.
+    from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     denominators = Counter()
     denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
         FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
         WHERE e.kind IN ('education','training') AND e.status IN ('observed','corroborated')"""
     params = ()
+    if has_interpretations(store):
+        # The explicit v2 view counts its interpreted training observations in
+        # the same denominator; old frozen inputs retain their predecessor view.
+        denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
+            FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+            LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?
+            WHERE COALESCE(i.kind,e.kind) IN ('education','training')
+            AND COALESCE(i.status,e.status) IN ('observed','corroborated')
+            AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
+                AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
+            AND (e.source!='orcid-2026-summary' OR EXISTS(
+                SELECT 1 FROM runs r WHERE r.source=e.source AND r.status='verified'))"""
+        params = (VERSION, POLICY_SHA256)
     if allowed is not None:
         denominator_sql += " AND e.source IN (" + ','.join('?' for _ in allowed) + ")"
-        params = tuple(sorted(allowed))
+        params += tuple(sorted(allowed))
     for institution, count in store.db.execute(denominator_sql + " GROUP BY COALESCE(a.institution,e.institution)",params):
         if institution:
             denominators[institution] = count
@@ -257,17 +297,32 @@ def rank_global(store, *, public=False, publication_policy=None):
         coverage = {"people":len(people), "events":sum(statuses.values()), "countries":sorted(countries),
                     "event_status":dict(statuses), "member_status":dict(store.db.execute(
                         f"SELECT status,count(*) FROM members WHERE source IN ({placeholders}) GROUP BY status", tuple(sorted(allowed))))}
-    return {"schema_version":"gapi-global-observed/v1","dataset_kind":"real/global-public-observations",
+    result = {"schema_version":"gapi-global-observed/v1","dataset_kind":"real/global-public-observations",
         "publication_status":"public-observations-pending-external-review" if public else "local-only-source-license-review",
         "scope":{"complete_global_census":False,"enumeration_complete":False,"source_scope":"committed, individually hashed records; annual archive excluded until verified"},
         "coverage":coverage,"nodes":rows,
         "edges":[{"source":s,"target":t,"weight":w,"stages":dict(stages[(s,t)])} for (s,t),w in sorted(edges.items())],
-        "algorithm":{"direction":"employer -> training","config":DEFAULT_CONFIG,"network_universe":nodes},
-        "convergence":convergence,"sensitivity":scenarios,
+        "algorithm":{"method_version":"gapi-observed-network/2", "direction":"employer -> training",
+            "config":DEFAULT_CONFIG,"network_universe":nodes,
+            "version_boundary":"New method outputs supersede predecessor calculations; historical bytes require their frozen inputs and pinned predecessor code."},
+        "convergence":convergence,"sensitivity":scenarios,"expanded_universe_sensitivity":expanded_scenarios,
         "uncertainty":{"kind":"parameter-scenarios-only","unknown_global_missingness_covered":False,
+            "rank_range_scope":"fixed-reference-universe; excludes prior-only and expanded-universe scenarios",
             "not_run":["discipline","bootstrap","english_source_deletion","official_profile_loss"],
             "intensity_denominator":"observed training people; not all graduates or job seekers"},
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
+    from .nobel import public_inventory
+    awards = public_inventory(store)
+    if awards is not None:
+        result['official_award_inventory'] = awards
+        result['limitations'][1] = 'Formal ranking, complete canonical award scoring and composite data are unavailable.'
+    from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
+    if has_interpretations(store) and (allowed is None or 'orcid-public-api' in allowed):
+        interpreted = store.db.execute('SELECT count(*) FROM event_interpretations WHERE rule_version=? AND policy_sha256=?', (VERSION, POLICY_SHA256)).fetchone()[0]
+        result['algorithm']['normalization_policy'] = {'version': VERSION, 'policy_sha256': POLICY_SHA256,
+            'interpreted_events': interpreted, 'canonical_events_modified': 0,
+            'confidence': 'observed-only; lexical rules do not corroborate facts'}
+    return result
 
 
 def export_release(store, out: Path, *, publication_policy=None, frozen_input=None):
@@ -312,6 +367,11 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         manifest['publication_policy_sha256']=digest(publication_policy)
     if frozen_input is not None:
         manifest['private_normalized_input']=frozen_input
+    if 'official_award_inventory' in result:
+        awards = result['official_award_inventory']
+        manifest['official_award_source_sha256'] = awards['source_sha256']
+        manifest['normalized_award_index_sha256'] = awards['normalized_award_index_sha256']
+        manifest['official_award_page_index_sha256'] = awards['page_index_sha256']
     (out/"manifest.json").write_bytes(canonical(manifest))
     (out/"SHA256SUMS").write_text(f"{checksum}  {filename}\n",encoding="ascii")
     return manifest

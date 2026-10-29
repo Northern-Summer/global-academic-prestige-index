@@ -77,7 +77,7 @@ def _accepted_events(
 def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float, tolerance: float, max_iterations: int, personalization: dict[str, float] | None = None) -> tuple[dict[str, float], dict[str, Any]]:
     if len(set(nodes)) != len(nodes):
         raise ValueError("PageRank nodes must be unique")
-    if not 0 <= alpha < 1 or tolerance <= 0 or max_iterations < 1:
+    if not math.isfinite(alpha) or not math.isfinite(tolerance) or not 0 <= alpha < 1 or tolerance <= 0 or type(max_iterations) is not int or max_iterations < 1:
         raise ValueError("invalid PageRank parameters")
     if any(not math.isfinite(value) or value < 0 for value in edges.values()):
         raise ValueError("edge weights must be finite and non-negative")
@@ -89,6 +89,8 @@ def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float
         if set(personalization) - set(nodes) or any(not math.isfinite(v) or v < 0 for v in personalization.values()) or sum(personalization.values()) <= 0:
             raise ValueError("invalid personalization vector")
         total = sum(personalization.values())
+        if not math.isfinite(total):
+            raise ValueError("personalization sum exceeds finite arithmetic")
         prior = [personalization.get(node, 0.0) / total for node in nodes]
     else:
         prior = [1.0 / n] * n
@@ -98,6 +100,8 @@ def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float
     for (source, _target), value in valid_edges.items():
         if source in index:
             outgoing[index[source]] += value
+    if any(not math.isfinite(total) for total in outgoing):
+        raise ValueError("outgoing weight sum exceeds finite arithmetic")
     rank = prior[:]
     error = math.inf
     iterations = 0
@@ -111,6 +115,8 @@ def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float
         rank = next_rank
         if error < tolerance:
             break
+    if not math.isclose(math.fsum(rank), 1.0, rel_tol=0, abs_tol=1e-10):
+        raise ValueError("PageRank probability mass is not conserved")
     return dict(zip(nodes, rank)), {"iterations": iterations, "error": error, "converged": error < tolerance}
 
 

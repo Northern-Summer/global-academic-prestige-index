@@ -6,6 +6,15 @@ from gapi.ranking import DEFAULT_CONFIG, _percentiles, calculate_rankings, pager
 
 
 class RankingTests(unittest.TestCase):
+    def test_overflowing_row_or_prior_sum_never_claims_convergence(self):
+        with self.assertRaisesRegex(ValueError,'finite arithmetic'):
+            pagerank(['a','b'],{('a','a'):1e308,('a','b'):1e308},.85,1e-12,200)
+        with self.assertRaisesRegex(ValueError,'finite arithmetic'):
+            pagerank(['a','b'],{},.85,1e-12,200,{'a':1e308,'b':1e308})
+        scores,conv=pagerank(['a','b'],{('a','b'):1e-300},.85,1e-12,200)
+        self.assertTrue(conv['converged'])
+        self.assertAlmostEqual(sum(scores.values()),1)
+
     def setUp(self):
         payload = build_demo()
         self.institutions, self.education, self.employment, self.awards, self.evidence = parse_dataset(payload)

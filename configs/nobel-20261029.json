@@ -1,0 +1,14 @@
+{
+  "id": "nobel-official-20261029",
+  "kind": "nobel-laureate-pages/v1",
+  "url": "https://api.nobelprize.org/2.1/laureates",
+  "page_size": 25,
+  "license": "CC0-1.0-with-service-terms",
+  "terms_url": "https://www.nobelprize.org/about/terms-of-use-for-api-nobelprize-org-and-data-nobelprize-org/",
+  "documentation_url": "https://www.nobelprize.org/about/developer-zone-2/",
+  "terms_checked_on": "2026-10-29",
+  "allow_institution_aggregates": true,
+  "rule_version": "official-nobel-affiliation-inventory/1",
+  "measurement": "official award-time affiliations; no inferred education or employment events",
+  "refresh_policy": "new collection id for refresh; committed pages are immutable"
+}

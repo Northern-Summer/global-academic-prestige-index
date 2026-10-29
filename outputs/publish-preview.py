@@ -8,13 +8,19 @@ import argparse
 import re
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('gapi_publish', root/'outputs/publish-git-api.py')
-pub = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(pub)
+pub = None
 receipt = root/'outputs/github-preview-receipt.json'
+
+
+def load_transport():
+    global pub
+    spec = importlib.util.spec_from_file_location('gapi_publish', root/'outputs/publish-git-api.py')
+    pub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pub)
 
 
 def git_sha(kind, body):
@@ -54,11 +60,21 @@ def main():
     global receipt
     parser=argparse.ArgumentParser()
     parser.add_argument('--tag',default='v0.2.0-preview')
+    parser.add_argument('--preflight-only',action='store_true',help='verify local committed build; no transport or credentials')
     args=parser.parse_args()
     if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-[a-z0-9.-]+',args.tag):
         raise ValueError('only an explicit prerelease tag is supported')
     receipt=root/('outputs/github-preview-'+args.tag+'-receipt.json')
+    # Execute the shared local preflight before credential use or remote mutation.
+    provenance = json.loads(subprocess.check_output(
+        ['node',str(root/'scripts/build-provenance.mjs'),'verify','--publish'],cwd=root,text=True))
+    if args.preflight_only:
+        print(json.dumps(provenance))
+        return
+    load_transport()
     head = pub.git('rev-parse','HEAD').decode().strip()
+    if provenance['source_commit'] != head:
+        raise RuntimeError('source revision changed during publication preflight')
     if pub.client.request('GET','/user')['login'] != 'Northern-Summer':
         raise RuntimeError('account identity changed')
     if pub.read('/git/ref/heads/'+pub.branch)['object']['sha'] != head:
@@ -68,12 +84,16 @@ def main():
     if selected != built or built['publication_status'] != 'public-observations-pending-external-review':
         raise RuntimeError('selected/built public manifest mismatch')
     files = {p.relative_to(root/'dist').as_posix():p.read_bytes() for p in (root/'dist').rglob('*') if p.is_file()}
+    output_hashes = {path:hashlib.sha256(body).hexdigest() for path,body in files.items() if path != 'build-provenance.json'}
+    if output_hashes != provenance['outputs'] or hashlib.sha256(files['build-provenance.json']).hexdigest() != provenance['provenance_sha256']:
+        raise RuntimeError('build changed after preflight; captured site cannot be published')
     if sum(map(len,files.values())) > 8*1024**2 or any(path.startswith('data/local/') for path in files):
         raise RuntimeError('site exceeds reviewed bounds or contains private dataset')
     if hashlib.sha256(files['data/global/'+built['snapshot']]).hexdigest() != built['output_sha256']:
         raise RuntimeError('site snapshot identity mismatch')
     files['.nojekyll'] = b''
-    manifest = {'source_commit':head, 'ranking_status':'observations-only-pending-independent-review',
+    manifest = {'source_commit':head, 'build_provenance_sha256':provenance['provenance_sha256'],
+        'ranking_status':'observations-only-pending-independent-review',
         'files':{path:hashlib.sha256(body).hexdigest() for path,body in sorted(files.items())}}
     files['site-manifest.json'] = json.dumps(manifest,sort_keys=True,separators=(',',':')).encode()
     expected_tree = tree_sha(files)
