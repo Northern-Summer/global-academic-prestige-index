@@ -67,16 +67,22 @@ class Task:
 
     def used(self) -> int:
         total = 0
+        def size_if_present(path):
+            try:return path.stat().st_size
+            except FileNotFoundError:
+                # A journal/test directory can disappear between enumeration
+                # and stat. Permission/other observation errors still escape.
+                return 0
         for folder, dirs, files in os.walk(self.root, followlinks=False):
             for name in [*dirs, *files]:
                 path = Path(folder) / name
                 if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
                     raise ValueError("links are forbidden in the task storage tree")
-            total += sum((Path(folder) / name).stat().st_size for name in files)
+            total += sum(size_if_present(Path(folder) / name) for name in files)
         # Count new release/build outputs too; existing real input snapshots are not copied.
         for directory in (project_root() / "outputs", project_root() / "dist"):
             if directory.exists():
-                total += sum(p.stat().st_size for p in directory.rglob("*") if p.is_file())
+                total += sum(size_if_present(p) for p in directory.rglob("*") if p.is_file())
         return total
 
     def check(self, anticipated: int = 0) -> int:

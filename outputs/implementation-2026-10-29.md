@@ -142,3 +142,70 @@ creation or a successful upload alone is not evidence of a live site. External
 dual-track review, official-profile adapters, complete enumeration and fuller OOD
 analysis remain unfinished. The user's complete-global-statistics objective has
 not been achieved by this preview.
+
+## Continuation: source-independent discovery, affiliation streams and fair retry
+
+Preserved predecessor commit `0f120ef` before further changes. The prior collector
+was allowed to finish; no second real-data writer was started concurrently. Added
+Crossref's public metadata cursor as another candidate source. Its initial ascending
+index selection returned three pages without usable ORCIDs; these pages remain as
+feed v1 evidence. A distinct descending-index v2 selection committed three pages,
+yielding 148, 150 and 158 valid identifiers (456 before queue/cross-page dedup).
+OpenAlex's first page committed 200 candidates, but its second page returned 401.
+No account, key or alternate protected route was used. Candidate sources never
+become education/employment assertions or independent corroboration.
+
+ORCID ingestion now streams only education and employment XML sections. The 109
+members acquired by the new section path transferred 847,393 total body bytes,
+about 7.6 KiB/member in this observed mix; this is not a population-wide estimate.
+Both sections, their exact identities, hashes, URLs and events commit atomically.
+Truncation of the second section rolls back the first. Earlier whole-record members
+remain immutable. All raw XML, archives and author response bodies remain unsaved.
+
+The finite collection loop repeatedly replenishes pages, isolates discovery and
+career sources, retains bounded progress history, and persists individual backoff.
+One quarter of normal batches is reserved for due retries, preventing permanent
+starvation by newly discovered candidates. Long/date-form Retry-After instructions
+persist as source cooldowns across invocations. HTTP stage deadlines bound retry
+admission. A rolling-day task ledger reserves worst-case ORCID requests before the
+network and settles actual attempts; crashes retain conservative reservations. It
+does not account for other software on the same IP or earlier uninstrumented calls.
+
+One read-only internal review found three P1 defects and a P2 starvation risk:
+source-wide rate-limit signaling, malformed discovery containers, deletion-source
+sensitivity erasing surviving alternate evidence, and due-retry starvation. All
+have deterministic regression fixtures. Source deletion now filters and rejoins
+person events before deduplication. A transient disappeared-journal stat during
+concurrent tests was observed in the real collector and fixed without suppressing
+permission errors. The internal review is not an independent third-party audit.
+
+Executed full verification: 112 Python tests with 23 subtests and 13 Node tests.
+Real 15-minute continuation ended at its declared time boundary, not a source
+failure. At that frozen checkpoint: 3,612 events; 954 person keys; 76 reported
+country/territory codes; 772 observed and 2,840 unresolved events; ORCID 350 and
+Wikidata 689 committed members. 134 deduplicated qualifying relations form 119
+weighted edges over 162 scored endpoints. The directory contains 1,582 observed
+institution identifiers, not necessarily 1,582 distinct resolved institutions.
+PageRank converged in 27 iterations, residual 3.6716636675482306e-13. Recalculation
+produced the same local snapshot SHA-256:
+`01574652825a6e29b68a2615548ac2d2cc4c3563910d10d3ebe03e205564cf38`.
+
+Browser runtime checks bound this exact snapshot to the served manifest and passed
+search/filter/sort, keyboard details, CSV, Three.js, WebGL fallback and mobile layout.
+Desktop/mobile screenshots were actually viewed. Task/build/release data accounted
+about 48 MiB before final publication; SQLite integrity was OK, and raw source-file
+bytes detected were zero. The frozen ORCID annual route and checksum remain
+unavailable, while Wikidata dump discovery has processed only its 256 MiB prefix.
+No global source-enumeration completeness is asserted.
+
+The official ORCID terms were reviewed live on 2026-10-29. Terms of Use sections 3
+and 4 explicitly permit distribution/public display of public Record Data; API
+terms still constrain acquisition to noncommercial use. A separately versioned
+`configs/publication-20261029.json` therefore permits institution aggregates for this
+noncommercial research release, without editing the acquisition lock or labeling
+API data CC0. Manifest policy hashes preserve the exact decision. Public histories,
+linked works, the US study, missing awards and formal ranking remain excluded.
+
+The global-design target remains open: complete frozen enumeration, substantially
+wider independent official corroboration, official awards, full OOD analysis and
+external dual-track review are not achieved by these implementation tests.

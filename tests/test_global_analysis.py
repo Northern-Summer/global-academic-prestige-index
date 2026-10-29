@@ -47,6 +47,27 @@ class AnalysisTests(unittest.TestCase):
                 self.assertIsNone(node['formal_rank'])
         finally:s.close()
 
+    def test_versioned_noncommercial_publication_policy_allows_only_aggregate_fields(self):
+        from pathlib import Path
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:
+                s.db.execute('''UPDATE events SET role=CASE WHEN kind='education' THEN 'Master' ELSE 'Professor' END,
+                    payload=json_set(payload,'$.role',CASE WHEN kind='education' THEN 'Master' ELSE 'Professor' END)
+                    WHERE source='orcid-public-api' ''')
+            policy=json.loads(Path('configs/publication-20261029.json').read_text())
+            result=rank_global(s,public=True,publication_policy=policy)
+            self.assertEqual(len(result['edges']),2)
+            text=json.dumps(result)
+            self.assertNotIn('restricted-person',text)
+            self.assertNotIn('private-person',text)
+            self.assertNotIn('put_code',text)
+            self.assertIsNone(result['nodes'][0]['formal_rank'])
+            policy['purpose']='revenue-generating'
+            with self.assertRaises(ValueError):rank_global(s,public=True,publication_policy=policy)
+        finally:s.close()
+
     def test_repeat_output_is_byte_identical_and_probabilities_conserve(self):
         s=self.store(archive([]))
         try:
@@ -59,6 +80,27 @@ class AnalysisTests(unittest.TestCase):
             result=json.loads(first)
             self.assertAlmostEqual(sum(n['network_score'] or 0 for n in result['nodes']),1)
             self.assertTrue(result['sensitivity']['delete_source_wikidata']['converged'])
+        finally:s.close()
+
+    def test_source_deletion_rejoins_surviving_alternative_evidence(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            # The same person's doctorate has a second source, which must survive
+            # removal of the first source before the person-level join/dedup.
+            with s.member('orcid-public-api','alternative'):
+                s.event(dict(source='orcid-public-api',person='private-person',institution='wd:Q1',
+                    kind='education',stage='doctorate',role='PhD',year_start=2000,year_end=2005,
+                    locator='alternative',status='observed',country='CN'))
+                s.event(dict(source='orcid-public-api',person='private-person',institution='wd:Q2',
+                    kind='employment',stage='academic',role='Professor',year_start=2010,year_end=None,
+                    locator='alternative',status='observed',country='CN'))
+                s.finish_member('orcid-public-api','alternative','c'*64)
+            result=rank_global(s)
+            remaining=result['sensitivity']['delete_source_wikidata']
+            self.assertEqual(remaining['edges'],1)
+            self.assertFalse(remaining['prior_only'])
+            self.assertEqual(result['sensitivity']['delete_source_orcid-public-api']['edges'],1)
         finally:s.close()
 
     def test_process_exit_releases_writer_and_rolls_back_current_member(self):
@@ -95,18 +137,85 @@ os._exit(19)
         class HTTP:
             def open(self,url,accept):
                 if accept!='application/vnd.orcid+xml': raise AssertionError('must use XML')
-                return Response(XML)
+                section=url.rsplit('/',1)[-1]
+                if section not in ('educations','employments'):raise AssertionError('irrelevant person/works data requested')
+                body=XML.replace(b'<record path="/'+PERSON.encode()+b'"',
+                                 b'<educations path="/'+PERSON.encode()+b'/educations"').replace(b'</record>',b'</educations>')
+                return Response(body if section=='educations' else b'<employments path="/'+PERSON.encode()+b'/employments"/>')
         s=self.store(archive([]))
         try:
             result=ingest_orcid_api(s,HTTP(),[PERSON])
             self.assertEqual(result['events'],1)
             payload=json.loads(s.db.execute('SELECT payload FROM events').fetchone()[0])
-            self.assertEqual(payload['transport'],'incremental-xml-no-tree')
+            self.assertEqual(payload['transport'],'incremental-affiliation-xml/v1')
+            self.assertEqual(s.db.execute('SELECT count(*) FROM member_parts').fetchone()[0],2)
         finally:s.close()
 
     def test_candidate_and_honorary_degrees_are_not_promoted(self):
         for value in ('PhD candidate','honorary PhD','PhD student','在读博士'):
             self.assertIsNone(classify('education',value)[1])
+
+    def test_second_affiliation_failure_rolls_back_all_events_and_parts(self):
+        class Response(io.BytesIO):
+            headers={'Content-Type':'application/vnd.orcid+xml'}
+        class HTTP:
+            def open(self,url,accept):
+                if url.endswith('/employments'):raise OSError('truncated second section')
+                return Response(XML.replace(b'<record path="/'+PERSON.encode()+b'"',
+                    b'<educations path="/'+PERSON.encode()+b'/educations"').replace(b'</record>',b'</educations>'))
+        s=self.store(archive([]))
+        try:
+            ingest_orcid_api(s,HTTP(),[PERSON])
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM member_parts').fetchone()[0],0)
+            self.assertIsNone(s.seen('orcid-public-api',PERSON))
+            self.assertEqual(s.db.execute('SELECT attempts FROM discovery_retries').fetchone()[0],1)
+        finally:s.close()
+
+    def test_affiliation_identity_and_wrong_section_fail_closed(self):
+        from gapi.orcid_stream import SummaryParser
+        for body in (b'<educations path="/different/educations"/>',
+                     b'<educations path="/'+PERSON.encode()+b'/educations"><employment-summary/></educations>'):
+            parser=SummaryParser('private','source',PERSON,lambda event:None,section='educations')
+            with self.subTest(body=body),self.assertRaises(ValueError):
+                parser.feed(body,True)
+
+    def test_access_denial_pauses_one_source_without_requesting_other_people(self):
+        from urllib.error import HTTPError
+        class HTTP:
+            calls=0
+            def open(self,url,accept):
+                self.calls+=1
+                raise HTTPError(url,403,'Forbidden',{},None)
+        s=self.store(archive([]))
+        try:
+            http=HTTP()
+            ingest_orcid_api(s,http,[PERSON,'0000-0001-5109-3700'])
+            self.assertEqual(http.calls,1)
+            self.assertEqual(s.db.execute("SELECT status FROM runs WHERE source='orcid-public-api'").fetchone()[0],'access_failed')
+        finally:s.close()
+
+    def test_server_pause_survives_reopen_and_prevents_all_source_requests(self):
+        from gapi.career_store import CareerStore
+        from gapi.task import Task
+        from gapi.source_http import SourcePause
+        import time
+        class HTTP:
+            calls=0
+            def open(self,url,accept):
+                self.calls+=1
+                raise SourcePause(429,time.time()+120,'server requested two minutes')
+        s=self.store(archive([]))
+        http=HTTP()
+        ingest_orcid_api(s,http,[PERSON,'0000-0001-5109-3700'])
+        self.assertEqual(http.calls,1)
+        s.close()
+        s=CareerStore(Task(self.path))
+        try:
+            ingest_orcid_api(s,http,[PERSON])
+            self.assertEqual(http.calls,1)
+            self.assertFalse(s.source_ready('orcid-public-api'))
+        finally:s.close()
 
     def test_intensity_denominator_resolves_aliases_and_deduplicates_people(self):
         s=self.store(archive([]))

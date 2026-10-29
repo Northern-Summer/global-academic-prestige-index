@@ -23,10 +23,13 @@ def private_person(orcid):
 
 class SummaryParser:
     """Retains whitelisted affiliation fields only, never an XML/person tree."""
-    def __init__(self, person, source, locator, emit, max_events=4096):
+    def __init__(self, person, source, locator, emit, max_events=4096, *, section=None):
         self.person, self.source, self.locator, self.emit = person, source, locator, emit
         candidate = locator.rsplit("/", 1)[-1].removesuffix(".xml")
         self.expected_orcid = candidate if re.fullmatch(ORCID, candidate) else None
+        if section not in (None,'educations','employments'):
+            raise ValueError('unsupported affiliation section')
+        self.section=section
         self.path, self.current = [], None
         self.max_events, self.count = max_events, 0
         self.parser = expat.ParserCreate(namespace_separator="}")
@@ -42,12 +45,17 @@ class SummaryParser:
 
     def start(self, tag, attrs):
         local = tag.rsplit("}", 1)[-1]
-        if not self.path and self.expected_orcid and (local != "record" or attrs.get("path") != "/" + self.expected_orcid):
-            raise ValueError("ORCID XML root identity does not match frozen member locator")
+        if not self.path and self.expected_orcid:
+            root=self.section or 'record'
+            expected_path='/'+self.expected_orcid+('/'+self.section if self.section else '')
+            if local!=root or attrs.get('path')!=expected_path:
+                raise ValueError("ORCID XML root identity does not match frozen member locator")
         self.path.append(local)
         if len(self.path) > 64:
             raise ValueError("XML nesting exceeds bound")
         if local in ("education-summary", "employment-summary"):
+            if self.section and local != self.section.removesuffix('s')+'-summary':
+                raise ValueError('affiliation appears in the wrong section')
             if self.current is not None:
                 raise ValueError("nested affiliation")
             self.current = {"kind": local.split("-", 1)[0], "put_code": attrs.get("put-code", "")[:128], "fields": {}}

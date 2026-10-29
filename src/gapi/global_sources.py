@@ -7,15 +7,23 @@ import time
 from xml.parsers.expat import ExpatError
 from datetime import datetime, timezone
 from urllib.parse import quote
+from urllib.error import HTTPError
 
 from .career_rules import classify, year, valid_orcid
-from .orcid_stream import ORCID, private_person, SummaryParser, CHUNK
+from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
+from .source_http import SourcePause, ORCID_ANONYMOUS_DAILY_READS
 
 DEGREES = {"Q752297": "doctorate", "Q849697": "doctorate", "Q177232": "master", "Q163727": "bachelor"}
 
 
+def access_refused(exc):
+    return isinstance(exc,(PermissionError,SourcePause)) or isinstance(exc,HTTPError) and exc.code in (401,403,429)
+
+
 def wd_value(snak):
+    if not isinstance(snak,dict) or not isinstance(snak.get('datavalue',{}),dict):
+        raise ValueError('invalid Wikidata snak/value container')
     return snak.get("datavalue", {}).get("value")
 
 
@@ -26,8 +34,22 @@ def qualifier_year(claim, prop):
 
 
 def wikidata_events(entity, content_hash):
+    if not isinstance(entity,dict) or not isinstance(entity.get('id'),str) or not re.fullmatch(r'Q[1-9]\d*',entity['id']):
+        raise ValueError('invalid Wikidata entity identity')
+    if type(entity.get('lastrevid')) is not int or entity['lastrevid']<=0 or not isinstance(entity.get('claims',{}),dict):
+        raise ValueError('invalid Wikidata revision/claims')
     qid, revision = entity["id"], entity["lastrevid"]
     claims = entity.get("claims", {})
+    for prop in ('P69','P108','P496'):
+        statements=claims.get(prop,[])
+        if not isinstance(statements,list):raise ValueError('invalid Wikidata statement collection')
+        for statement in statements:
+            if not isinstance(statement,dict) or not isinstance(statement.get('mainsnak'),dict):
+                raise ValueError('invalid Wikidata statement')
+            qualifiers=statement.get('qualifiers',{})
+            if not isinstance(qualifiers,dict) or any(not isinstance(value,list) for value in qualifiers.values()):
+                raise ValueError('invalid Wikidata qualifiers')
+            if not isinstance(statement.get('references',[]),list):raise ValueError('invalid Wikidata references')
     identifiers = [wd_value(c["mainsnak"]) for c in claims.get("P496", []) if c.get("rank") != "deprecated"]
     identifiers = sorted({x for x in identifiers if valid_orcid(x)})
     # A conflicting ORCID never triggers automatic cross-person merging.
@@ -63,11 +85,13 @@ def wikidata_events(entity, content_hash):
 
 def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
     source = "wikidata"
+    if not store.source_ready(source):return store.report()
     store.start(source)
     failures = []
     started = time.monotonic()
     previous_bytes=store.db.execute('SELECT bytes FROM runs WHERE source=?',(source,)).fetchone()[0]
     start_bytes=getattr(http,'bytes_received',0)
+    blocked=False
     for qid in qids:
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
@@ -79,7 +103,14 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
         url = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
         try:
             data, checksum = http.json(url)
+            if not isinstance(data,dict) or not isinstance(data.get('entities'),dict):
+                raise ValueError('invalid Wikidata EntityData envelope')
             entity = data["entities"][qid]
+            if not isinstance(entity,dict) or entity.get('id')!=qid:
+                raise ValueError('Wikidata response does not match requested entity')
+            # Validate revision before using it as a member locator.
+            if type(entity.get('lastrevid')) is not int or entity['lastrevid']<=0:
+                raise ValueError('invalid Wikidata entity revision')
             locator = f"{qid}@{entity['lastrevid']}"
             if store.seen(source, locator):
                 continue
@@ -95,8 +126,13 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
                 progress({"source":source,"committed_entity":qid,"events":store.db.execute("SELECT count(*) FROM events").fetchone()[0]})
         except (KeyError, ValueError, OSError, RuntimeError) as exc:
             store.failure(source,qid,f"{type(exc).__name__}: {exc}")
+            store.defer('ingest-wikidata',qid,str(exc))
             failures.append({"entity": qid, "reason": f"{type(exc).__name__}: {exc}"[:256]})
-    store.status(source, "partial", byte_count=previous_bytes+getattr(http,'bytes_received',0)-start_bytes,
+            if access_refused(exc):
+                if isinstance(exc,SourcePause):store.pause_source(source,exc.retry_at,str(exc))
+                blocked=True
+                break
+    store.status(source, "access_failed" if blocked else "partial", byte_count=previous_bytes+getattr(http,'bytes_received',0)-start_bytes,
                  detail=json.dumps({"requested": len(qids), "failures": failures[:20]}))
     return store.report()
 
@@ -136,46 +172,61 @@ def orcid_api_events(record, checksum, orcid):
 
 def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
     source = "orcid-public-api"
+    if not store.source_ready(source):return store.report()
     store.start(source)
     failures = []
     byte_count = store.db.execute("SELECT bytes FROM runs WHERE source=?",(source,)).fetchone()[0]
     started = time.monotonic()
+    blocked=False
     for orcid in ids:
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
             break
         if not valid_orcid(orcid):
             store.failure(source,digest(orcid),'invalid ORCID format/checksum; not requested')
+            store.defer('ingest-orcid-api',orcid,'invalid ORCID format/checksum; not requested')
             continue
         # This is a fixed record snapshot once committed, not a mirror of the annual dump.
         if store.seen(source, orcid):
             continue
         try:
-            with store.member(source, orcid):
-                checksum = __import__('hashlib').sha256()
-                retrieved = datetime.now(timezone.utc).isoformat()
-                def emit(event):
-                    event["retrieved_at"] = retrieved
-                    event["transport"] = "incremental-xml-no-tree"
-                    store.event(event)
-                parser = SummaryParser(private_person(orcid), source, orcid, emit,
-                    min(store.task.config["max_events_per_member"], store.task.config["batch_events"]))
-                member_bytes = 0
-                with http.open(f"https://pub.orcid.org/v3.0/{orcid}/record", "application/vnd.orcid+xml") as response:
-                    if "xml" not in response.headers.get("Content-Type", ""):
-                        raise ValueError("ORCID must return XML for the strict streaming adapter")
-                    while chunk := response.read(CHUNK):
-                        member_bytes += len(chunk)
-                        byte_count += len(chunk)
-                        store.task.check_memory()
-                        if member_bytes > store.task.config["max_member_bytes"]:
-                            raise ValueError("API XML member exceeds size limit")
-                        if max_seconds is not None and time.monotonic()-started >= max_seconds:
-                            raise BudgetStop("bounded XML API batch time reached; current member rolled back")
-                        checksum.update(chunk)
-                        parser.feed(chunk)
-                    parser.feed(b"", final=True)
-                store.finish_member(source, orcid, checksum.hexdigest())
+            with store.request_budget(source,2*(store.task.config['max_retries']+1),ORCID_ANONYMOUS_DAILY_READS,http),store.member(source, orcid):
+                parts={}
+                event_count=member_bytes=0
+                for section in ('educations','employments'):
+                    checksum = __import__('hashlib').sha256()
+                    retrieved = datetime.now(timezone.utc).isoformat()
+                    url=f"https://pub.orcid.org/v3.0/{orcid}/{section}"
+                    def emit(event):
+                        nonlocal event_count
+                        event_count+=1
+                        if event_count>min(store.task.config['max_events_per_member'],store.task.config['batch_events']):
+                            raise ValueError('affiliation pair exceeds bounded event transaction')
+                        event.update(retrieved_at=retrieved,transport='incremental-affiliation-xml/v1',
+                                     locator=orcid+'#'+section,url=url)
+                        store.event(event)
+                    parser = SummaryParser(private_person(orcid), source, orcid, emit,
+                        store.task.config['batch_events'],section=section)
+                    section_bytes=0
+                    with http.open(url, "application/vnd.orcid+xml") as response:
+                        if "xml" not in response.headers.get("Content-Type", ""):
+                            raise ValueError("ORCID must return XML for the strict streaming adapter")
+                        while chunk := response.read(CHUNK):
+                            member_bytes += len(chunk)
+                            section_bytes += len(chunk)
+                            byte_count += len(chunk)
+                            store.task.check_memory()
+                            if member_bytes > store.task.config["max_member_bytes"]:
+                                raise ValueError("API XML affiliation pair exceeds size limit")
+                            if max_seconds is not None and time.monotonic()-started >= max_seconds:
+                                raise BudgetStop("bounded XML API batch time reached; current member rolled back")
+                            checksum.update(chunk)
+                            parser.feed(chunk)
+                        parser.feed(b"", final=True)
+                    parts[section]=checksum.hexdigest()
+                    store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
+                        (source,orcid,section,url,parts[section],section_bytes,retrieved))
+                store.finish_member(source, orcid, digest({'transport':'incremental-affiliation-xml/v1','parts':parts}))
             if progress:
                 progress({"source":source,"committed_members":store.db.execute("SELECT count(*) FROM members WHERE source=?",(source,)).fetchone()[0]})
         except BudgetStop as exc:
@@ -183,8 +234,13 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
             return store.report()
         except (ValueError, KeyError, OSError, RuntimeError, ExpatError) as exc:
             store.failure(source,private_person(orcid),f"{type(exc).__name__}: {exc}")
+            store.defer('ingest-orcid-api',orcid,str(exc))
             failures.append({"id_hash": private_person(orcid), "reason": str(exc)[:128]})
-    store.status(source, "partial", byte_count=byte_count, detail=json.dumps({"requested": len(ids), "failures": failures[:20]}))
+            if access_refused(exc):
+                if isinstance(exc,SourcePause):store.pause_source(source,exc.retry_at,str(exc))
+                blocked=True
+                break
+    store.status(source, "access_failed" if blocked else "partial", byte_count=byte_count, detail=json.dumps({"requested": len(ids), "failures": failures[:20]}))
     return store.report()
 
 
@@ -204,7 +260,16 @@ def discover_wikidata(http, *, after="", limit=100, degree_employer=False, acade
         query += f' FILTER(STR(?person) > "http://www.wikidata.org/entity/{after}")'
     query += ' }' + ('' if degree_employer or academic else ' GROUP BY ?person') + ' ORDER BY STR(?person)' + f' LIMIT {limit}'
     data, checksum = http.json("https://query.wikidata.org/sparql?format=json&query=" + quote(query))
-    rows = data["results"]["bindings"]
+    if not isinstance(data,dict) or not isinstance(data.get('results'),dict):
+        raise ValueError('invalid Wikidata discovery envelope')
+    rows = data['results'].get('bindings')
+    if not isinstance(rows,list) or len(rows)>limit:
+        raise ValueError('invalid Wikidata discovery bindings')
+    for row in rows:
+        if not isinstance(row,dict) or not isinstance(row.get('person'),dict) or not isinstance(row['person'].get('value'),str):
+            raise ValueError('invalid Wikidata discovery person')
+        if 'orcids' in row and (not isinstance(row['orcids'],dict) or not isinstance(row['orcids'].get('value'),str)):
+            raise ValueError('invalid Wikidata discovery identifier')
     result = [{"qid": r["person"]["value"].rsplit("/", 1)[-1],
                "orcid": r.get("orcids", {}).get("value") if '|' not in r.get("orcids", {}).get("value", '') else None} for r in rows]
     if len(result) > limit or any(not re.fullmatch(r"Q[1-9]\d*", r['qid']) or after and r['qid'] <= after for r in result):
@@ -221,23 +286,24 @@ def enqueue_discovery(store, http, command, *, limit=200, scope='academic'):
         raise ValueError('unsupported discovery source')
     if scope not in ('academic', 'degree-employer'):
         raise ValueError('unsupported discovery scope')
+    if not store.source_ready('wikidata-discovery'):
+        return {'status':'server-backoff-pending','rows':0,'queued':0}
     page_source = command+':'+scope if command == 'ingest-wikidata' else command+':orcid'
     previous = store.db.execute('SELECT cursor_after,row_count FROM discovery_pages WHERE source=? ORDER BY rowid DESC LIMIT 1', (page_source,)).fetchone()
     if previous and previous[1] == 0:
         return {'status': 'live-query-exhausted-not-global-complete', 'cursor': previous[0]}
     cursor = previous[0] if previous else ''
-    page = discover_wikidata(http, after=cursor, limit=limit, degree_employer=command == 'ingest-wikidata',
-        academic=command == 'ingest-wikidata' and scope == 'academic')
+    try:
+        page = discover_wikidata(http, after=cursor, limit=limit, degree_employer=command == 'ingest-wikidata',
+            academic=command == 'ingest-wikidata' and scope == 'academic')
+    except SourcePause as exc:
+        store.pause_source('wikidata-discovery',exc.retry_at,str(exc))
+        raise
     ids = set()
     for row in page['rows']:
         value = row['qid'] if command == 'ingest-wikidata' else row['orcid']
         if value and (command == 'ingest-wikidata' or valid_orcid(value)):
             ids.add(value)
     end = page['rows'][-1]['qid'] if page['rows'] else cursor
-    store.task.check(1024**2)
-    with store.db:
-        store.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-            [(command, identifier, page['query_sha256'], page['response_sha256']) for identifier in sorted(ids)])
-        store.db.execute('INSERT INTO discovery_pages VALUES(?,?,?,?,?,?,?)',
-            (page_source, cursor, end, page['query_sha256'], page['response_sha256'], datetime.now(timezone.utc).isoformat(), len(page['rows'])))
+    store.queue_page(page_source,command,cursor,end,page['query_sha256'],page['response_sha256'],ids,len(page['rows']))
     return {'status': page['enumeration'], 'cursor': end, 'rows': len(page['rows']), 'queued': len(ids)}

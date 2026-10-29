@@ -44,3 +44,44 @@ class ResourceTests(unittest.TestCase):
                 with self.assertRaises(BudgetStop):s.task.check()
             self.assertEqual(s.report()['sources'][0]['source'],'wikidata')
         finally:s.close()
+
+    def test_disappearing_journal_does_not_turn_budget_probe_into_source_failure(self):
+        s=self.store(archive([]))
+        try:
+            journal=s.task.root/'disappearing.sqlite-journal'
+            journal.write_bytes(b'x'*32)
+            baseline=s.task.used()
+            original=Path.stat
+            def stat(path,*args,**kwargs):
+                if path==journal:raise FileNotFoundError('journal committed during scan')
+                return original(path,*args,**kwargs)
+            with patch.object(Path,'stat',stat):self.assertEqual(s.task.used(),baseline-32)
+            def forbidden(path,*args,**kwargs):
+                if path==journal:raise PermissionError('cannot observe budget')
+                return original(path,*args,**kwargs)
+            with patch.object(Path,'stat',forbidden),self.assertRaises(PermissionError):s.task.used()
+        finally:s.close()
+
+    def test_http_request_reservation_settles_and_survives_reopen(self):
+        from types import SimpleNamespace
+        from gapi.source_http import SourcePause
+        from gapi.career_store import CareerStore
+        s=self.store(archive([]))
+        http=SimpleNamespace(requests_count=0)
+        with s.request_budget('source',8,10,http):http.requests_count+=3
+        self.assertEqual(s.db.execute('SELECT sum(requests) FROM request_reservations').fetchone()[0],3)
+        s.close()
+        s=CareerStore(Task(self.path))
+        try:
+            with self.assertRaises(SourcePause):
+                with s.request_budget('source',8,10,http):self.fail('quota must be reserved before transport')
+            self.assertEqual(http.requests_count,3)
+        finally:s.close()
+
+    def test_request_reservation_is_conservative_for_an_uninstrumented_transport(self):
+        s=self.store(archive([]))
+        try:
+            with self.assertRaises(OSError):
+                with s.request_budget('source',8,10,object()):raise OSError('interrupted transport')
+            self.assertEqual(s.db.execute('SELECT sum(requests) FROM request_reservations').fetchone()[0],8)
+        finally:s.close()

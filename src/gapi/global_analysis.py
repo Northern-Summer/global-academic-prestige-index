@@ -14,6 +14,7 @@ from .ranking import DEFAULT_CONFIG, pagerank
 from .career_rules import classify
 from .storage import project_root
 from .task import BudgetStop, canonical, digest
+from .publication import public_sources
 
 
 def ror_records(path):
@@ -150,12 +151,11 @@ def relation_rows(store, *, allowed_sources=None):
         yield from relations(events)
 
 
-def rank_global(store, *, public=False):
+def rank_global(store, *, public=False, publication_policy=None):
     store.task.check(64*1024**2)
-    allowed = {name for name, spec in store.task.config["sources"].items() if spec.get("allow_derivatives")} if public else None
+    allowed = public_sources(store.task,publication_policy) if public else None
     edges, stages, counts, source_counts = defaultdict(float), defaultdict(Counter), Counter(), defaultdict(set)
     corroborated = Counter()
-    by_source = defaultdict(lambda: defaultdict(float))
     recent_edges = defaultdict(float)
     relation_count = 0
     for (employer, training, stage), train, job in relation_rows(store, allowed_sources=allowed):
@@ -168,8 +168,6 @@ def rank_global(store, *, public=False):
         weight = DEFAULT_CONFIG["stage_weights"][stage]
         edges[key] += weight
         stages[key][stage] += weight
-        for source in {train["source"],job["source"]}:
-            by_source[source][key] += weight
         if job["year_start"] >= 2016:
             recent_edges[key] += weight
         # Bound Python sparse graph size; do not silently sample beyond this limit.
@@ -202,8 +200,16 @@ def rank_global(store, *, public=False):
         scenario(f"alpha_{alpha}",edges,alpha)
     for stage in DEFAULT_CONFIG["stage_weights"]:
         scenario("stage_only_"+stage,{edge:values[stage] for edge,values in stages.items() if values[stage]>0})
-    for source, contributions in by_source.items():
-        scenario("delete_source_"+source,{edge:weight-contributions.get(edge,0) for edge,weight in edges.items() if weight-contributions.get(edge,0)>1e-15})
+    available_sources={row[0] for row in store.db.execute('SELECT DISTINCT source FROM events')
+                       if allowed is None or row[0] in allowed}
+    # A deduplicated relation may have alternative evidence from another source.
+    # Subtracting the selected evidence's contribution would erase that support.
+    # Replay source filtering BEFORE joining and deduplicating the person's facts.
+    for source in sorted(available_sources):
+        remaining_edges=defaultdict(float)
+        for (employer,training,stage),_train,_job in relation_rows(store,allowed_sources=available_sources-{source}):
+            remaining_edges[(employer,training)]+=DEFAULT_CONFIG['stage_weights'][stage]
+        scenario('delete_source_'+source,remaining_edges)
     scenario("employment_since_2016", recent_edges)
     groups = Counter(directory.get(node,(None,None,{}))[2].get("region") or "unknown" for node in nodes)
     if nodes:
@@ -264,12 +270,12 @@ def rank_global(store, *, public=False):
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
 
 
-def export_release(store, out: Path):
+def export_release(store, out: Path, *, publication_policy=None):
     """Public, licensed institution aggregates only; no individual trajectories."""
     if out.resolve() != (project_root()/"outputs/global").resolve():
         raise ValueError("public release output must use the budget-accounted outputs/global directory")
     store.task.check(64*1024**2)
-    result = rank_global(store, public=True)
+    result = rank_global(store, public=True,publication_policy=publication_policy)
     # Failing this gate prevents a misleading blank real-score release.
     if not result["edges"]:
         raise ValueError("no licensed, validated real relations available for public score release")
@@ -284,7 +290,7 @@ def export_release(store, out: Path):
     tmp = out/(filename+".tmp")
     tmp.write_bytes(content)
     os.replace(tmp,target)
-    allowed = {n for n,s in store.task.config["sources"].items() if s.get("allow_derivatives")}
+    allowed = public_sources(store.task,publication_policy)
     inputs = {row[0]:row[1] for row in store.db.execute("SELECT source,identity FROM runs WHERE members>0 ORDER BY source") if row[0] in allowed}
     member_hash = hashlib.sha256()
     for row in store.db.execute("SELECT source,locator,sha256,status FROM members ORDER BY source,locator"):
@@ -301,6 +307,9 @@ def export_release(store, out: Path):
             for p in sorted((project_root()/'src/gapi').glob('*.py'))}),
         "environment":{"python":platform.python_version()},"review_status":"pending-independent-dual-track",
         "publication_status":result["publication_status"]}
+    if publication_policy is not None:
+        manifest['publication_policy']=publication_policy
+        manifest['publication_policy_sha256']=digest(publication_policy)
     (out/"manifest.json").write_bytes(canonical(manifest))
     (out/"SHA256SUMS").write_text(f"{checksum}  {filename}\n",encoding="ascii")
     return manifest

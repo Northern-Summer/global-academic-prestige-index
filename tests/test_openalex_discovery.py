@@ -62,3 +62,11 @@ class OpenAlexDiscoveryTests(unittest.TestCase):
         self.assertTrue(valid_orcid('0000-0002-1825-0097'))
         for value in ('0000-0002-1825-0098','００００-0002-1825-0097','0000-0001-1111-1111',None):
             self.assertFalse(valid_orcid(value))
+
+    def test_malformed_containers_rejected_without_queue_or_cursor(self):
+        s=self.store(archive([]))
+        try:
+            for response in ([],{}, {'results':[None],'meta':{}},{'results':[],'meta':[]}):
+                with self.subTest(response=response),self.assertRaises(ValueError):discover_openalex(s,HTTP([response]))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery_pages').fetchone()[0],0)
+        finally:s.close()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from .career_store import CareerStore
@@ -15,7 +16,7 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name in ('discover-wikidata-dump','collect-global'):
@@ -25,9 +26,9 @@ def register(sub):
             parser.add_argument('--max-compressed-bytes', type=int)
         if name == 'collect-global':
             parser.add_argument('--batch-members',type=int,default=50)
-        if name == 'discover-openalex':
+        if name in ('discover-openalex','discover-crossref'):
             parser.add_argument('--pages',type=int,default=1)
-            parser.add_argument('--per-page',type=int,default=200)
+            parser.add_argument('--per-page',type=int,default=50 if name=='discover-crossref' else 200)
         if name.startswith("ingest-"):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
@@ -39,13 +40,14 @@ def register(sub):
             parser.add_argument("--discovery-scope", choices=['academic','degree-employer'], default='academic')
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
+            parser.add_argument('--publication-policy',type=Path)
         if name == 'corroborate':
             parser.add_argument('--official',action='store_true')
             parser.add_argument('--max-pages',type=int,default=20)
 
 
 def execute(args):
-    names = {"sources", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -59,7 +61,7 @@ def execute(args):
 def execute_task(task, args):
     if hasattr(args,'max_members') and args.max_members is not None and args.max_members < 1:
         raise ValueError('max-members must be positive')
-    if hasattr(args,'max_seconds') and args.max_seconds <= 0:
+    if hasattr(args,'max_seconds') and (not math.isfinite(args.max_seconds) or args.max_seconds <= 0):
         raise ValueError('max-seconds must be positive')
     if args.command == "sources":
         print(json.dumps(task.freeze(), indent=2))
@@ -67,9 +69,12 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command=='discover-openalex':
-            from .openalex_discovery import discover_openalex
-            result=discover_openalex(store,http,pages=args.pages,per_page=args.per_page,
+        if args.command in ('discover-openalex','discover-crossref'):
+            if args.command=='discover-openalex':
+                from .openalex_discovery import discover_openalex as discover
+            else:
+                from .crossref_discovery import discover_crossref as discover
+            result=discover(store,http,pages=args.pages,per_page=args.per_page,
                 progress=lambda r:print(json.dumps(r),flush=True))
         elif args.command == 'collect-global':
             from .collection import collect
@@ -125,7 +130,8 @@ def execute_task(task, args):
         else:
             from .global_analysis import corroborate, export_release, export_local
             result = {"corroborate": corroborate, "rank-global": export_local,
-                      "export-release": lambda s: export_release(s, args.out)}[args.command](store)
+                      "export-release": lambda s: export_release(s, args.out,publication_policy=
+                          json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None)}[args.command](store)
             if args.command=='corroborate' and args.official:
                 from .official_profiles import check_official_profiles
                 result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)

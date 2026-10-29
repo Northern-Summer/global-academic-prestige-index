@@ -13,6 +13,7 @@ python -m pip install -e .
 npm ci
 $env:PYTHONPATH='src'
 python -m gapi sources freeze
+python -m gapi collect-global --max-seconds 900 --batch-members 50
 python -m gapi ingest-wikidata --discover --resume --max-members 200 --max-seconds 300
 python -m gapi ingest-orcid-api --discover --resume --max-members 200 --max-seconds 300
 python -m gapi corroborate
@@ -33,11 +34,21 @@ $env:GAPI_CODE_ONLY='1'
 npm run build
 ```
 
-A score-bearing production build requires an explicitly selected real release manifest. Hash/path errors, missing inputs and restricted datasets fail closed. `export-release` exports only source-permitted institution aggregates. ORCID API observations and the historical US sample remain local pending reuse review.
+A score-bearing production build requires an explicitly selected real release manifest. Hash/path errors, missing inputs and restricted datasets fail closed. `export-release` exports only source-permitted institution aggregates. The reviewed noncommercial ORCID aggregate policy is explicit:
+
+```powershell
+python -m gapi export-release --publication-policy configs/publication-20261029.json
+npm run build
+```
+
+Without that policy the frozen registry's restrictive default remains in effect.
+ORCID API data is governed by its record-data and noncommercial API terms, not a
+blanket CC0 label. Personal trajectories and the historical US sample remain
+excluded from public export.
 
 ## Implemented and remaining
 
-Implemented: source/config freezes; bounded SAX/gzip/tar processing; atomic member transactions, OS writer lock and replay; Wikidata revisions/references; conservative stage and stable-ID rules; unresolved queues; probability-conserving PageRank; observed qualification reasons; conditional parameter/source/stage/region scenarios; hash-bound institution exports; accessible table/details/CSV and on-demand Three.js.
+Implemented: source/config freezes; bounded SAX/gzip/tar processing; affiliation-only ORCID XML with atomic two-section evidence; independent OpenAlex/Crossref/Wikidata candidate discovery; repeated page refill; persistent source backoff and fair retry queues; rolling-day ORCID request reservations; atomic member transactions, OS writer lock and replay; Wikidata revisions/references; conservative stage and stable-ID rules; unresolved queues; probability-conserving PageRank; observed qualification reasons; source-deletion scenarios rebuilt from surviving evidence; hash-bound institution exports; accessible table/details/CSV and on-demand Three.js.
 
 Remaining: complete frozen global source enumeration, independent official-profile corroboration, fuller entity crosswalks, official award data and attribution, discipline/English-coverage OOD analysis, and independent dual-track red-team review. Awards and composite scores stay missing without evidence. Matching source statements does not alone establish independent confirmation. No employment probability or causal training effect is claimed.
 

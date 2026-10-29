@@ -1,0 +1,26 @@
+{
+  "schema_version": "gapi-publication-policy/v1",
+  "purpose": "noncommercial-research",
+  "export_scope": "institution-aggregates-only",
+  "permissions": {
+    "orcid-public-api": {
+      "decision": "allow-public-institution-derivatives",
+      "license": "LicenseRef-ORCID-Public-Record-Data-Terms",
+      "rationale": "ORCID Terms of Use sections 3 and 4 permit distribution and public display of Public Record Data. Public API acquisition remains noncommercial and subject to quotas, privacy and service terms. Only institution aggregates are released; linked materials and individual histories are excluded. This is a project source review, not independent legal certification.",
+      "evidence": [
+        {
+          "url": "https://info.orcid.org/terms-of-use/",
+          "retrieved_at": "2026-10-29T12:22:43Z",
+          "sha256": "328ac3c3169ca9d9be0c16e09390ffa840575fa9c83f99b9351ac01ad601d35e",
+          "representation": "Firecrawl live markdown sections 3 and 4"
+        },
+        {
+          "url": "https://info.orcid.org/public-client-terms-of-service/",
+          "retrieved_at": "2026-10-29T12:22:43Z",
+          "sha256": "d0b8b4e8fadba735c4d913d580c98ca0f035bef452511e3dfe2f183834c18e5c",
+          "representation": "Firecrawl live markdown sections 2 and 3"
+        }
+      ]
+    }
+  }
+}

@@ -22,11 +22,11 @@ python -m gapi ingest-ror
 
 The command writes the normalized institution directory to `data/real/institutions.json.gz` and its `.manifest.json` file. The upstream ZIP is processed in a temporary system directory and removed after parsing. Set `GAPI_SCRATCH_DIR` to an external scratch volume when the system temporary drive does not have enough space. If resumability is needed, `--cache-dir` must point outside the project tree; the importer rejects an in-project raw-cache path. Generated `data/real` outputs are ignored by Git by default.
 
-## ORCID Public Data File 2025
+## Historical ORCID 2025 source discovery
 
 ORCID's official [2025 Public Data File](https://orcid.figshare.com/articles/dataset/ORCID_Public_Data_File_2025/30375589) is CC0 and includes public education and employment activity records. The official integration guide documents eleven activity archives; the 2025 Figshare metadata reports approximately 194 GB compressed across those shards and an additional approximately 43 GB summaries archive. ORCID also documents access to the 2023–2025 files through a Google BigQuery collaboration, which requires a Google Cloud account.
 
-This is the strongest identified open global source for researcher-declared career activity, but it is not a census: profile registration and activity completeness are voluntary, institution names/identifiers can be absent, and record visibility is selective. A future importer should stream one shard at a time from a configurable temporary volume, hash and validate the upstream shard, normalize only education/employment events into privacy-minimized institution aggregates, and delete each raw shard after verified processing. It must not turn OpenAlex publication affiliations into degree or employment facts. No ORCID bulk activity data has been ingested into this release yet, so it contributes no current score.
+This paragraph preserves an earlier source-discovery checkpoint, not an instruction to download archives. The active frozen target is the 2026 summary release documented below. The streaming importer never writes source archives/XML. ORCID registration, completeness and visibility are voluntary, so neither annual release is a census. No verified annual archive contributes to the current scores.
 
 OpenAlex provides an independent open scholarly graph and institution identifiers, while ROR provides an independently curated organization registry. These can cross-check institution identity and research activity, but they are not independent confirmation of a person's education or employment assertion. Event-level corroboration must come from another source that actually asserts the same career event, such as an official institution CV/profile or a separately sourced research dataset.
 
@@ -56,8 +56,9 @@ The public output should contain institution-level aggregates and source identif
 
 ## Acquisition status
 
-ROR, OpenAlex, and the U.S. faculty-hiring research connector are implemented. ROR and OpenAlex institution directories provide broad real global organization metadata; neither is a global academic career-history or hiring-flow census. OpenAlex institution import honors rate limits and supports checkpoints when explicitly requested; its default page cache is temporary and removed after processing. Global person-level career-history acquisition remains unimplemented. The current real score is therefore explicitly a scoped U.S.-employer research sample.
-# Streaming career sources (2026-10-29)
+The global streaming career pipeline is implemented and partially populated with real ORCID and Wikidata observations. ROR supplies stable institution crosswalks. OpenAlex and Crossref supply candidate identifiers, never degree or employment facts. The U.S. study remains a separately named local historical sample. Source enumeration, independent official corroboration and formal-global-ranking eligibility are incomplete. Legacy directory importers use temporary caches and are excluded from the zero-raw-disk streaming route.
+
+## Streaming career sources (2026-10-29)
 
 Current source, access, license and storage contracts are in [STREAMING.md](STREAMING.md)
 and `configs/streaming.json`. The frozen annual target is ORCID **2026**, not 2025.
@@ -65,5 +66,34 @@ Summary importer exists; the local annual-download route currently returns 202/e
 and upstream checksum/bytes remain unknown. Individual ORCID API XML and Wikidata
 EntityData are separate, partially scanned sources. Wikidata statements retain revision,
 qualifiers and references. Publication affiliations are not career facts. ORCID API
-redistribution is disabled by the task registry. Existing directory/US collectors
-below are legacy capabilities, not part of the zero-raw-disk streaming flow.
+redistribution defaults to disabled in the frozen acquisition registry; an explicit
+reviewed release policy can permit institution aggregates. Existing directory/US collectors
+above are legacy capabilities, not part of the zero-raw-disk streaming flow.
+
+Public API acquisition now requests only education and employment XML sections.
+Their independent hashes/URLs commit atomically with the normalized member; earlier
+whole-record snapshots remain immutable. Failed candidates are retained with
+persistent backoff, and source refusals do not terminate other source queues.
+
+[Crossref's public REST API](https://github.com/CrossRef/rest-api-doc) is an additional
+unauthenticated candidate-discovery route with a separately persisted live cursor.
+It writes only validated ORCID identifiers and page hashes, never paper affiliations,
+author names or assertions of academic careers. Index recency, publisher deposits,
+duplicates and source disagreements remain coverage limitations. OpenAlex first-page
+success followed by an actual 401 on its next cursor is retained as an access
+boundary; Crossref is an independent metadata source, not an alternate OpenAlex
+authentication channel. See the streaming guide for real trial counts and limits.
+
+## Reviewed noncommercial ORCID aggregate release policy
+
+`configs/publication-20261029.json` freezes the project's reuse decision separately
+from the immutable acquisition lock. ORCID's current [Terms of Use](https://info.orcid.org/terms-of-use/),
+sections 3 and 4, grant distribution and public display rights for public Record
+Data. Its [Public API terms](https://info.orcid.org/public-client-terms-of-service/)
+still restrict API acquisition to noncommercial use and require quotas and other
+conditions. The release policy therefore permits this noncommercial research
+project to publish institution-level derived observations only. It does not label
+API data CC0, grant rights to linked works, publish individual histories or assert
+independent legal certification. The policy records retrieval time, official URLs
+and hashes of the reviewed live Markdown sections; its own hash enters the release
+manifest. Without explicit selection of this policy, the default remains restrictive.

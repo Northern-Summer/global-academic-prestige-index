@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from urllib.error import HTTPError
 
-from gapi.source_http import PublicHTTP, safe_url
+from gapi.source_http import PublicHTTP, safe_url, SourcePause
 
 
 class Response(io.BytesIO):
@@ -62,3 +62,40 @@ class HTTPTests(unittest.TestCase):
             PublicHTTP(self.task(),opener=opener).json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record')
         self.assertTrue(response.closed)
         self.assertEqual(len(calls),1)
+
+    def test_stage_deadline_bounds_retries_and_restores_outer_runtime(self):
+        from unittest.mock import patch
+        calls=[]
+        def opener(request,**kwargs):
+            calls.append(kwargs['timeout'])
+            raise HTTPError(request.full_url,429,'Slow',{'Retry-After':'5'},None)
+        http=PublicHTTP(self.task(),opener=opener,sleep=lambda _:self.fail('must not wait beyond deadline'))
+        with patch('gapi.source_http.time.monotonic',return_value=100):
+            with http.within(1),self.assertRaisesRegex(SourcePause,'stage'):
+                http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/educations')
+        self.assertEqual(calls,[1])
+        self.assertIsNone(http.deadline)
+
+    def test_body_read_obeys_expired_stage_and_closes_response(self):
+        from unittest.mock import patch
+        response=Response()
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response)
+        with patch('gapi.source_http.time.monotonic',return_value=100):
+            with http.within(2):
+                with http.open('https://pub.orcid.org/v3.0/0000-0002-1825-0097/employments') as stream:
+                    with patch('gapi.source_http.time.monotonic',return_value=103),self.assertRaises(TimeoutError):
+                        stream.read(1)
+        self.assertTrue(response.closed)
+
+    def test_long_and_date_retry_after_pause_entire_source(self):
+        from unittest.mock import patch
+        for header in ('120','Thu, 01 Jan 1970 00:03:40 GMT','malformed-date'):
+            calls=[]
+            def opener(request,**kwargs):
+                calls.append(1)
+                raise HTTPError(request.full_url,429,'Slow',{'Retry-After':header},None)
+            with patch('gapi.source_http.time.time',return_value=100):
+                with self.subTest(header=header),self.assertRaises(SourcePause) as result:
+                    PublicHTTP(self.task(),opener=opener,sleep=lambda _:None).json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/educations')
+            self.assertGreaterEqual(result.exception.retry_at,220)
+            self.assertEqual(calls,[1])
