@@ -7,6 +7,7 @@ import time
 
 from .global_sources import ingest_orcid_api, ingest_wikidata
 from .dump_discovery import discover_dump
+from .openalex_discovery import discover_openalex
 from .task import BudgetStop
 
 
@@ -16,9 +17,20 @@ def collect(store,http,feed,*,max_seconds=900,batch_members=50,progress=None):
     deadline=time.monotonic()+max_seconds
     suspended=set()
     dump_attempted=False
+    openalex_attempted=False
     stages=[]
     while time.monotonic()<deadline:
         store.task.check();store.task.check_memory()
+        if not store.pending('ingest-orcid-api',1) and not openalex_attempted:
+            openalex_attempted=True
+            try:
+                result=discover_openalex(store,http,pages=1,progress=progress)
+                if progress:progress({'stage':'openalex-discovery',**result})
+            except BudgetStop:
+                raise
+            except (OSError,ValueError,RuntimeError) as exc:
+                store.failure('openalex-discovery','collection-loop',str(exc))
+                if progress:progress({'stage':'openalex-discovery','failed':str(exc)[:256]})
         progressed=False
         for command,adapter in (('ingest-orcid-api',ingest_orcid_api),('ingest-wikidata',ingest_wikidata)):
             if command in suspended or time.monotonic()>=deadline:continue

@@ -38,7 +38,7 @@ class CollectionTests(unittest.TestCase):
         s=self.store(archive([]))
         try:
             with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
-            with patch('gapi.collection.ingest_wikidata',side_effect=BudgetStop('disk limit')), self.assertRaises(BudgetStop):
+            with patch('gapi.collection.discover_openalex',return_value={}), patch('gapi.collection.ingest_wikidata',side_effect=BudgetStop('disk limit')), self.assertRaises(BudgetStop):
                 collect(s,None,{'id':'feed','size_bytes':100},max_seconds=10)
             self.assertEqual(s.pending('ingest-wikidata'),['Q1'])
         finally:s.close()
@@ -46,8 +46,9 @@ class CollectionTests(unittest.TestCase):
     def test_empty_sources_try_dump_once_and_do_not_loop_forever(self):
         s=self.store(archive([]))
         try:
-            with patch('gapi.collection.discover_dump',return_value={'status':'provisional'}) as dump:
+            with patch('gapi.collection.discover_openalex',side_effect=OSError('independent source offline')) as openalex, patch('gapi.collection.discover_dump',return_value={'status':'provisional'}) as dump:
                 result=collect(s,None,{'id':'feed','size_bytes':100},max_seconds=10)
             dump.assert_called_once()
+            openalex.assert_called_once()
             self.assertEqual(result['status'],'resumable-source-boundary')
         finally:s.close()

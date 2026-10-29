@@ -120,6 +120,24 @@ Because the Wikidata statements already cite that page, the check is explicitly
 same-origin confirmation; neither copied evidence nor the dump/API paths become two
 independent source classes. No formal-eligibility promotion is made.
 
+### Independent candidate discovery with OpenAlex
+
+```powershell
+python -m gapi discover-openalex --pages 5 --per-page 200
+python -m gapi ingest-orcid-api --resume --max-members 200 --max-seconds 300
+```
+
+The public OpenAlex author endpoint supplies only `id,orcid` with an opaque saved
+cursor. No account/key is used, and paid access is never requested. Its own API
+documentation permits basic [unauthenticated access](https://help.openalex.org/api/).
+Every page validates ASCII ORCID formatting and ISO 7064 MOD 11-2 check digits,
+commits queue/cursor atomically, and does not create career facts. Publication
+affiliations are never converted to degrees/employment or independent confirmation.
+OpenAlex's author count is a discovery-search count, not an academic population
+denominator. Live cursor scans have update drift and cannot establish frozen coverage.
+`collect-global` tries this discovery route once when its ORCID queue is empty,
+independently of Wikidata services, and continues other routes on failure.
+
 Discovery uses ordered live Wikidata pages, atomically committing each page's query
 hash, response hash, retrieval time, queue and last person identifier to SQLite.
 Each `--discover --resume` invocation advances one page (at most 200 people) and

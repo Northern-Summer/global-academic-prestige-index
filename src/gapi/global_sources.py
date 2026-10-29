@@ -8,7 +8,7 @@ from xml.parsers.expat import ExpatError
 from datetime import datetime, timezone
 from urllib.parse import quote
 
-from .career_rules import classify, year
+from .career_rules import classify, year, valid_orcid
 from .orcid_stream import ORCID, private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
 
@@ -29,7 +29,7 @@ def wikidata_events(entity, content_hash):
     qid, revision = entity["id"], entity["lastrevid"]
     claims = entity.get("claims", {})
     identifiers = [wd_value(c["mainsnak"]) for c in claims.get("P496", []) if c.get("rank") != "deprecated"]
-    identifiers = sorted({x for x in identifiers if isinstance(x, str) and re.fullmatch(ORCID, x)})
+    identifiers = sorted({x for x in identifiers if valid_orcid(x)})
     # A conflicting ORCID never triggers automatic cross-person merging.
     person = private_person(identifiers[0]) if len(identifiers) == 1 else "wd:" + qid
     for prop, kind in (("P69", "education"), ("P108", "employment")):
@@ -144,8 +144,9 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
             break
-        if not re.fullmatch(ORCID, orcid):
-            raise ValueError("invalid ORCID")
+        if not valid_orcid(orcid):
+            store.failure(source,digest(orcid),'invalid ORCID format/checksum; not requested')
+            continue
         # This is a fixed record snapshot once committed, not a mirror of the annual dump.
         if store.seen(source, orcid):
             continue
@@ -230,7 +231,7 @@ def enqueue_discovery(store, http, command, *, limit=200, scope='academic'):
     ids = set()
     for row in page['rows']:
         value = row['qid'] if command == 'ingest-wikidata' else row['orcid']
-        if value and (command == 'ingest-wikidata' or re.fullmatch(ORCID, value)):
+        if value and (command == 'ingest-wikidata' or valid_orcid(value)):
             ids.add(value)
     end = page['rows'][-1]['qid'] if page['rows'] else cursor
     store.task.check(1024**2)

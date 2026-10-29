@@ -15,7 +15,7 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name in ('discover-wikidata-dump','collect-global'):
@@ -25,6 +25,9 @@ def register(sub):
             parser.add_argument('--max-compressed-bytes', type=int)
         if name == 'collect-global':
             parser.add_argument('--batch-members',type=int,default=50)
+        if name == 'discover-openalex':
+            parser.add_argument('--pages',type=int,default=1)
+            parser.add_argument('--per-page',type=int,default=200)
         if name.startswith("ingest-"):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
@@ -42,7 +45,7 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -64,7 +67,11 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command == 'collect-global':
+        if args.command=='discover-openalex':
+            from .openalex_discovery import discover_openalex
+            result=discover_openalex(store,http,pages=args.pages,per_page=args.per_page,
+                progress=lambda r:print(json.dumps(r),flush=True))
+        elif args.command == 'collect-global':
             from .collection import collect
             from .dump_discovery import load_feed
             result=collect(store,http,load_feed(args.feed),max_seconds=args.max_seconds,

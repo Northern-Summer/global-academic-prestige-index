@@ -7,6 +7,17 @@ import unicodedata
 RULES_VERSION = "career-rules/1"
 
 
+def valid_orcid(value):
+    """ISO 7064 MOD 11-2 check digit; formatting alone cannot bind identity."""
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]',value):
+        return False
+    digits=value.replace('-','')
+    total=0
+    for digit in digits[:-1]:total=(total+int(digit))*2
+    check=(12-total%11)%11
+    return digits[-1]==('X' if check==10 else str(check))
+
+
 def normalized(text):
     return " ".join(unicodedata.normalize("NFKC", text or "").casefold().split())
 

@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 from .global_sources import wd_value
-from .orcid_stream import CHUNK, ORCID
+from .orcid_stream import CHUNK
+from .career_rules import valid_orcid
 from .task import BudgetStop, canonical, digest
 
 MAX_LINE = 2*1024**2
@@ -146,7 +147,7 @@ def discover_dump(store, http, spec, *, max_seconds=300, max_bytes=None, progres
                                     batch.append(('ingest-wikidata',qid,digest(spec),checksum))
                                     candidates += 1
                                 values = (wd_value(c.get('mainsnak',{})) for c in claims.get('P496',[]) if c.get('rank')!='deprecated')
-                                ids = {v for v in values if isinstance(v,str) and re.fullmatch(ORCID,v)}
+                                ids = {v for v in values if valid_orcid(v)}
                                 if len(ids) == 1 and (claims.get('P69') or claims.get('P108')):
                                     batch.append(('ingest-orcid-api',next(iter(ids)),digest(spec),checksum))
                             except (ValueError,TypeError,AttributeError,RecursionError):
