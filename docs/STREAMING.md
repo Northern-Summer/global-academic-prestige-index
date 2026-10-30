@@ -323,6 +323,15 @@ streaming dump-discovery route requires explicit `--allow-dump-discovery`; the
 archive itself still never lands on disk. Interrupted API batches preserve the
 committed queue and retry deadlines instead of requiring a large download.
 
+`collect-global --queued-only` drains committed discovery candidates and their
+explicit stable-identifier followups without adding new discovery pages. It never
+starts dump discovery. Temporarily unavailable records remain pending, including
+those under persisted retry deadlines; they are not counted as received. The
+quality and public observation summaries hash the current candidate selection and
+separately report received, rejected and pending members for each source. A source
+queue reaching zero is completion of that named selection, never evidence of a
+complete world personnel census. A world denominator is explicitly unavailable.
+
 ## Evidence decisions and qualification checks
 
 `corroboration.py` derives a versioned, hashed decision from frozen structured

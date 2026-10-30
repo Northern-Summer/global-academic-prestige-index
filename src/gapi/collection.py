@@ -16,9 +16,11 @@ from .task import BudgetStop
 from .source_http import SourcePause
 
 
-def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None):
+def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True):
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
         raise ValueError('invalid collection time/batch budget')
+    if not discovery and feed is not None:
+        raise ValueError('queued-only acquisition cannot enable dump discovery')
     deadline=time.monotonic()+max_seconds
     suspended=set()
     dump_attempted=False
@@ -33,6 +35,7 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
         for command,feed_name in (('ingest-orcid-api','openalex-discovery'),
                                   ('ingest-orcid-api','crossref-discovery'),
                                   ('ingest-wikidata','wikidata-discovery')):
+            if not discovery:continue
             if command in suspended or feed_name in discovery_suspended or time.monotonic()>=deadline or not store.source_ready(feed_name):
                 continue
             if store.pending(command,batch_members):
@@ -109,4 +112,4 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
     return {'status':'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
         'suspended_sources':sorted(suspended),'suspended_discovery':sorted(discovery_suspended),
         'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':store.report(),
-        'global_complete':False,'archive_discovery_enabled':feed is not None}
+        'global_complete':False,'archive_discovery_enabled':feed is not None,'discovery_enabled':discovery}

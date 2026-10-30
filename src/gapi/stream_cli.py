@@ -31,6 +31,8 @@ def register(sub):
             parser.add_argument('--batch-members',type=int,default=50)
             parser.add_argument('--allow-dump-discovery',action='store_true',
                 help='explicitly enable optional compressed-stream candidate discovery; default uses finite APIs only')
+            parser.add_argument('--queued-only',action='store_true',
+                help='finish committed candidates and their stable-identifier followups without refilling discovery pages')
         if name == 'ingest-nobel':
             parser.add_argument('--source', type=Path, default=Path('configs/nobel-20261029.json'))
             parser.add_argument('--max-pages', type=int, default=100)
@@ -105,7 +107,7 @@ def execute_task(task, args):
             from .collection import collect
             from .dump_discovery import load_feed
             result=collect(store,http,load_feed(args.feed) if args.allow_dump_discovery else None,max_seconds=args.max_seconds,
-                batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True))
+                batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True),discovery=not args.queued_only)
         elif args.command == 'discover-wikidata-dump':
             from .dump_discovery import discover_dump, load_feed
             if args.max_compressed_bytes is not None and args.max_compressed_bytes <= 0:

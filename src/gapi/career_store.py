@@ -6,12 +6,15 @@ DuckDB owns bounded analysis/Parquet export; it never downloads raw input or spi
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import time
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
 from .task import Task, canonical, digest
+
+CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
 DDL = """
 CREATE TABLE IF NOT EXISTS runs(
@@ -143,7 +146,7 @@ class CareerStore:
         return self.db.execute("SELECT sha256,status FROM members WHERE source=? AND locator=?", (source, locator)).fetchone()
 
     def pending(self, command, limit=200, *, now=None):
-        sources={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
+        sources=CANDIDATE_SOURCES
         if command not in sources or not 1<=limit<=1000:
             raise ValueError('invalid pending source/batch limit')
         query='''SELECT d.identifier FROM discovery d
@@ -269,5 +272,31 @@ class CareerStore:
             "discovery_feeds":[dict(zip(('id','status','compressed_bytes','lines','candidates','rejected','sha256','detail'), row))
                 for row in self.db.execute('SELECT id,status,compressed_bytes,lines,candidates,rejected,sha256,detail FROM discovery_feeds ORDER BY id')],
             "storage_bytes": self.task.used(), "storage_budget": self.task.config["budget_bytes"],
+            "acquisition_progress":self.candidate_progress(),
+            "institution_alias_issues":dict(self.db.execute('SELECT reason,count(*) FROM institution_alias_issues GROUP BY reason')),
             "complete_global_census": False,
         }
+
+    def candidate_progress(self, *, allowed_sources=None):
+        """Counts committed candidate selection, not unknown world personnel."""
+        rows=[]
+        for command,source in CANDIDATE_SOURCES.items():
+            if allowed_sources is not None and source not in allowed_sources:continue
+            index=hashlib.sha256()
+            for row in self.db.execute('SELECT identifier,query_sha256,response_sha256 FROM discovery WHERE source=? ORDER BY identifier',(command,)):
+                index.update(canonical(row))
+            total,processed,observed,failed_pending=self.db.execute('''SELECT count(*),COALESCE(sum(committed),0),
+                COALESCE(sum(observed),0),COALESCE(sum(attempted AND NOT committed),0) FROM (
+                SELECT EXISTS(SELECT 1 FROM members m WHERE m.source=? AND
+                    (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) AS committed,
+                    EXISTS(SELECT 1 FROM members m WHERE m.source=? AND m.status='observed' AND
+                    (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) AS observed,
+                    EXISTS(SELECT 1 FROM discovery_retries r WHERE r.source=d.source AND r.identifier=d.identifier) AS attempted
+                FROM discovery d WHERE d.source=?)''',(source,source,command)).fetchone()
+            if total:
+                rows.append({'source':source,'candidates':total,'processed':processed,
+                    'observed_members':observed,'rejected_members':processed-observed,
+                    'pending':total-processed,'pending_with_errors':failed_pending,
+                    'selection_sha256':index.hexdigest(),'enumeration_complete':processed==total})
+        return {'scope':'current-discovered-candidates-only','complete_global_census':False,
+                'world_personnel_denominator':None,'sources':rows}

@@ -358,6 +358,8 @@ def rank_global(store, *, public=False, publication_policy=None):
             "not_run":["discipline","bootstrap","english_source_deletion","official_profile_loss"],
             "intensity_denominator":"observed training people; not all graduates or job seekers"},
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
+    if hasattr(store,'candidate_progress'):
+        result['acquisition_progress']=store.candidate_progress(allowed_sources=allowed)
     if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='institution_bridge'").fetchone():
         from .institution_bridge import VERSION as BRIDGE_VERSION, SPEC as BRIDGE_SPEC
         bridge_hash=hashlib.sha256()

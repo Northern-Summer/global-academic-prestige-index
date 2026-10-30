@@ -19,6 +19,29 @@ class CollectionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_candidate_progress_keeps_failures_and_missing_world_denominator(self):
+        s=self.store(archive([]))
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-wikidata','Q1','a','b'),('ingest-wikidata','Q2','a','b'),
+                    ('ingest-wikidata','Q3','a','b'),('ingest-orcid-api','private-id','c','d')])
+                s.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',[
+                    ('wikidata','Q1@1','a'*64,'observed',None),
+                    ('wikidata','Q2@1','b'*64,'rejected','explicit invalid source member')])
+            s.defer('ingest-wikidata','Q3','temporarily unavailable',now=1000)
+            r=s.candidate_progress()
+            wd=next(x for x in r['sources'] if x['source']=='wikidata')
+            self.assertEqual((wd['candidates'],wd['processed'],wd['observed_members'],wd['rejected_members'],
+                wd['pending'],wd['pending_with_errors']),(3,2,1,1,1,1))
+            self.assertFalse(wd['enumeration_complete'])
+            self.assertIsNone(r['world_personnel_denominator'])
+            self.assertFalse(r['complete_global_census'])
+            self.assertNotIn('private-id',str(r))
+            self.assertEqual(r,s.candidate_progress())
+            self.assertEqual(len(s.candidate_progress(allowed_sources={'wikidata'})['sources']),1)
+        finally:s.close()
+
     def test_one_source_failure_does_not_stop_another_or_erase_queue(self):
         s=self.store(archive([]))
         try:
@@ -39,6 +62,25 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(len(s.pending('ingest-orcid-api')),1)
             self.assertFalse(s.pending('ingest-wikidata'))
             self.assertFalse(result['global_complete'])
+        finally:s.close()
+
+    def test_queued_only_never_refills_or_discovers_archive(self):
+        s=self.store(archive([]))
+        try:
+            with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
+            def ingest(store,http,ids,**kwargs):
+                with store.db:store.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',('wikidata','Q1@1','a'*64,'observed',None))
+            with patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 patch('gapi.collection.discover_openalex') as oa, \
+                 patch('gapi.collection.discover_crossref') as cr, \
+                 patch('gapi.collection.enqueue_discovery') as wd, \
+                 patch('gapi.collection.discover_dump') as dump:
+                r=collect(s,None,discovery=False,max_seconds=10)
+            self.assertEqual(sum(t.call_count for t in (oa,cr,wd,dump)),0)
+            self.assertFalse(r['discovery_enabled'])
+            self.assertFalse(s.pending('ingest-wikidata'))
+            with self.assertRaisesRegex(ValueError,'queued-only'):
+                collect(s,None,{'id':'feed'},discovery=False)
         finally:s.close()
 
     def test_budget_refusal_propagates_and_preserves_pending_work(self):
