@@ -1,0 +1,56 @@
+{
+  "schema_version": "gapi-prefix-release-acceptance/v1",
+  "generated_at": "2026-10-30T05:04:46.241762+00:00",
+  "source_code_before_commit": "8be6bd815e8698da8c821a1beed32e471387abbd",
+  "snapshot": "global-25eb446c6ef5c475.json",
+  "snapshot_sha256": "25eb446c6ef5c475f6826b69a83da5df0a40896dedfb17a9574522622cef705f",
+  "statistics": {
+    "people": 5475,
+    "events": 20492,
+    "institutions": 5677,
+    "country_region_codes": 99,
+    "relations": 462,
+    "edges": 398,
+    "scored_endpoints": 454
+  },
+  "acquisition": {
+    "complete_global_census": false,
+    "scope": "current-discovered-candidates-only",
+    "sources": [
+      {
+        "candidates": 5862,
+        "enumeration_complete": false,
+        "observed_members": 4662,
+        "pending": 1200,
+        "pending_with_errors": 0,
+        "processed": 4662,
+        "rejected_members": 0,
+        "selection_sha256": "38009620c8cca7c344c4bacc3a2e456674f631b83011157dde156f2507a012cc",
+        "source": "wikidata"
+      },
+      {
+        "candidates": 1915,
+        "enumeration_complete": false,
+        "observed_members": 1797,
+        "pending": 118,
+        "pending_with_errors": 6,
+        "processed": 1797,
+        "rejected_members": 0,
+        "selection_sha256": "1a4f9a55a36b01c64cad36f004e26232931fc8578f38e7fd18bdae942520302e",
+        "source": "orcid-public-api"
+      }
+    ],
+    "world_personnel_denominator": null
+  },
+  "quality": {
+    "sqlite_integrity": "ok",
+    "events_without_member_evidence": 0,
+    "raw_source_files_detected": 0,
+    "raw_source_bytes_detected": 0
+  },
+  "global_complete": false,
+  "independent_third_party_review": false,
+  "public_personal_records": false,
+  "raw_source_files_in_task": 0,
+  "note": "real institution aggregates only; new public snapshot pending CI and browser readback"
+}
