@@ -62,6 +62,16 @@ determine whether the automatic path has actually succeeded.
 
 Before a real ranking release, two independent review tracks are required:
 
+The 2026-10-30 bounded batch-transport review reproduced nested item-ID type
+pollution interrupting adjacent entities, and socket timeouts at a caller's
+deadline being recorded as member failures. Scalar item/time validation and
+deadline-aware connection/read exception handling now cover those counterexamples.
+The implementation-team reviewer independently reran both original cases and the
+early-timeout, access-refusal, maxlag and oversized-response controls. This was a
+read-only internal review with mock transport/in-memory SQLite, not a third-party
+review or proof of the underlying career facts. The dated batch acceptance record
+contains actual test counts, live acquisition measurements and deployment status.
+
 1. Research validity and data governance: measurement claims, direction, coverage, entity resolution, attribution, rights, privacy, and OOD behavior.
 2. Software security and reproducibility: hostile inputs, public-data leakage, dependency/build risks, frontend injection and resource exhaustion, and clean-room reproduction.
 

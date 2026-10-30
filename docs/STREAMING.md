@@ -58,6 +58,37 @@ replay, but the scoring reader excludes them.
 
 ## Actual source boundaries
 
+### Bounded Wikibase entity batches
+
+Wikidata ingestion now uses the official read-only
+[Wikibase Action API](https://www.mediawiki.org/wiki/Wikibase/API), with
+`action=wbgetentities`, `props=claims|info`, `maxlag=5` and at most **10 IDs**
+per request. The HTTP reader keeps its existing **2 MiB response limit** and
+64 KiB read chunks. This bounded JSON buffer is distinct from the incremental
+XML/archive parser: it never holds the whole source, writes raw JSON to disk or
+opens parallel HTTP streams. Each entity still has its own atomic transaction;
+one invalid entity rolls back without losing its valid neighbors. Already committed
+EntityData members retain their original evidence and are not downloaded again.
+
+For new batch members, the ledger retains the exact response SHA-256, batch URL,
+response byte count and retrieval time in `member_parts`. The member hash is the
+SHA-256 of the canonical entity JSON; event evidence includes both hashes and the
+entity revision/statement locator. Neither hash is described as the other. Batch
+transport is another access channel to Wikidata, **not an independent source**.
+
+An oversized batch may use the existing individually bounded EntityData reader.
+HTTP 401/403/429, `maxlag`, access refusals and server pauses never trigger that
+fallback. The documented-route exception admits only the exact claims/info query;
+it does not authorize search, editing or extra parameters. `--batch-size 1` selects
+the predecessor single-entity transport for reproducible diagnostics.
+
+Caller time exhaustion has its own `StageDeadline` signal. Reading/connecting
+across the deadline, or having insufficient time for the ordinary request interval,
+leaves the member pending without recording a source failure or increasing its
+retry penalty. A genuine earlier socket timeout still records failure; server
+`Retry-After` still pauses the source. A partially read ORCID affiliation pair
+continues to roll back both sections. Historical failures remain in the ledger.
+
 The 2026 archive is [ORCID's frozen release](https://orcid.figshare.com/articles/dataset/ORCID_Public_Data_File_2026/34697766/1),
 snapshot 2026-10-13. The public file locator observed on its UI is 70342863. At this
 implementation checkpoint the local download/robots route returned HTTP 202 with an
