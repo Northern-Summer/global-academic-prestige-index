@@ -5,6 +5,27 @@ import {csv,networkSlice,selectRows,validateGlobal} from './global-data.js';
 const node = (id,score,country='CN') => ({institution_id:id,name:id,country,network_score:score,award_score:null,composite_score:null,relations:1,corroborated_relations:0,source_classes:[],traceability:null,observed_rank:null,formal_rank:null,rank_range:null,unranked_reasons:['independent_review_pending']});
 const dataset = () => ({schema_version:'gapi-global-observed/v1',dataset_kind:'real/global-public-observations',algorithm:{config:{alpha:.85}},coverage:{events:3,people:1},nodes:[node('a',.7),node('b',.3,'DE'),node('missing',null)],edges:[{source:'b',target:'a',weight:2,stages:{doctorate:2}}]});
 
+test('candidate progress preserves scope, failed work and exact count reconciliation',()=>{
+  const make=()=>({...dataset(),acquisition_progress:{scope:'current-discovered-candidates-only',
+    complete_global_census:false,world_personnel_denominator:null,sources:[{source:'wikidata',candidates:10,
+      processed:7,observed_members:6,rejected_members:1,pending:3,pending_with_errors:2,
+      selection_sha256:'a'.repeat(64),enumeration_complete:false}]}});
+  assert.equal(validateGlobal(make()).acquisition_progress.sources[0].pending_with_errors,2);
+  const complete=make();Object.assign(complete.acquisition_progress.sources[0],{processed:10,observed_members:9,pending:0,pending_with_errors:0,enumeration_complete:true});
+  assert.equal(validateGlobal(complete).acquisition_progress.complete_global_census,false);
+  for(const change of [{processed:11},{processed:6},{pending:1},{pending_with_errors:4},
+    {observed_members:7},{candidates:0},{enumeration_complete:true},{selection_sha256:'invalid'},
+    {processed:'<img src=x>'}]){
+    const data=make();Object.assign(data.acquisition_progress.sources[0],change);
+    assert.throws(()=>validateGlobal(data));
+  }
+  for(const change of [{complete_global_census:true},{world_personnel_denominator:10},{scope:'all-world'}]){
+    const data=make();Object.assign(data.acquisition_progress,change);assert.throws(()=>validateGlobal(data));
+  }
+  const duplicate=make();duplicate.acquisition_progress.sources.push({...duplicate.acquisition_progress.sources[0]});
+  assert.throws(()=>validateGlobal(duplicate));
+});
+
 test('real global schema preserves missing scores and rejects synthetic or malformed edges',()=>{
   assert.equal(validateGlobal(dataset()).nodes[2].network_score,null);
   assert.throws(()=>validateGlobal({...dataset(),dataset_kind:'synthetic/demo'}));

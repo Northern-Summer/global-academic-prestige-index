@@ -38,6 +38,25 @@ export function validateGlobal(data) {
   for (const field of ['events','people']) {
     if (!Number.isSafeInteger(data.coverage?.[field]) || data.coverage[field] < 0) throw new Error('Invalid coverage count');
   }
+  const acquisition = data.acquisition_progress;
+  if (acquisition != null) {
+    if (acquisition.scope !== 'current-discovered-candidates-only' || acquisition.complete_global_census !== false
+        || acquisition.world_personnel_denominator !== null || !Array.isArray(acquisition.sources)
+        || acquisition.sources.length > 20) throw new Error('Invalid acquisition scope');
+    const sources = new Set();
+    for (const source of acquisition.sources) {
+      if (typeof source.source !== 'string' || !source.source || sources.has(source.source)
+          || !/^[a-f0-9]{64}$/.test(source.selection_sha256)) throw new Error('Invalid acquisition source');
+      sources.add(source.source);
+      for (const field of ['candidates','processed','observed_members','rejected_members','pending','pending_with_errors']) {
+        if (!Number.isSafeInteger(source[field]) || source[field] < 0) throw new Error('Invalid acquisition count');
+      }
+      if (source.candidates === 0 || source.processed > source.candidates
+          || source.observed_members + source.rejected_members !== source.processed
+          || source.pending !== source.candidates - source.processed || source.pending_with_errors > source.pending
+          || source.enumeration_complete !== (source.pending === 0)) throw new Error('Acquisition totals mismatch');
+    }
+  }
   const awards = data.official_award_inventory;
   if (awards != null) {
     if (!Array.isArray(awards.affiliations) || awards.affiliations.length > 25000 || typeof awards.categories !== 'object' || awards.categories === null) throw new Error('Invalid official award inventory');

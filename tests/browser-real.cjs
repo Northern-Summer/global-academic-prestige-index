@@ -36,6 +36,25 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     const metricText=await page.locator('#global-metrics').innerText();
     for (const value of [results.version.people,results.version.events,results.version.relations,results.version.scored]) assert.ok(metricText.replaceAll(',','').includes(String(value)));
     results.coverage_counts_match=true;
+    const acquisition=await page.evaluate(async()=>{
+      const base=new URL('.',location.href),m=await(await fetch(new URL('data/global/manifest.json',base))).json();
+      return(await(await fetch(new URL('data/global/'+m.snapshot,base))).json()).acquisition_progress;
+    });
+    if(acquisition?.sources?.length){
+      await page.locator('#global-acquisition summary').click();
+      const bars=page.locator('#global-acquisition progress');
+      assert.equal(await bars.count(),acquisition.sources.length);
+      for(let i=0;i<acquisition.sources.length;i++){
+        const s=acquisition.sources[i];
+        assert.equal(await bars.nth(i).getAttribute('value'),String(s.processed));
+        assert.equal(await bars.nth(i).getAttribute('max'),String(s.candidates));
+        assert.match(await bars.nth(i).getAttribute('aria-label'),/已发现候选/);
+      }
+      assert.match(await page.locator('#global-acquisition').innerText(),/不代表全球学术人员覆盖率/);
+      await page.locator('#global-acquisition').screenshot({path:screenshotPath('acquisition')});
+      await page.locator('#global-acquisition summary').click();
+      results.acquisition_progress_matches_snapshot=true;
+    }
     await page.evaluate(()=>document.fonts.ready);
     results.typography=await page.evaluate(()=>({
       hero_family:getComputedStyle(document.querySelector('#page-title')).fontFamily,

@@ -18,6 +18,7 @@ root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">01 / INSTITU
 <div id="global-metrics" class="observation-metrics" aria-label="当前切片的实际数据范围"></div>
 <p class="scope-caption">仅统计已收录的公开记录。各项计数的口径不同，不能相除得到全球覆盖率或就业率。</p>
 <div id="global-evidence" class="evidence-summary"></div>
+<details id="global-acquisition" class="reading-note" hidden><summary>采集进度</summary><p>本版本已发现的候选记录，按来源分别计数。候选仍在扩展；这里的完成比例不代表全球学术人员覆盖率。</p><div id="global-acquisition-sources" class="acquisition-progress"></div></details>
 <details class="reading-note"><summary>分数与排名说明</summary><p>“网络份额”表示一个机构在本次人才关系网络中分到的影响力，占比合计为 100%。它不是就业率，也不能直接衡量大学整体质量。奖项和综合评分尚未发布。</p></details>
 <details id="global-official-awards" class="award-inventory" hidden><summary>官方奖项数据：查看采集范围与归属标签</summary><div id="global-award-content"></div></details>
 <div class="table-tools"><label>查找机构<input type="search" id="global-search" placeholder="输入机构名称，例如 Cambridge" autocomplete="off"></label>
@@ -108,6 +109,11 @@ async function load(){
     $('#global-metrics').innerHTML=metrics.map(([label,value,unit])=>`<div><span>${esc(label)}</span><strong>${esc(integer(value))}<small>${esc(unit)}</small></strong></div>`).join('');
     const observed=(data.coverage.event_status?.observed??0)+(data.coverage.event_status?.corroborated??0),pending=data.coverage.event_status?.unresolved??0;
     $('#global-evidence').innerHTML=`<div><strong>履历记录</strong><span>已识别 ${esc(integer(observed))} 条 · 待定 ${esc(integer(pending))} 条</span></div><div class="evidence-track" aria-hidden="true"><span style="width:${data.coverage.events ? Math.min(100,Math.max(0,observed/data.coverage.events*100)).toFixed(3) : 0}%"></span></div><p>另有 ${esc(integer(data.algorithm.normalization_policy?.interpreted_events??0))} 条按公开规则识别，原始记录保留。已识别的记录仍需独立核验。</p>`;
+    const acquisition=data.acquisition_progress?.sources??[];
+    if(acquisition.length){
+      $('#global-acquisition').hidden=false;
+      $('#global-acquisition-sources').innerHTML=acquisition.map(s=>`<div><div><span>${esc(sourceName(s.source))}</span><span>已处理 ${esc(integer(s.processed))} / ${esc(integer(s.candidates))}</span></div><progress value="${s.processed}" max="${s.candidates}" aria-label="${esc(sourceName(s.source))} 已发现候选处理进度">${esc(integer(s.processed))} / ${esc(integer(s.candidates))}</progress><p>待处理 ${esc(integer(s.pending))} · 其中待重试 ${esc(integer(s.pending_with_errors))} · 已拒绝 ${esc(integer(s.rejected_members))}</p></div>`).join('');
+    }
     renderAwards();
     for(const id of ['#global-search','#global-country','#global-sort','#global-scenario'])$(id).addEventListener('input',()=>{page=0;edgePage=0;renderTable();renderNetwork();});
     $('#global-prev').onclick=()=>{page--;renderTable();};$('#global-next').onclick=()=>{page++;renderTable();};

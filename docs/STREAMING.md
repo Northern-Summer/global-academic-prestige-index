@@ -332,6 +332,13 @@ separately report received, rejected and pending members for each source. A sour
 queue reaching zero is completion of that named selection, never evidence of a
 complete world personnel census. A world denominator is explicitly unavailable.
 
+The public page's expandable acquisition panel reads those same frozen selection
+counts. Each source gets its own native accessible progress bar, received/rejected
+totals and outstanding retry count. It describes that release's snapshot, not a
+live connection to private inputs. Even a fully processed candidate selection
+cannot claim global coverage. Browser validation rejects inconsistent totals,
+duplicate source rows and a fabricated world denominator before rendering.
+
 ## Evidence decisions and qualification checks
 
 `corroboration.py` derives a versioned, hashed decision from frozen structured
