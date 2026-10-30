@@ -1,0 +1,41 @@
+{
+  "schema_version": "gapi-queue-closeout/v1",
+  "checked_at": "2026-10-30T05:38:28.920526+00:00",
+  "acquisition": {
+    "scope": "current-discovered-candidates-only",
+    "complete_global_census": false,
+    "world_personnel_denominator": null,
+    "sources": [
+      {
+        "source": "wikidata",
+        "candidates": 5862,
+        "processed": 5862,
+        "observed_members": 5862,
+        "rejected_members": 0,
+        "pending": 0,
+        "pending_with_errors": 0,
+        "selection_sha256": "38009620c8cca7c344c4bacc3a2e456674f631b83011157dde156f2507a012cc",
+        "enumeration_complete": true
+      },
+      {
+        "source": "orcid-public-api",
+        "candidates": 1916,
+        "processed": 1910,
+        "observed_members": 1910,
+        "rejected_members": 0,
+        "pending": 6,
+        "pending_with_errors": 6,
+        "selection_sha256": "80d6bfcafb9d783d08e1f28b924d66a06686ee5bc30e50f4c0941da2787f3ad6",
+        "enumeration_complete": false
+      }
+    ]
+  },
+  "events": 25091,
+  "people": 6659,
+  "due": {
+    "ingest-wikidata": 0,
+    "ingest-orcid-api": 0
+  },
+  "raw_source_files_detected": 0,
+  "global_complete": false
+}

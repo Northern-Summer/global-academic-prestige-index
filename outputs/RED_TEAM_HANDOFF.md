@@ -39,3 +39,31 @@ candidates. Annual archive metadata is available but no large archive is require
 or downloaded; the active pipeline is finite-response API ingestion. Two external
 reviewers, their identities/conflicts and independent retests have not been supplied.
 Any formal-global-ranking approval is withheld.
+
+## Frozen observation review target — 2026-10-30 queue drain
+
+The next review target is `outputs/global/manifest.json`, snapshot
+`global-765523a4bf2d9f9c.json`, SHA-256
+`765523a4bf2d9f9c02c79b88eff93df1fb9ad327e61752f4b99a4a01493c4965`.
+The manifest binds calculation code `4f29d37e422ea9debbbc841f03e24514ed8d0572`
+and private normalized input SHA-256
+`7f11e661a4020fd1caece668ddf2199f6b5cd9ffe63d9e32ffed794df0221577`.
+That private input remains outside the public repository on the task's D drive.
+
+This selection contains 6,659 people, 25,091 career events, 100 country/region
+codes, 6,606 institution identifiers, 478 deduplicated relations, 412 aggregate
+edges and 465 scored endpoints. Institution identifiers are not a university
+denominator. Only 2,404 events have observed status; 22,687 remain unresolved.
+No relation has independent corroboration and no institution has a formal rank.
+
+Wikidata candidate processing is 5,862/5,862 for the discovered selection, while
+ORCID is 1,910/1,916. Six original exceptions remain pending; no locked account,
+redirect or unresolved identity is relabeled as successful retrieval. The source
+enumeration and world personnel denominator remain incomplete/unknown. The
+separate official Nobel inventory does not establish canonical institutional
+award scores. Award and composite scores remain missing.
+
+Local Python 197/197 and frontend 30/30 checks were rerun for this selection.
+Frozen-input byte comparison, public graph replay, deployment and browser
+readback have separate dated receipts; consult those receipts for their actual
+status rather than interpreting this handoff as reviewer approval.

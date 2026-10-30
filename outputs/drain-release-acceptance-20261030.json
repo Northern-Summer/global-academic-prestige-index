@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-10-30T05:44:54.216168+00:00",
+  "scope": "frozen-observation-selection-only",
+  "global_complete": false,
+  "snapshot_sha256": "765523a4bf2d9f9c02c79b88eff93df1fb9ad327e61752f4b99a4a01493c4965",
+  "private_frozen_input_sha256_verified": "7f11e661a4020fd1caece668ddf2199f6b5cd9ffe63d9e32ffed794df0221577",
+  "repeated_export_manifest_equal": true,
+  "repeated_snapshot_hash_equal": true,
+  "people": 6659,
+  "events": 25091,
+  "countries": 100,
+  "institution_identifiers": 6606,
+  "scored_nodes": 465,
+  "deduplicated_relations": 478,
+  "aggregate_edges": 412,
+  "missing_award_and_composite_scores_preserved": true,
+  "formal_ranks": 0,
+  "raw_source_files": 0,
+  "raw_source_bytes": 0,
+  "budgeted_bytes": 517114318,
+  "git_additional_conservative_bytes": 4480817,
+  "total_conservative_bytes": 521595135,
+  "budget_bytes": 2147483648,
+  "reserve_bytes": 268435456,
+  "remaining_after_reserve": 1357453057,
+  "tests": {
+    "python_passed": 197,
+    "frontend_passed": 30
+  },
+  "third_party_review": "pending",
+  "deployment": "pending-current-selection"
+}
