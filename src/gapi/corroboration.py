@@ -49,7 +49,7 @@ def decisions(store, *, allowed_sources=None):
     checks = store.db.execute('''SELECT e.id,e.payload,COALESCE(a.institution,e.institution),
             c.url,c.content_sha256,c.field_hash
         FROM official_checks c JOIN events e ON e.id=c.event_id
-        LEFT JOIN institution_aliases a ON a.alias=e.institution
+        LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE c.rule_version=? AND c.status='official-underlying-source-confirmed'
         AND c.origin_relation='same-origin-as-wikidata-reference' AND e.source='wikidata'
         AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
@@ -65,7 +65,7 @@ def decisions(store, *, allowed_sources=None):
         if not subject or subject[0]!=official['person']:
             continue
         candidates = store.db.execute('''SELECT e.id,e.payload,COALESCE(a.institution,e.institution)
-            FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+            FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
             WHERE e.person=? AND e.source='orcid-public-api'
             AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
                 AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))

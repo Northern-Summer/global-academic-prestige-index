@@ -119,3 +119,16 @@ Nobel-only award-time label attributions use the existing official page hashes.
 The fixed normalized ROR directory hash is independently checked before exact
 name/alias-and-country candidate matching. No fuzzy or LLM identity decisions are
 made, and those candidates are not canonical merges or a complete award score.
+
+## Institution identifier bridge (checked 2026-10-30)
+
+Wikidata's [P3500](https://www.wikidata.org/w/index.php?title=Property:P3500&oldid=2559905787)
+is the Ringgold organization identifier; [P6782](https://www.wikidata.org/w/index.php?title=Property:P6782&oldid=2537555919)
+is the ROR identifier. The property pages were retrieved from the official site
+through the registered public research fallback after the primary research channel
+returned HTTP 503. This is source verification, not an entity match produced by an
+LLM. Actual mapping uses exact structured statements and the pinned reciprocal ROR
+directory only. Wikidata structured data and the ROR directory retain their existing
+source-specific CC0 declarations; this does not access or republish the proprietary
+Ringgold database. The normalized query ledger and acquisition window are evidence;
+property distinct-value constraints alone do not prove a particular ID is unique.

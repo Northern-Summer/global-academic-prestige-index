@@ -46,8 +46,10 @@ def ror_records(path):
             buffer = buffer[end:]
 
 
-def resolve_institutions(store):
-    wanted = set()
+def resolve_institutions(store, *, extra_identifiers=()):
+    wanted = set(extra_identifiers)
+    if len(wanted) > 200000:
+        raise BudgetStop('institution crosswalk exceeds bounded in-memory set')
     for row in store.db.execute("SELECT DISTINCT institution FROM events WHERE institution IS NOT NULL"):
         wanted.add(row[0])
         if len(wanted) > 200000:
@@ -77,10 +79,22 @@ def resolve_institutions(store):
                         continue
                     resolved[alias] = (canonical_id, record)
     batch = []
+    conflicts = set()
+    policy='ror-exact-crosswalk/2'
+    with store.db:
+        for alias in sorted(ambiguous):
+            store.db.execute('INSERT OR IGNORE INTO institution_alias_issues VALUES(?,?,?,?)',
+                (alias,policy,'ambiguous_frozen_ror_identifier',canonical({'ror_sha256':expected}).decode()))
     def commit_batch(rows):
         with store.member("identity", "ror-crosswalk"):
             for alias, (target, record) in rows:
-                store.db.execute("INSERT OR REPLACE INTO institution_aliases VALUES(?,?,?)",(alias,target,expected))
+                old=store.db.execute('SELECT institution,provenance FROM institution_aliases WHERE alias=?',(alias,)).fetchone()
+                if old and old[0]!=target:
+                    conflicts.add(alias)
+                    store.db.execute('INSERT OR IGNORE INTO institution_alias_issues VALUES(?,?,?,?)',
+                        (alias,policy,'existing_alias_conflict',canonical({'existing':old,'proposed':target,'ror_sha256':expected}).decode()))
+                else:
+                    store.db.execute("INSERT OR IGNORE INTO institution_aliases VALUES(?,?,?)",(alias,target,expected))
                 store.db.execute("INSERT OR REPLACE INTO entities VALUES(?,?,?,?,?)", (target, record["name"], record.get("country_code"), 1,
                     canonical({"region": record.get("geo", {}).get("continent_name"), "type": record.get("type"), "ror": record["ror"]}).decode()))
     for item in resolved.items():
@@ -90,8 +104,13 @@ def resolve_institutions(store):
             batch.clear()
     if batch:
         commit_batch(batch)
-    return {"resolved_identifiers": len(resolved), "unresolved_identifiers": len(wanted - resolved.keys()),
-            "ambiguous_identifiers": sorted(ambiguous), "name_similarity_merges": 0}
+    active=dict(store.db.execute('SELECT alias,institution FROM active_institution_aliases'))
+    # The bridge consumes this scan's agreement, never an old reciprocal row.
+    verified={alias:target for alias,(target,_) in resolved.items() if active.get(alias)==target}
+    total_resolved = sum(alias in wanted for alias in active)
+    return {"resolved_identifiers": total_resolved, "unresolved_identifiers": len(wanted)-total_resolved,
+            "ambiguous_identifiers": sorted(ambiguous), "conflicting_identifiers":sorted(conflicts),
+            "verified_reciprocal":verified, "name_similarity_merges": 0}
 
 
 def corroborate(store):
@@ -119,7 +138,7 @@ def relation_rows(store, *, allowed_sources=None):
     columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
     cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source,e.id""" + columns + """
-        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution""" + join + """
+        FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution""" + join + """
         WHERE EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
           AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
         ORDER BY e.person,e.id""", (VERSION, POLICY_SHA256) if enriched else ())
@@ -222,7 +241,7 @@ def rank_global(store, *, public=False, publication_policy=None):
         if institution not in directory and reported:
             directory[institution] = (reported, country, {"identity_status":"reported-label-unresolved"})
     # Observed event endpoints belong in directory even when they have no qualifying edge.
-    directory_ids = {r[0] for r in store.db.execute("SELECT DISTINCT COALESCE(a.institution,e.institution),e.source FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution WHERE e.institution IS NOT NULL")
+    directory_ids = {r[0] for r in store.db.execute("SELECT DISTINCT COALESCE(a.institution,e.institution),e.source FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution WHERE e.institution IS NOT NULL")
                      if allowed is None or r[1] in allowed}
     ordering = sorted(network, key=lambda node: (-network[node], node))
     order = {node: i+1 for i, node in enumerate(ordering)}
@@ -271,14 +290,14 @@ def rank_global(store, *, public=False, publication_policy=None):
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     denominators = Counter()
     denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
-        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+        FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE e.kind IN ('education','training') AND e.status IN ('observed','corroborated')"""
     params = ()
     if has_interpretations(store):
         # The explicit v2 view counts its interpreted training observations in
         # the same denominator; old frozen inputs retain their predecessor view.
         denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
-            FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+            FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
             LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?
             WHERE COALESCE(i.kind,e.kind) IN ('education','training')
             AND COALESCE(i.status,e.status) IN ('observed','corroborated')
@@ -339,6 +358,16 @@ def rank_global(store, *, public=False, publication_policy=None):
             "not_run":["discipline","bootstrap","english_source_deletion","official_profile_loss"],
             "intensity_denominator":"observed training people; not all graduates or job seekers"},
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='institution_bridge'").fetchone():
+        from .institution_bridge import VERSION as BRIDGE_VERSION, SPEC as BRIDGE_SPEC
+        bridge_hash=hashlib.sha256()
+        for bridge_row in store.db.execute('SELECT * FROM institution_bridge ORDER BY alias,version'):
+            bridge_hash.update(canonical(bridge_row))
+        result['algorithm']['institution_identity_projection'] = {
+            'version':BRIDGE_VERSION, 'spec_sha256':digest(BRIDGE_SPEC),
+            'index_sha256':bridge_hash.hexdigest(),
+            'totals':dict(store.db.execute('SELECT status,count(*) FROM institution_bridge WHERE version=? GROUP BY status',(BRIDGE_VERSION,))),
+            'scope':'observed Ringgold identifiers only; reciprocal ROR and revision-pinned Wikidata; no personal fact corroboration'}
     from .nobel import public_inventory
     from .corroboration import decisions, VERSION as EVIDENCE_VERSION, POLICY_SHA256 as EVIDENCE_POLICY
     verified = decisions(store, allowed_sources=allowed)
@@ -394,8 +423,16 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
     for row in store.db.execute('SELECT id,institution,status,payload,source FROM events ORDER BY id'):
         if row[-1] in allowed:
             events_hash.update(canonical(row))
+    aliases_hash=hashlib.sha256()
+    for alias_row in store.db.execute('SELECT alias,institution,provenance FROM institution_aliases ORDER BY alias'):
+        aliases_hash.update(canonical(alias_row))
+    alias_issues_hash=hashlib.sha256()
+    for issue_row in store.db.execute('SELECT * FROM institution_alias_issues ORDER BY alias,policy'):
+        alias_issues_hash.update(canonical(issue_row))
     manifest = {"schema_version":"gapi-public-release/v1", "snapshot":filename, "output_sha256":checksum,
         "sources":inputs,"member_index_sha256":member_hash.hexdigest(),"normalized_event_index_sha256":events_hash.hexdigest(),"config_sha256":digest(store.task.config),
+        "institution_alias_index_sha256":aliases_hash.hexdigest(),
+        "institution_alias_issue_index_sha256":alias_issues_hash.hexdigest(),
         "code_commit":subprocess.check_output(["git","rev-parse","HEAD"],cwd=project_root(),text=True).strip(),
         "code_tree_sha256":digest({str(p.relative_to(project_root())).replace('\\','/'):hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest()
             for p in sorted((project_root()/'src/gapi').glob('*.py'))}),

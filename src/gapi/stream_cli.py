@@ -16,9 +16,12 @@ def register(sub):
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
+        if name == 'resolve-institutions-online':
+            parser.add_argument('--max-aliases',type=int,default=100)
+            parser.add_argument('--max-seconds',type=float,default=300)
         if name in ('discover-wikidata-dump','collect-global'):
             parser.add_argument('--feed', type=Path, default=Path('configs/discovery-dump.json'))
             parser.add_argument('--max-seconds', type=float, default=300)
@@ -55,7 +58,7 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    names = {"sources", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names:
         return False
     task = Task(args.task)
@@ -77,7 +80,11 @@ def execute_task(task, args):
     store = CareerStore(task)
     try:
         http = PublicHTTP(task)
-        if args.command == 'project-awards':
+        if args.command == 'resolve-institutions-online':
+            from .institution_bridge import resolve_online
+            result=resolve_online(store,http,max_aliases=args.max_aliases,max_seconds=args.max_seconds,
+                progress=lambda r: print(json.dumps(r),flush=True))
+        elif args.command == 'project-awards':
             from .award_projection import project_awards
             result = project_awards(store)
         elif args.command == 'normalize-careers':

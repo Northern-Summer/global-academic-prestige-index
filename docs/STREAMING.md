@@ -347,3 +347,45 @@ sources survive deduplication; evidence selection and qualification do not depen
 on event ID order. Source deletion replays the join after removing that source,
 including evidence decisions. Missing real independent evidence remains missing;
 the existence of this mechanism does not establish global corroboration coverage.
+
+## Reciprocal institution identifiers
+
+```powershell
+python -m gapi resolve-institutions-online --max-aliases 1000 --max-seconds 1200
+```
+
+`institution_bridge.py` processes at most 20 observed Ringgold IDs per query. A
+Wikidata query discovers candidates; it cannot authorize a merge. The subsequent
+revision-pinned entity must carry one current unqualified Ringgold ID (P3500) and
+one ROR ID (P6782). The frozen ROR directory must independently point back to that
+same Wikidata entity and ROR ID. Qualified/historical statements, multiple candidate
+entities, multiple current IDs, missing reciprocal IDs and existing alias conflicts
+stay unresolved. Institution names never decide these matches.
+
+The normalized ledger keeps the versioned specification, query/response hashes,
+entity revision/hash, statement IDs and frozen ROR identity. The acquisition sweep
+receipt bounds the retrieval time window; it does not invent an exact timestamp
+for older individual queries. No original response or personal trajectory is saved.
+Every completed alias decision, including unmatched or ambiguous, resumes without
+refetching within that version. A network failure leaves the current batch pending.
+The adapter shares WDQS and EntityData pause keys with the existing source workers.
+Its output is institution identity evidence, not independent confirmation of a
+person's degree or employment, and enumerates only observed IDs rather than the
+world's institutions. A new source/identity version is required to refresh completed
+decisions. Public manifests bind the alias projection's checksum separately.
+
+Bridge v2 consumes only the current frozen-directory scan's unambiguous,
+conflict-free reciprocal results. Conflicting alias rows are preserved as history
+and excluded from the active projection used by ranking, official checks and
+corroboration. Neither stale rows nor old provenance can restore eligibility.
+Predecessor bridge decisions are rechecked against that same rule without
+refetching already stored snapshots; their original evidence remains in the
+versioned ledger. Each rejected predecessor is excluded from active aliases.
+Source snapshots and issue indexes are hashed in the release manifest.
+
+A live bulk `api.php` experiment was rejected by robots before the entity request;
+it created no bridge decisions. This route has been removed. Entity acquisition
+continues only through the previously allowed individual `Special:EntityData`
+URLs. No authentication, robot rule or access limit is bypassed. Oversized entity
+responses receive an explicit unresolved rejection count, allowing later entities
+to continue without sampling or promoting the rejected identity.

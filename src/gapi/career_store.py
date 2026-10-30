@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS discovery_feeds(
  sha256 TEXT, detail TEXT, prefix_sha256 TEXT);
 CREATE TABLE IF NOT EXISTS institution_aliases(
  alias TEXT PRIMARY KEY, institution TEXT NOT NULL, provenance TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS institution_alias_issues(
+ alias TEXT NOT NULL, policy TEXT NOT NULL, reason TEXT NOT NULL,
+ evidence TEXT NOT NULL, PRIMARY KEY(alias,policy));
+CREATE VIEW IF NOT EXISTS active_institution_aliases AS
+ SELECT a.* FROM institution_aliases a WHERE NOT EXISTS(
+ SELECT 1 FROM institution_alias_issues i WHERE i.alias=a.alias);
 CREATE TABLE IF NOT EXISTS official_checks(
  event_id TEXT NOT NULL, url TEXT NOT NULL, content_sha256 TEXT NOT NULL,
  rule_version TEXT NOT NULL, retrieved_at TEXT NOT NULL, status TEXT NOT NULL,

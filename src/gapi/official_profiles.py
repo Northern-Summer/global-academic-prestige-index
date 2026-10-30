@@ -114,7 +114,7 @@ def check_official_profiles(store,http,*,limit=20):
     if not 1<=limit<=100:raise ValueError('official page limit must be between 1 and 100')
     selected={}
     for event_id,payload,institution in store.db.execute('''SELECT e.id,e.payload,COALESCE(a.institution,e.institution)
-        FROM events e LEFT JOIN institution_aliases a ON a.alias=e.institution
+        FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE e.source='wikidata' ORDER BY e.id'''):
         event=json.loads(payload)
         url=profile_url(event)
