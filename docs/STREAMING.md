@@ -171,6 +171,13 @@ The process ends at its time/resource/source boundary; it creates no scheduler o
 background timer. Every invocation resumes the existing database. Access denials
 remain denials and cannot change source trust or trigger authentication workarounds.
 
+The discovery ledger's `compressed_bytes` and `sha256` retain the longest observed
+compressed prefix as a matching count/hash pair. A shorter replay or failed open
+must not reduce that continuation ceiling or replace its hash with an empty one.
+The command result's `compressed_bytes` reports bytes from the current attempt;
+neither quantity implies a full-source checksum or random-access resumability.
+The committed line prefix is checked separately before new candidates are queued.
+
 The official-profile adapter currently supports the exact TAMU-CC business-directory
 layout and existing Wikidata P854 profile references. It incrementally reads HTML,
 extracts only education lines and explicit academic/start-year statements, checks
