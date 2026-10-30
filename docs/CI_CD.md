@@ -96,3 +96,20 @@ commits, source/asset/manifest/snapshot modification, dirty source at build time
 in-flight input changes, line-ending portability and disallowed build modes.
 
 Public asset readback retries transient network/timeouts and HTTP 429/500/502/503/504 up to three times, with a 10-second per-request deadline and bounded backoff. Permanent HTTP errors, byte-limit violations and content-hash mismatches still fail. This addresses observed Pages HTTP 503 after the site manifest had settled; it does not repeat publication writes. The rejected run is retained as evidence.
+
+The 2026-10-30 run `41011067971` exposed a distinct settlement delay: Pages
+reported a successful 65,550 ms build, while the old 12-poll / five-second
+manifest window had already expired. The public source subsequently matched the
+expected commit. `waitForPublicManifest` now uses a monotonic 180-second deadline,
+keeps polling read-only, and never repeats a push or build request. A pending or
+stale manifest still fails when that deadline expires. One bounded in-flight
+HTTP read may finish after the deadline; late matching bytes cannot pass.
+Clock-injected regression cases cover this observed delay, transient read errors,
+stale/malformed output, and a response arriving too late. The first failed run is
+retained rather than relabeled as successful.
+
+Browser network-view checks wait for the renderer's actual completed node/edge
+counts after each switch. Synchronous status text alone cannot satisfy scene
+acceptance. The checks also exercise a rapid all-to-focus switch and require a
+single final canvas with the latest counts. These receipts describe internal
+automated validation, not independent third-party review.
