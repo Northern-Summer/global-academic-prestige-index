@@ -41,6 +41,17 @@ implemented PageRank iteration, and conservative Nobel label attribution. Exact
 ROR candidates remain unconfirmed. See docs/OOD.md and the continuation receipts.
 These are internal executable checks, not external reviewer acceptance.
 
+The institution bridge's bounded internal cross-challenge additionally reproduced
+stale reciprocal reuse after a newly detected ROR ambiguity, silent replacement of
+an existing conflicting WD alias, and nested JSON type pollution bypassing the
+batch failure boundary. Bridge v2 now consumes only the current unambiguous scan,
+preserves conflicting originals outside the active projection, rechecks predecessor
+decisions and rejects polluted containers through explicit validation. Regression
+tests include ambiguous and conflicting intermediates, valid same-target prior
+evidence, interrupted/resumed batches and oversized entity isolation. Real-sweep
+counts and the source-specific unresolved remainder belong to the dated receipt;
+these tests do not prove global identity accuracy.
+
 The automatic deployment increment received a bounded internal read-only review.
 That review flagged the GITHUB_TOKEN/legacy-Pages trigger restriction; deployment
 now explicitly requests the existing Pages build using a narrow pages:write token.
