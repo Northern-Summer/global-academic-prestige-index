@@ -1,0 +1,18 @@
+{
+  "schema_version": "gapi-lifecycle-closeout/v1",
+  "checked_at": "2026-10-30T05:08:52.922133+00:00",
+  "budgeted_bytes": 442760983,
+  "git_conservative_extra_bytes": 4312871,
+  "combined_bytes": 447073854,
+  "budget_bytes": 2147483648,
+  "reserve_bytes": 268435456,
+  "usable_remaining_bytes": 1431974338,
+  "raw_source_files_detected": 0,
+  "raw_source_bytes_detected": 0,
+  "old_test_temp_dirs_remaining": 0,
+  "new_deletions_this_continuation": 0,
+  "prior_verified_deleted_bytes": 276594,
+  "private_frozen_inputs_preserved": true,
+  "historical_evidence_preserved": true,
+  "user_dev_server_untouched": true
+}

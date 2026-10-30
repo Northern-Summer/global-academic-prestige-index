@@ -1,0 +1,121 @@
+{
+  "schema_version": "gapi-deployment-settlement/v1",
+  "site": "https://northern-summer.github.io/global-academic-prestige-index/",
+  "source_commit": "846d57744807fb1322abd8014a58ab1fcb6e34da",
+  "run_id": 41006443652,
+  "workflow_url": "https://github.com/Northern-Summer/global-academic-prestige-index/actions/runs/41006443652",
+  "jobs": [
+    [
+      "test",
+      "completed",
+      "success"
+    ],
+    [
+      "real-observation-build",
+      "completed",
+      "success"
+    ],
+    [
+      "production-browser",
+      "completed",
+      "success"
+    ],
+    [
+      "deploy-observations",
+      "completed",
+      "success"
+    ]
+  ],
+  "verified_files": {
+    ".nojekyll": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "assets/global-network-BZnljDAM.js": {
+      "sha256": "7ec176a1d3562b1b64ee17a29f140dfbaf877b50d987f6996a2cb27635a0b715",
+      "bytes": 497422
+    },
+    "assets/index-6yOmGVjn.js": {
+      "sha256": "3fa70fcedc1ae29c662dca8549a8c5fb34ea9c73530c325b7c3e1f6e38cf939b",
+      "bytes": 28471
+    },
+    "assets/index-D4rmSPIp.css": {
+      "sha256": "444c0585a6ac6c48e744bee054adef28ef27ff7fe30888523089bc452d09b702",
+      "bytes": 29614
+    },
+    "assets/mono-4GdczIuU.woff2": {
+      "sha256": "e1896b13b2b1bb112fac2f9571bd6c40e118746e77a4511edbf43fbb41bf3e1e",
+      "bytes": 14820
+    },
+    "assets/playfair-BOwq7MWX.woff2": {
+      "sha256": "e0c764a8e9e1cce92163c55bac4b2ad6cd4cf8c696ce2289ab5c41565e65b7e2",
+      "bytes": 38404
+    },
+    "assets/playfair-italic-DmbndNpe.woff2": {
+      "sha256": "54af24bd0f911f0fd7399d5445ea2023ff501d6a69f2d728f1213072f977ab14",
+      "bytes": 38804
+    },
+    "assets/sans-Xz1IZZA0.woff2": {
+      "sha256": "9fea608a947e67020c33cad9a6fe3d60c54119dfb8cff87768a8117a15ed7543",
+      "bytes": 36932
+    },
+    "assets/song-DHchGQ_0.woff2": {
+      "sha256": "e7f54fce9a72f450f14894f6a3041407435a70b2ed3e6d0af7971268e1d66e89",
+      "bytes": 9124
+    },
+    "build-provenance.json": {
+      "sha256": "31606ee2994e090f3c9aada7bfdd00924739f19769400d3b5a835aa4585429b1",
+      "bytes": 5068
+    },
+    "data/global/global-25eb446c6ef5c475.json": {
+      "sha256": "25eb446c6ef5c475f6826b69a83da5df0a40896dedfb17a9574522622cef705f",
+      "bytes": 4386465
+    },
+    "data/global/manifest.json": {
+      "sha256": "218a9aa2a070e51e93ce64d0a9e691294f462ff0d9ae2c9ecd3495a514762fcb",
+      "bytes": 2910
+    },
+    "docs/BIAS_AND_LIMITATIONS.md": {
+      "sha256": "856d950529ffd5838434f521a5504b00dd6493e2e904d6f833ef80ab12d00e20",
+      "bytes": 1257
+    },
+    "docs/CI_CD.md": {
+      "sha256": "122ff05ed75a6527b2f38c40f9020b826999be20c5c3ba5999869be74bfa054a",
+      "bytes": 6390
+    },
+    "docs/DATA_SCHEMA.md": {
+      "sha256": "512be9d1134b5144d07adf216e9e6eeef59389fd77f8877cd82dcde3a79d2943",
+      "bytes": 2978
+    },
+    "docs/DATA_SOURCES.md": {
+      "sha256": "84dfb4486e25c23844ebb92b3b85fcb31e7af4551c279367847be1e5e6d1a9df",
+      "bytes": 12165
+    },
+    "docs/FONTS.md": {
+      "sha256": "2f7356232c7e4c21e845f79e1eea243d79b6bde605e3b3a25d594a1a358b0360",
+      "bytes": 18972
+    },
+    "docs/METHODOLOGY.md": {
+      "sha256": "35458a305764ccc4c36844ca93e4a0b002b5b0b71a606eafb991ef35f87c296e",
+      "bytes": 9061
+    },
+    "docs/OOD.md": {
+      "sha256": "bed0fd8d16ad27f6600623ec6f6a8cfcd16af8962fd0d082cc446444d4ed992e",
+      "bytes": 3353
+    },
+    "docs/RED_TEAM_REPORT.md": {
+      "sha256": "b8a9c0a6420297287c444d99c055e49e1d68cfb76418f3d99199914171c88027",
+      "bytes": 5549
+    },
+    "docs/STREAMING.md": {
+      "sha256": "99e3fcb828d576031ec17f7bf97260dcd1481498fd59d2da12cb36bce54b0a46",
+      "bytes": 30362
+    },
+    "index.html": {
+      "sha256": "e0020b209480278087aaae283b8b32b928b3d289fb95b9461e1f75a363a213ad",
+      "bytes": 3239
+    }
+  },
+  "all_hashes_match": true,
+  "ranking_status": "observations-only-pending-independent-review"
+}

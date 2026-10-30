@@ -52,5 +52,8 @@
   "independent_third_party_review": false,
   "public_personal_records": false,
   "raw_source_files_in_task": 0,
-  "note": "real institution aggregates only; new public snapshot pending CI and browser readback"
+  "note": "institution aggregates deployed; CI four jobs passed, 22 public file hashes and browser acceptance verified",
+  "deployment_run": 41006443652,
+  "deployment_source_commit": "846d57744807fb1322abd8014a58ab1fcb6e34da",
+  "browser_receipt": "browser-prefix-public-20261030.json"
 }

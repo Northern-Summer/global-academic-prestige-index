@@ -1,0 +1,67 @@
+{
+  "tested_url": "https://northern-summer.github.io/global-academic-prestige-index/",
+  "load": "版本已校验 · 数据持续采集中 · 正式全球排名尚未发布",
+  "table_ready_ms": 3806,
+  "version": {
+    "snapshot": "global-25eb446c6ef5c475.json",
+    "expected": "25eb446c6ef5c475f6826b69a83da5df0a40896dedfb17a9574522622cef705f",
+    "actual": "25eb446c6ef5c475f6826b69a83da5df0a40896dedfb17a9574522622cef705f",
+    "institutions": 5677,
+    "events": 20492,
+    "edges": 398,
+    "people": 5475,
+    "relations": 462,
+    "scored": 454,
+    "award_recipients": 1028,
+    "award_attribution_labels": 384
+  },
+  "coverage_counts_match": true,
+  "acquisition_progress_matches_snapshot": true,
+  "typography": {
+    "hero_family": "\"Playfair Display\", Georgia, serif",
+    "hero_italic": "italic",
+    "heading_family": "\"Playfair Display\", \"GAPI Song\", \"Songti SC\", SimSun, serif",
+    "heading_weight": "400",
+    "fonts": [
+      {
+        "family": "Playfair Display",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Playfair Display",
+        "style": "italic",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Sans",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Mono",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "GAPI Song",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ]
+  },
+  "table_min_font_px": 14,
+  "public_source_isolation": true,
+  "search_filter_sort_keyboard_details": true,
+  "csv_download": true,
+  "official_award_attribution": true,
+  "official_awards": true,
+  "relationship_pagination": true,
+  "webgl": true,
+  "direction": "二维列表含当前筛选的全部 77 条关系，可翻页查看。3D 显示 120 个节点、77 条边，上限为 500 / 2,000。",
+  "mobile": true,
+  "webgl_fallback": true,
+  "hostile_number_rejected": true,
+  "hostile_label_escaped": true,
+  "page_errors": []
+}

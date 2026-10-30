@@ -1,0 +1,10 @@
+{
+  "schema_version": "gapi-frozen-byte-replay/v1",
+  "snapshot": "global-25eb446c6ef5c475.json",
+  "sha256": "25eb446c6ef5c475f6826b69a83da5df0a40896dedfb17a9574522622cef705f",
+  "byte_identical": true,
+  "bytes": 4386465,
+  "seconds": 36.226387,
+  "no_public_files_rewritten": true,
+  "personal_inputs_publicly_bundled": false
+}
