@@ -30,6 +30,17 @@ class SourcePause(RuntimeError):
         super().__init__(reason)
 
 
+class SourceRedirect(RuntimeError):
+    """ORCID identity redirects require candidate review before another request.
+
+    Keep URLs available to the ingestion owner, without putting identifiers in
+    ordinary error messages. A redirect is not a degree, job or person merge.
+    """
+    def __init__(self, source_url, target_url, code):
+        self.source_url, self.target_url, self.code = source_url, target_url, code
+        super().__init__('ORCID API identity redirect requires separate candidate validation')
+
+
 def retry_time(value,now):
     if not value:return now+60
     if value.isdigit():return now+int(value)
@@ -82,7 +93,16 @@ class PublicHTTP:
     def __init__(self, task, *, opener=None, sleep=time.sleep):
         class PublicRedirect(HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
-                safe_url(newurl)
+                try:
+                    safe_url(newurl)
+                except ValueError:
+                    fp.close()
+                    raise
+                if urlsplit(req.full_url).hostname == 'pub.orcid.org':
+                    # Do not silently follow another person's record or hide
+                    # extra requests from the per-source quota reservation.
+                    fp.close()
+                    raise SourceRedirect(req.full_url, newurl, code)
                 return super().redirect_request(req, fp, code, msg, headers, newurl)
         self.task, self.opener, self.sleep = task, opener or build_opener(PublicRedirect()).open, sleep
         self.robots = {}

@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from .career_rules import classify, year, valid_orcid
 from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
-from .source_http import SourcePause, ORCID_ANONYMOUS_DAILY_READS
+from .source_http import SourcePause, SourceRedirect, ORCID_ANONYMOUS_DAILY_READS
 
 DEGREES = {"Q752297": "doctorate", "Q849697": "doctorate", "Q177232": "master", "Q163727": "bachelor"}
 
@@ -178,6 +178,33 @@ def orcid_api_events(record, checksum, orcid):
                 "status": "observed" if inst and stage and (date("start-date") if kind == "employment" else date("end-date")) else "unresolved"}
 
 
+def queue_orcid_redirect(store, redirect, requested_url):
+    """A permanent official redirect discovers a candidate, never merges people.
+
+    The existing discovery page owns the immutable normalized header evidence.
+    Its hash is explicitly a metadata hash, not a raw response-body checksum.
+    Old candidates stay pending; only a fresh verified response can add events.
+    """
+    pattern = r'https://pub\.orcid\.org/v3\.0/(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/(educations|employments)'
+    origin = re.fullmatch(pattern, redirect.source_url)
+    target = re.fullmatch(pattern, redirect.target_url)
+    if (redirect.code not in (301, 308) or redirect.source_url != requested_url
+            or not origin or not target or origin[2] != target[2]
+            or origin[1] == target[1] or not valid_orcid(origin[1]) or not valid_orcid(target[1])):
+        return False
+    metadata = {'representation': 'http-permanent-redirect-metadata/v1',
+                'from': redirect.source_url, 'to': redirect.target_url, 'status': redirect.code}
+    checksum = digest(metadata)
+    feed = 'orcid-api-permanent-redirect-candidates/v1'
+    locator = redirect.source_url + '#' + str(redirect.code) + '@' + checksum
+    if not store.db.execute('SELECT 1 FROM discovery_pages WHERE source=? AND cursor_before=?',
+                            (feed, locator)).fetchone():
+        store.queue_page(feed, 'ingest-orcid-api', locator, redirect.target_url,
+                         digest({'policy': feed, 'purpose': 'candidate-only-no-person-merge'}),
+                         checksum, [target[1]], 1)
+    return True
+
+
 def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
     source = "orcid-public-api"
     if not store.source_ready(source):return store.report()
@@ -240,6 +267,13 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
         except BudgetStop as exc:
             store.status(source, "budget_stopped", byte_count=byte_count, detail=str(exc))
             return store.report()
+        except SourceRedirect as exc:
+            queued = queue_orcid_redirect(store, exc, url)
+            reason = ('permanent official redirect; target queued separately; original identity unresolved'
+                      if queued else 'unverified or temporary identity redirect; no target queued')
+            store.failure(source, private_person(orcid), reason)
+            store.defer('ingest-orcid-api', orcid, reason)
+            failures.append({'id_hash': private_person(orcid), 'reason': reason})
         except (ValueError, KeyError, OSError, RuntimeError, ExpatError) as exc:
             store.failure(source,private_person(orcid),f"{type(exc).__name__}: {exc}")
             store.defer('ingest-orcid-api',orcid,str(exc))

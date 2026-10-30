@@ -1,0 +1,120 @@
+{
+  "status": "passed",
+  "checked_at": "2026-10-30T03:10:03.408Z",
+  "source_commit": "9fc6ff6b1e5130e4b95282b62c5116530b0ba974",
+  "snapshot_sha256": "e5b80e4d979e48f09b08c922e04aaccdf7cfd56042bbb39f409c14bd52bfa5ac",
+  "site_url": "https://northern-summer.github.io/global-academic-prestige-index/",
+  "files": [
+    {
+      "path": ".nojekyll",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "assets/global-network-BZnljDAM.js",
+      "sha256": "7ec176a1d3562b1b64ee17a29f140dfbaf877b50d987f6996a2cb27635a0b715",
+      "bytes": 497422
+    },
+    {
+      "path": "assets/index-6yOmGVjn.js",
+      "sha256": "3fa70fcedc1ae29c662dca8549a8c5fb34ea9c73530c325b7c3e1f6e38cf939b",
+      "bytes": 28471
+    },
+    {
+      "path": "assets/index-D4rmSPIp.css",
+      "sha256": "444c0585a6ac6c48e744bee054adef28ef27ff7fe30888523089bc452d09b702",
+      "bytes": 29614
+    },
+    {
+      "path": "assets/mono-4GdczIuU.woff2",
+      "sha256": "e1896b13b2b1bb112fac2f9571bd6c40e118746e77a4511edbf43fbb41bf3e1e",
+      "bytes": 14820
+    },
+    {
+      "path": "assets/playfair-BOwq7MWX.woff2",
+      "sha256": "e0c764a8e9e1cce92163c55bac4b2ad6cd4cf8c696ce2289ab5c41565e65b7e2",
+      "bytes": 38404
+    },
+    {
+      "path": "assets/playfair-italic-DmbndNpe.woff2",
+      "sha256": "54af24bd0f911f0fd7399d5445ea2023ff501d6a69f2d728f1213072f977ab14",
+      "bytes": 38804
+    },
+    {
+      "path": "assets/sans-Xz1IZZA0.woff2",
+      "sha256": "9fea608a947e67020c33cad9a6fe3d60c54119dfb8cff87768a8117a15ed7543",
+      "bytes": 36932
+    },
+    {
+      "path": "assets/song-DHchGQ_0.woff2",
+      "sha256": "e7f54fce9a72f450f14894f6a3041407435a70b2ed3e6d0af7971268e1d66e89",
+      "bytes": 9124
+    },
+    {
+      "path": "build-provenance.json",
+      "sha256": "293beb564420de2e7882bcfb93b889402d0d7eed6c85c774eb5ba9ade24a31da",
+      "bytes": 5068
+    },
+    {
+      "path": "data/global/global-e5b80e4d979e48f0.json",
+      "sha256": "e5b80e4d979e48f09b08c922e04aaccdf7cfd56042bbb39f409c14bd52bfa5ac",
+      "bytes": 3861252
+    },
+    {
+      "path": "data/global/manifest.json",
+      "sha256": "cbb5fbe273baa176c1ef06ba67608901296fe86841c568116f75a8e4cf0b1179",
+      "bytes": 2909
+    },
+    {
+      "path": "docs/BIAS_AND_LIMITATIONS.md",
+      "sha256": "856d950529ffd5838434f521a5504b00dd6493e2e904d6f833ef80ab12d00e20",
+      "bytes": 1257
+    },
+    {
+      "path": "docs/CI_CD.md",
+      "sha256": "122ff05ed75a6527b2f38c40f9020b826999be20c5c3ba5999869be74bfa054a",
+      "bytes": 6390
+    },
+    {
+      "path": "docs/DATA_SCHEMA.md",
+      "sha256": "8f8af330c8703c4de42168245bb5094290fb5c90657c8195f707220f682ffc9c",
+      "bytes": 1245
+    },
+    {
+      "path": "docs/DATA_SOURCES.md",
+      "sha256": "84dfb4486e25c23844ebb92b3b85fcb31e7af4551c279367847be1e5e6d1a9df",
+      "bytes": 12165
+    },
+    {
+      "path": "docs/FONTS.md",
+      "sha256": "2f7356232c7e4c21e845f79e1eea243d79b6bde605e3b3a25d594a1a358b0360",
+      "bytes": 18972
+    },
+    {
+      "path": "docs/METHODOLOGY.md",
+      "sha256": "35458a305764ccc4c36844ca93e4a0b002b5b0b71a606eafb991ef35f87c296e",
+      "bytes": 9061
+    },
+    {
+      "path": "docs/OOD.md",
+      "sha256": "bed0fd8d16ad27f6600623ec6f6a8cfcd16af8962fd0d082cc446444d4ed992e",
+      "bytes": 3353
+    },
+    {
+      "path": "docs/RED_TEAM_REPORT.md",
+      "sha256": "d6e56938d2ba8cc1ed1981b4f23f7ba9c887c5b2acd9888fe31a4846df85c47e",
+      "bytes": 4827
+    },
+    {
+      "path": "docs/STREAMING.md",
+      "sha256": "90f9bcd6a487cd1d9cdeaca76248809f997bb6ce142c537ed950f3bb516986ae",
+      "bytes": 25924
+    },
+    {
+      "path": "index.html",
+      "sha256": "e0020b209480278087aaae283b8b32b928b3d289fb95b9461e1f75a363a213ad",
+      "bytes": 3239
+    }
+  ],
+  "actions_run": 40995592914
+}

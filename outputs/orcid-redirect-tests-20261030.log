@@ -1,0 +1,19 @@
+test_partial_original_rolls_back_and_target_requires_its_own_verified_pair (test_orcid_redirects.RedirectTests.test_partial_original_rolls_back_and_target_requires_its_own_verified_pair) ... ok
+test_permanent_candidate_proof_is_idempotent_and_never_accepts_old_identity (test_orcid_redirects.RedirectTests.test_permanent_candidate_proof_is_idempotent_and_never_accepts_old_identity) ... ok
+test_temporary_ambiguous_and_wrong_identity_routes_never_queue (test_orcid_redirects.RedirectTests.test_temporary_ambiguous_and_wrong_identity_routes_never_queue) ... ok
+test_transport_closes_redirect_without_issuing_target_request (test_orcid_redirects.RedirectTests.test_transport_closes_redirect_without_issuing_target_request) ... ok
+test_untrusted_transport_redirect_is_closed_and_rejected (test_orcid_redirects.RedirectTests.test_untrusted_transport_redirect_is_closed_and_rejected) ... ok
+test_body_read_obeys_expired_stage_and_closes_response (test_source_http.HTTPTests.test_body_read_obeys_expired_stage_and_closes_response) ... ok
+test_long_and_date_retry_after_pause_entire_source (test_source_http.HTTPTests.test_long_and_date_retry_after_pause_entire_source) ... ok
+test_no_retry_on_access_denial (test_source_http.HTTPTests.test_no_retry_on_access_denial) ... ok
+test_oversized_response_rejected (test_source_http.HTTPTests.test_oversized_response_rejected) ... ok
+test_rate_limit_honors_retry_after (test_source_http.HTTPTests.test_rate_limit_honors_retry_after) ... ok
+test_robots_disallow_and_unusable_202_block_crawling (test_source_http.HTTPTests.test_robots_disallow_and_unusable_202_block_crawling) ... ok
+test_stage_deadline_bounds_retries_and_restores_outer_runtime (test_source_http.HTTPTests.test_stage_deadline_bounds_retries_and_restores_outer_runtime) ... ok
+test_truncated_chunked_body_is_normalized_and_closed_without_retry (test_source_http.HTTPTests.test_truncated_chunked_body_is_normalized_and_closed_without_retry) ... ok
+test_untrusted_and_credentialed_urls_are_rejected (test_source_http.HTTPTests.test_untrusted_and_credentialed_urls_are_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.465s
+
+OK
