@@ -1,0 +1,21 @@
+test_brief_readonly_monitor_does_not_interrupt_member_commit (test_streaming.StreamingTests.test_brief_readonly_monitor_does_not_interrupt_member_commit) ... ERROR
+
+======================================================================
+ERROR: test_brief_readonly_monitor_does_not_interrupt_member_commit (test_streaming.StreamingTests.test_brief_readonly_monitor_does_not_interrupt_member_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\MzgyM\Documents\Codex\2026-10-21\oo\tests\test_streaming.py", line 72, in test_brief_readonly_monitor_does_not_interrupt_member_commit
+    with s.member('wikidata','Q1@1'):
+         ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\MzgyM\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "C:\Users\MzgyM\Documents\Codex\2026-10-21\oo\src\gapi\career_store.py", line 234, in member
+    self.db.commit()
+    ~~~~~~~~~~~~~~^^
+sqlite3.OperationalError: database is locked
+
+----------------------------------------------------------------------
+Ran 1 test in 0.321s
+
+FAILED (errors=1)

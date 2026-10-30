@@ -1,0 +1,12 @@
+{
+  "reason": "byte-identical duplicate export receipts; retain original export and independent public replay",
+  "retained": "outputs\\export-20261030.json",
+  "sha256": "667de911fe47f1d8eab5d07b992afb28392eebeacf6a03b56981780f9b89fab5",
+  "duplicate_paths": [
+    "outputs\\replay-a-20261030.json",
+    "outputs\\replay-b-20261030.json"
+  ],
+  "logical_bytes": 6284,
+  "readback_pending": false,
+  "removed_verified": true
+}

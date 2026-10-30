@@ -1,0 +1,19 @@
+test_bounded_parser_and_stage (test_streaming.StreamingTests.test_bounded_parser_and_stage) ... ok
+test_brief_readonly_monitor_does_not_interrupt_member_commit (test_streaming.StreamingTests.test_brief_readonly_monitor_does_not_interrupt_member_commit) ... ok
+test_budget_and_version_changes_rejected (test_streaming.StreamingTests.test_budget_and_version_changes_rejected) ... ok
+test_checksum_and_gzip_trailer_fail_closed (test_streaming.StreamingTests.test_checksum_and_gzip_trailer_fail_closed) ... ok
+test_educated_at_does_not_infer_doctorate (test_streaming.StreamingTests.test_educated_at_does_not_infer_doctorate) ... ok
+test_malicious_paths_and_entities_are_rejected_without_events (test_streaming.StreamingTests.test_malicious_paths_and_entities_are_rejected_without_events) ... ok
+test_nonfinite_and_negative_weights_rejected (test_streaming.StreamingTests.test_nonfinite_and_negative_weights_rejected) ... ok
+test_oversized_member_is_consumed_and_rejected_without_raw_disk (test_streaming.StreamingTests.test_oversized_member_is_consumed_and_rejected_without_raw_disk) ... ok
+test_pagerank_boundary_conserves_probability_and_zero_edges (test_streaming.StreamingTests.test_pagerank_boundary_conserves_probability_and_zero_edges) ... ok
+test_partial_resume_does_not_promote (test_streaming.StreamingTests.test_partial_resume_does_not_promote) ... ok
+test_process_member_change_rolls_back_without_duplication (test_streaming.StreamingTests.test_process_member_change_rolls_back_without_duplication) ... ok
+test_reader_wait_does_not_admit_a_second_writer (test_streaming.StreamingTests.test_reader_wait_does_not_admit_a_second_writer) ... ok
+test_realistic_stream_complete_and_idempotent_replay (test_streaming.StreamingTests.test_realistic_stream_complete_and_idempotent_replay) ... ok
+test_wrong_upstream_hash_never_promotes (test_streaming.StreamingTests.test_wrong_upstream_hash_never_promotes) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 1.706s
+
+OK
