@@ -1,0 +1,42 @@
+
+> gapi-web@0.2.0 test
+> node --test web/*.test.js
+
+✔ release provenance is idempotent and accepts later data-only commits (4445.1594ms)
+✔ source/output/selected manifest tampering fail before publication (1669.1491ms)
+✔ uncommitted build source cannot be labeled as published HEAD (1755.2266ms)
+✔ build inputs cannot change while building and text line endings remain portable (1840.8413ms)
+✔ code-only and wrong-base builds cannot be published (554.9188ms)
+✔ bundled font input identity covers binary bytes without UTF-8 replacement (2135.5887ms)
+✔ committed real slices larger than 2 MiB remain verifiable (2213.6246ms)
+✔ public demo exports are labeled and contain no person identifiers (7.3579ms)
+✔ synthetic scenarios are multistage, asymmetric, and visibly separated from real observations (3.0884ms)
+✔ stage and minimum-weight filters define one shared edge slice for network and details (0.713ms)
+✔ flow threshold range follows selected stage and high threshold excludes flows (0.2651ms)
+✔ scenario node color maps eligibility only and never encodes a score (1.5705ms)
+✔ static HTML exposes a real-score ranking and contains no synthetic-score controls (1.736ms)
+✔ frontend loads only the local real-data score snapshot and has no synthetic fallback (1.5804ms)
+✔ snapshot validation names missing fields and binds errors to a revision (0.81ms)
+✔ snapshot hash mismatch fails closed with the pinned revision in its diagnostic (4.1714ms)
+✔ automatic deployment only accepts exact trusted push identity (1.1445ms)
+✔ legacy Pages is explicitly built once and ambiguous writes are reconciled (0.73ms)
+✔ artifact byte capture rejects in-flight replacement and does not mutate site files (5.7223ms)
+✔ public asset reads survive bounded transient 503 and network errors (24.7568ms)
+✔ public read retry bound preserves permanent and oversized failures (1.2832ms)
+✔ candidate progress preserves scope, failed work and exact count reconciliation (3.2169ms)
+✔ real global schema preserves missing scores and rejects synthetic or malformed edges (0.2937ms)
+✔ global table search, country, sort and scenario ordering are deterministic (0.8784ms)
+✔ network retains employer to training direction and enforces rendering caps (11.9743ms)
+✔ institution CSV neutralizes formulas and preserves missing values (0.6123ms)
+✔ official award inventory validates counts without imputing university scores (0.4854ms)
+✔ polluted rendered numbers and stage weights fail closed before DOM rendering (0.3009ms)
+✔ share and contribution charts require conserved scores and valid damping (0.2486ms)
+✔ official attribution keeps rational shares exact and identity candidates unpromoted (0.6165ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14774.1883

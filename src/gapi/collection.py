@@ -13,7 +13,7 @@ from .dump_discovery import discover_dump
 from .openalex_discovery import discover_openalex
 from .crossref_discovery import discover_crossref
 from .task import BudgetStop
-from .source_http import SourcePause
+from .source_http import SourcePause, StageDeadline
 
 
 def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True):
@@ -56,6 +56,9 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 if progress:progress({'stage':feed_name,**result})
             except BudgetStop:
                 raise
+            except StageDeadline:
+                discovery_suspended.add(feed_name)
+                if progress:progress({'stage':feed_name,'status':'resumable-stage-time-boundary'})
             except (OSError,ValueError,RuntimeError) as exc:
                 if isinstance(exc,SourcePause):store.pause_source(feed_name,exc.retry_at,str(exc))
                 discovery_suspended.add(feed_name)
@@ -74,7 +77,8 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
             try:
                 seconds=min(60,deadline-time.monotonic())
                 with window(seconds):
-                    adapter(store,http,ids,max_seconds=seconds,progress=None)
+                    options={'batch_size':10} if command=='ingest-wikidata' else {}
+                    adapter(store,http,ids,max_seconds=seconds,progress=None,**options)
             except BudgetStop:
                 raise
             except (OSError,ValueError,RuntimeError) as exc:

@@ -87,6 +87,29 @@ class HTTPTests(unittest.TestCase):
                         stream.read(1)
         self.assertTrue(response.closed)
 
+    def test_socket_timeout_at_stage_boundary_is_not_an_early_source_failure(self):
+        from unittest.mock import patch
+        from gapi.source_http import StageDeadline
+        clock=[100]
+        class Expiring(Response):
+            def read(self,size):
+                clock[0]=103
+                raise TimeoutError('socket exceeded admitted window')
+        response=Expiring()
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response)
+        with patch('gapi.source_http.time.monotonic',side_effect=lambda:clock[0]):
+            with http.within(2),self.assertRaises(StageDeadline):
+                http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/employments')
+        self.assertTrue(response.closed)
+        # A timeout while there is still stage time is a real source failure.
+        clock[0]=100
+        response=Expiring()
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response)
+        with patch('gapi.source_http.time.monotonic',side_effect=lambda:clock[0]):
+            with http.within(10),self.assertRaises(TimeoutError) as result:
+                http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/employments')
+        self.assertNotIsInstance(result.exception,StageDeadline)
+
     def test_long_and_date_retry_after_pause_entire_source(self):
         from unittest.mock import patch
         for header in ('120','Thu, 01 Jan 1970 00:03:40 GMT','malformed-date'):

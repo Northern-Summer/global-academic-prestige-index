@@ -83,6 +83,21 @@ class CollectionTests(unittest.TestCase):
                 collect(s,None,{'id':'feed'},discovery=False)
         finally:s.close()
 
+    def test_discovery_window_exhaustion_is_pending_not_a_source_failure(self):
+        from gapi.source_http import StageDeadline
+        s=self.store(archive([]));progress=[]
+        try:
+            with patch('gapi.collection.enqueue_discovery',side_effect=StageDeadline('window')) as wd, \
+                 patch('gapi.collection.discover_openalex',return_value={}), \
+                 patch('gapi.collection.discover_crossref',return_value={}):
+                result=collect(s,None,max_seconds=10,progress=progress.append)
+            self.assertEqual(wd.call_count,1)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery_pages').fetchone()[0],0)
+            self.assertIn('wikidata-discovery',result['suspended_discovery'])
+            self.assertIn({'stage':'wikidata-discovery','status':'resumable-stage-time-boundary'},progress)
+        finally:s.close()
+
     def test_budget_refusal_propagates_and_preserves_pending_work(self):
         s=self.store(archive([]))
         try:

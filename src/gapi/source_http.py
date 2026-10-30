@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from urllib.robotparser import RobotFileParser
 
@@ -28,6 +28,25 @@ class SourcePause(RuntimeError):
     def __init__(self,code,retry_at,reason):
         self.code,self.retry_at=code,retry_at
         super().__init__(reason)
+
+
+class StageDeadline(TimeoutError):
+    """The caller's work window ended; this is not a source/member failure."""
+
+
+def entity_batch_route(parsed):
+    """Permit only the documented read-only claims/info Action API contract."""
+    if parsed.hostname != 'www.wikidata.org' or parsed.path != '/w/api.php':
+        return False
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    expected = {'action':['wbgetentities'], 'props':['claims|info'],
+                'format':['json'], 'maxlag':['5']}
+    if set(query) != {*expected, 'ids'} or any(query.get(k) != v for k,v in expected.items()):
+        return False
+    import re
+    ids = query.get('ids', [])
+    return (len(ids) == 1 and 1 <= len(ids[0].split('|')) <= 10
+            and all(re.fullmatch(r'Q[1-9]\d*', q) for q in ids[0].split('|')))
 
 
 class SourceRedirect(RuntimeError):
@@ -66,6 +85,11 @@ class SourceResponse:
         self.check_deadline()
         try:
             return self.response.read(min(size,65536))
+        except (TimeoutError, URLError, ConnectionError):
+            # A socket uses the remaining stage time as its timeout. Preserve a
+            # genuine early transport failure; classify expiration at the owner.
+            self.check_deadline()
+            raise
         except HTTPException as exc:
             raise OSError('source body transport failed: '+type(exc).__name__) from exc
 
@@ -123,12 +147,12 @@ class PublicHTTP:
     def remaining(self):
         if self.deadline is None:return self.task.config['http_timeout']
         remaining=self.deadline-time.monotonic()
-        if remaining<=0:raise TimeoutError('source stage time exhausted; work remains pending')
+        if remaining<=0:raise StageDeadline('source stage time exhausted; work remains pending')
         return min(self.task.config['http_timeout'],remaining)
 
     def wait(self,seconds):
         if self.deadline is not None and time.monotonic()+seconds>=self.deadline:
-            raise TimeoutError('retry/rate-limit delay exceeds source stage budget')
+            raise StageDeadline('retry/rate-limit delay exceeds source stage budget')
         self.sleep(seconds)
 
     def _open(self, url, accept):
@@ -161,7 +185,10 @@ class PublicHTTP:
                 if delay>60 or (self.deadline is not None and time.monotonic()+delay>=self.deadline):
                     raise SourcePause(code,until,'server Retry-After exceeds source stage; source paused') from error
                 self.wait(delay)
+            except StageDeadline:
+                raise
             except (TimeoutError, URLError, ConnectionError):
+                self.remaining()
                 if attempt == self.task.config['max_retries']:
                     raise
                 self.wait(2**attempt)
@@ -207,6 +234,8 @@ class PublicHTTP:
         documented_api = (
             p.hostname == "pub.orcid.org" and re.fullmatch(r"/v3\.0/\d{4}-\d{4}-\d{4}-\d{3}[\dX]/(record|educations|employments)", p.path)
             or p.hostname == "www.wikidata.org" and re.fullmatch(r"/wiki/Special:EntityData/Q[1-9]\d*\.json", p.path)
+            # Official Wikibase API: read-only bounded IDs, no search/write/auth.
+            or entity_batch_route(p)
             or p.hostname == "query.wikidata.org" and p.path == "/sparql"
             # The official developer zone explicitly documents this free public API.
             or p.hostname == "api.nobelprize.org" and p.path == "/2.1/laureates"

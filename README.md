@@ -27,6 +27,13 @@ Edit the task's external work location before freezing if needed. Its source loc
 
 For strict streaming, failures, snapshot scope, optional DuckDB/Parquet analysis and local/public builds, follow [the streaming guide](docs/STREAMING.md).
 
+Wikidata uses bounded official claims/info batches (up to 10 IDs, 2 MiB response
+cap) with one atomic transaction per entity; `ingest-wikidata --batch-size 1`
+retains the single-entity diagnostic route. Caller time limits leave work pending
+without fabricating source failures. Access refusals and server backoff still stop
+the affected source; raw source bodies and individual trajectories stay off disk
+and out of public exports, respectively.
+
 ```powershell
 python -m unittest discover -s tests -v
 npm test

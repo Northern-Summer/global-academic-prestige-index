@@ -46,6 +46,12 @@ class ResourceTests(unittest.TestCase):
         finally:s.close()
 
     def test_disappearing_journal_does_not_turn_budget_probe_into_source_failure(self):
+        # The fixture measures a disappearing owned journal, not unrelated logs
+        # growing under the real repository while another check/collector runs.
+        project=self.root/'budget-project'
+        (project/'outputs').mkdir(parents=True)
+        (project/'outputs'/'owned.txt').write_bytes(b'owned')
+        self.enterContext(patch('gapi.task.project_root',return_value=project))
         s=self.store(archive([]))
         try:
             journal=s.task.root/'disappearing.sqlite-journal'

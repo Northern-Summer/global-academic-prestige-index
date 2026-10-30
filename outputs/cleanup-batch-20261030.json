@@ -1,0 +1,29 @@
+{
+  "checked_at": "2026-10-30T12:05:31.4849539+08:00",
+  "targets": [
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-bi2yw57l",
+      "files": 4,
+      "bytes": 138297.0,
+      "classification": "inactive unittest fixture; known seed matched; no unique research data",
+      "removed": true
+    },
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-fpdn1qb8",
+      "files": 4,
+      "bytes": 138297.0,
+      "classification": "inactive unittest fixture; known seed matched; no unique research data",
+      "removed": true
+    },
+    {
+      "target": "D:\\GAPI\\global-academic-prestige-index\\gapi-stream-test-ma9376f8",
+      "files": 0,
+      "bytes": null,
+      "classification": "inactive unittest fixture; known seed matched; no unique research data",
+      "removed": true
+    }
+  ],
+  "logical_deleted_bytes": 276594.0,
+  "raw_caches_untouched": true,
+  "frozen_inputs_preserved": true
+}

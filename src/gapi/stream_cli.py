@@ -8,7 +8,7 @@ from pathlib import Path
 from .career_store import CareerStore
 from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
 from .orcid_stream import stream_archive
-from .source_http import PublicHTTP
+from .source_http import PublicHTTP, StageDeadline
 from .task import Task
 
 
@@ -48,6 +48,9 @@ def register(sub):
             parser.add_argument("--discover", action="store_true")
             parser.add_argument("--discovery-limit", type=int, default=200)
             parser.add_argument("--discovery-scope", choices=['academic','degree-employer'], default='academic')
+        if name == 'ingest-wikidata':
+            parser.add_argument('--batch-size',type=int,default=10,
+                help='1 uses EntityData; 2–10 use bounded official claims/info batches')
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
             parser.add_argument('--publication-policy',type=Path)
@@ -132,14 +135,18 @@ def execute_task(task, args):
                     try:
                         print(json.dumps(enqueue_discovery(store, http, args.command,
                             limit=args.discovery_limit, scope=args.discovery_scope)), flush=True)
+                    except StageDeadline:
+                        print(json.dumps({'discovery_status':'resumable-stage-time-boundary',
+                            'continuing_committed_queue':True}),flush=True)
                     except (OSError, RuntimeError, ValueError) as exc:
                         store.failure('wikidata', 'discovery:'+args.command, str(exc))
                         print(json.dumps({'discovery_failed': str(exc)[:256], 'continuing_committed_queue': True}), flush=True)
                 ids=store.pending(args.command,min(args.max_members or 200,1000))
             if args.max_members:
                 ids = ids[:args.max_members]
+            options={'batch_size':getattr(args,'batch_size',10)} if args.command=='ingest-wikidata' else {}
             result = (ingest_wikidata if args.command == "ingest-wikidata" else ingest_orcid_api)(store, http, ids,
-                max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r),flush=True))
+                max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r),flush=True),**options)
         elif args.command == "quality":
             result = store.report()
             result["sqlite_integrity"] = store.db.execute("PRAGMA quick_check").fetchone()[0]

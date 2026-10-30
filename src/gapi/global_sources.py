@@ -6,13 +6,13 @@ import re
 import time
 from xml.parsers.expat import ExpatError
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.error import HTTPError
 
 from .career_rules import classify, year, valid_orcid
 from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
-from .source_http import SourcePause, SourceRedirect, ORCID_ANONYMOUS_DAILY_READS
+from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS
 
 DEGREES = {"Q752297": "doctorate", "Q849697": "doctorate", "Q177232": "master", "Q163727": "bachelor"}
 
@@ -30,7 +30,21 @@ def wd_value(snak):
 def qualifier_year(claim, prop):
     values = claim.get("qualifiers", {}).get(prop, [])
     value = wd_value(values[0]) if len(values) == 1 else None
-    return year(value["time"][1:5]) if isinstance(value, dict) and value.get("precision", 0) >= 9 else None
+    if not isinstance(value,dict):return None
+    precision=value.get('precision',0)
+    stamp=value.get('time')
+    if type(precision) is not int or not isinstance(stamp,str):
+        raise ValueError('invalid Wikidata time/precision')
+    if not re.fullmatch(r'[+-]\d{4,16}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',stamp):
+        raise ValueError('invalid Wikidata timestamp')
+    return year(stamp[1:].split('-',1)[0]) if precision>=9 and stamp.startswith('+') else None
+
+
+def wd_item(value):
+    if value is None:return None
+    if not isinstance(value,dict) or not isinstance(value.get('id'),str) or not re.fullmatch(r'Q[1-9]\d*',value['id']):
+        raise ValueError('invalid Wikidata item value')
+    return value['id']
 
 
 def wikidata_events(entity, content_hash):
@@ -59,10 +73,11 @@ def wikidata_events(entity, content_hash):
             if claim.get("rank") == "deprecated":
                 continue
             value = wd_value(claim.get("mainsnak", {}))
-            if not isinstance(value, dict) or not re.fullmatch(r"Q[1-9]\d*", value.get("id", "")):
-                continue
+            item=wd_item(value)
+            if item is None:continue
             qualifications = [wd_value(s) for s in claim.get("qualifiers", {}).get("P512", [])]
-            stages = {DEGREES[v["id"]] for v in qualifications if isinstance(v, dict) and v.get("id") in DEGREES}
+            degree_ids=[wd_item(v) for v in qualifications]
+            stages = {DEGREES[v] for v in degree_ids if v in DEGREES}
             # Educated-at does not imply any degree. Employer does not imply academic role.
             stage = next(iter(stages)) if kind == "education" and len(stages) == 1 else None
             event = {"person": person, "institution": "wd:" + value["id"], "kind": kind,
@@ -76,14 +91,53 @@ def wikidata_events(entity, content_hash):
             # Roles need explicit qualifiers; no job inference from being a named person.
             roles = [wd_value(s) for s in claim.get("qualifiers", {}).get("P39", [])]
             academic = {"Q121594", "Q1622272", "Q3400985"}  # professor, university teacher, academic
-            if kind == "employment" and any(isinstance(v, dict) and v.get("id") in academic for v in roles):
+            if kind == "employment" and any(wd_item(v) in academic for v in roles):
                 event["stage"], event["role"] = "academic", "explicit academic position qualifier"
             if event["stage"] and (event["year_end"] if kind == "education" else event["year_start"]):
                 event["status"] = "observed"
             yield event
 
 
-def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
+def commit_wikidata_entity(store, qid, entity, checksum, *, batch_url=None, batch_bytes=0):
+    """Single owner for revision validation, events and stable-ID followups."""
+    if not isinstance(entity,dict) or entity.get('id')!=qid:
+        raise ValueError('Wikidata response does not match requested entity')
+    if type(entity.get('lastrevid')) is not int or entity['lastrevid']<=0:
+        raise ValueError('invalid Wikidata entity revision')
+    locator = f"{qid}@{entity['lastrevid']}"
+    if store.seen('wikidata', locator):
+        return
+    retrieved = datetime.now(timezone.utc).isoformat()
+    # Batch transport binds both the exact HTTP response and the canonical entity.
+    # Individual EntityData snapshots retain their original byte-hash convention.
+    entity_hash = digest(entity) if batch_url else checksum
+    with store.member('wikidata', locator):
+        for event_index,event in enumerate(wikidata_events(entity,checksum),1):
+            if event_index>store.task.config['batch_events']:
+                raise ValueError('entity exceeds bounded event transaction; unresolved oversized member')
+            event['retrieved_at'] = retrieved
+            if batch_url:
+                event.update(transport='wikibase-claims-info-batch/v1',response_url=batch_url,
+                             entity_sha256=entity_hash)
+            store.event(event)
+        if batch_url:
+            store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
+                ('wikidata',locator,'entity-batch/v1',batch_url,checksum,batch_bytes,retrieved))
+        store.finish_member('wikidata',locator,entity_hash)
+        ids = {wd_value(claim['mainsnak']) for claim in entity.get('claims',{}).get('P496',[])
+               if claim.get('rank')!='deprecated' and valid_orcid(wd_value(claim['mainsnak']))}
+        if len(ids)==1:
+            query_hash=digest({'rule':'wikidata-explicit-orcid-followup/1','locator':locator})
+            store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
+                ('ingest-orcid-api',next(iter(ids)),query_hash,checksum))
+
+
+def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch_size=1):
+    if type(batch_size) is not int or not 1<=batch_size<=10:
+        raise ValueError('Wikidata entity batch size must be between 1 and 10')
+    qids=list(dict.fromkeys(qids))
+    if any(not isinstance(qid,str) or not re.fullmatch(r'Q[1-9]\d*',qid) for qid in qids):
+        raise ValueError('invalid Wikidata ID')
     source = "wikidata"
     if not store.source_ready(source):return store.report()
     store.start(source)
@@ -91,57 +145,70 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None):
     started = time.monotonic()
     previous_bytes=store.db.execute('SELECT bytes FROM runs WHERE source=?',(source,)).fetchone()[0]
     start_bytes=getattr(http,'bytes_received',0)
-    blocked=False
-    for qid in qids:
+    blocked=stage_ended=False
+    pending=[qid for qid in qids if not store.db.execute(
+        'SELECT 1 FROM members WHERE source=? AND locator LIKE ? LIMIT 1',(source,qid+'@%')).fetchone()]
+    for offset in range(0,len(pending),batch_size):
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
+            stage_ended=True
             break
-        if not re.fullmatch(r"Q[1-9]\d*", qid):
-            raise ValueError("invalid Wikidata ID")
-        if store.db.execute('SELECT 1 FROM members WHERE source=? AND locator LIKE ? LIMIT 1',(source,qid+'@%')).fetchone():
-            continue
-        url = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+        group=pending[offset:offset+batch_size]
+        batch_url=('https://www.wikidata.org/w/api.php?'+urlencode({
+            'action':'wbgetentities','ids':'|'.join(group),'props':'claims|info',
+            'format':'json','maxlag':'5'})) if batch_size>1 else None
+        url=batch_url or f'https://www.wikidata.org/wiki/Special:EntityData/{group[0]}.json'
+        response_start=getattr(http,'bytes_received',0)
         try:
             data, checksum = http.json(url)
             if not isinstance(data,dict) or not isinstance(data.get('entities'),dict):
+                if isinstance(data,dict) and isinstance(data.get('error'),dict) and data['error'].get('code') in ('maxlag','ratelimited','readonly'):
+                    raise SourcePause(503,time.time()+60,'Wikibase service requested a source pause')
                 raise ValueError('invalid Wikidata EntityData envelope')
-            entity = data["entities"][qid]
-            if not isinstance(entity,dict) or entity.get('id')!=qid:
-                raise ValueError('Wikidata response does not match requested entity')
-            # Validate revision before using it as a member locator.
-            if type(entity.get('lastrevid')) is not int or entity['lastrevid']<=0:
-                raise ValueError('invalid Wikidata entity revision')
-            locator = f"{qid}@{entity['lastrevid']}"
-            if store.seen(source, locator):
+            if set(data['entities'])-set(group):
+                raise ValueError('Wikidata batch contains unexpected or redirected entity keys')
+        except StageDeadline:
+            stage_ended=True
+            break
+        except BudgetStop:
+            raise
+        except (KeyError,ValueError,OSError,RuntimeError) as exc:
+            # A large batch is retried through the existing bounded per-entity
+            # interface; a protected/access-refused response never takes this path.
+            if batch_url and isinstance(exc,ValueError) and str(exc)=='structured response exceeds bound':
+                seconds=None if max_seconds is None else max_seconds-(time.monotonic()-started)
+                if seconds is None or seconds>0:
+                    ingest_wikidata(store,http,group,max_seconds=seconds,progress=progress,batch_size=1)
+                    state=store.db.execute('SELECT status FROM runs WHERE source=?',(source,)).fetchone()
+                    if state and state[0]=='access_failed':
+                        blocked=True
+                        break
                 continue
-            with store.member(source, locator):
-                for event_index, event in enumerate(wikidata_events(entity, checksum), 1):
-                    if event_index > store.task.config["batch_events"]:
-                        raise ValueError("entity exceeds bounded event transaction; unresolved oversized member")
-                    event['retrieved_at'] = datetime.now(timezone.utc).isoformat()
-                    store.event(event)
-                # Revision, references and member hash remain internal.
-                store.finish_member(source, locator, checksum)
-                # Follow a single explicit stable ID into a genuinely separate
-                # public source. Discovery remains a lead, not corroboration.
-                ids = {wd_value(claim['mainsnak']) for claim in entity.get('claims',{}).get('P496',[])
-                       if claim.get('rank')!='deprecated' and valid_orcid(wd_value(claim['mainsnak']))}
-                if len(ids)==1:
-                    query_hash=digest({'rule':'wikidata-explicit-orcid-followup/1','locator':locator})
-                    store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-                        ('ingest-orcid-api',next(iter(ids)),query_hash,checksum))
-            if progress:
-                progress({"source":source,"committed_entity":qid,"events":store.db.execute("SELECT count(*) FROM events").fetchone()[0]})
-        except (KeyError, ValueError, OSError, RuntimeError) as exc:
-            store.failure(source,qid,f"{type(exc).__name__}: {exc}")
-            store.defer('ingest-wikidata',qid,str(exc))
-            failures.append({"entity": qid, "reason": f"{type(exc).__name__}: {exc}"[:256]})
+            for qid in group:
+                store.failure(source,qid,f'{type(exc).__name__}: {exc}')
+                store.defer('ingest-wikidata',qid,str(exc))
+                failures.append({'entity':qid,'reason':f'{type(exc).__name__}: {exc}'[:256]})
             if access_refused(exc):
                 if isinstance(exc,SourcePause):store.pause_source(source,exc.retry_at,str(exc))
                 blocked=True
                 break
+            continue
+        batch_bytes=getattr(http,'bytes_received',0)-response_start
+        for qid in group:
+            try:
+                commit_wikidata_entity(store,qid,data['entities'].get(qid),checksum,
+                    batch_url=batch_url,batch_bytes=batch_bytes)
+                if progress:
+                    progress({'source':source,'committed_entity':qid,
+                        'events':store.db.execute('SELECT count(*) FROM events').fetchone()[0]})
+            except BudgetStop:
+                raise
+            except (KeyError,ValueError,OSError,RuntimeError) as exc:
+                store.failure(source,qid,f'{type(exc).__name__}: {exc}')
+                store.defer('ingest-wikidata',qid,str(exc))
+                failures.append({'entity':qid,'reason':f'{type(exc).__name__}: {exc}'[:256]})
     store.status(source, "access_failed" if blocked else "partial", byte_count=previous_bytes+getattr(http,'bytes_received',0)-start_bytes,
-                 detail=json.dumps({"requested": len(qids), "failures": failures[:20]}))
+                 detail=json.dumps({"requested": len(qids), "failures": failures[:20], 'stage_time_exhausted':stage_ended}))
     return store.report()
 
 
@@ -212,10 +279,11 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
     failures = []
     byte_count = store.db.execute("SELECT bytes FROM runs WHERE source=?",(source,)).fetchone()[0]
     started = time.monotonic()
-    blocked=False
+    blocked=stage_ended=False
     for orcid in ids:
         store.task.check_memory()
         if max_seconds is not None and time.monotonic() - started >= max_seconds:
+            stage_ended=True
             break
         if not valid_orcid(orcid):
             store.failure(source,digest(orcid),'invalid ORCID format/checksum; not requested')
@@ -254,7 +322,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
                             if member_bytes > store.task.config["max_member_bytes"]:
                                 raise ValueError("API XML affiliation pair exceeds size limit")
                             if max_seconds is not None and time.monotonic()-started >= max_seconds:
-                                raise BudgetStop("bounded XML API batch time reached; current member rolled back")
+                                raise StageDeadline('bounded XML API batch time reached; current member rolled back')
                             checksum.update(chunk)
                             parser.feed(chunk)
                         parser.feed(b"", final=True)
@@ -264,6 +332,9 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
                 store.finish_member(source, orcid, digest({'transport':'incremental-affiliation-xml/v1','parts':parts}))
             if progress:
                 progress({"source":source,"committed_members":store.db.execute("SELECT count(*) FROM members WHERE source=?",(source,)).fetchone()[0]})
+        except StageDeadline:
+            stage_ended=True
+            break
         except BudgetStop as exc:
             store.status(source, "budget_stopped", byte_count=byte_count, detail=str(exc))
             return store.report()
@@ -282,7 +353,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
                 if isinstance(exc,SourcePause):store.pause_source(source,exc.retry_at,str(exc))
                 blocked=True
                 break
-    store.status(source, "access_failed" if blocked else "partial", byte_count=byte_count, detail=json.dumps({"requested": len(ids), "failures": failures[:20]}))
+    store.status(source, "access_failed" if blocked else "partial", byte_count=byte_count, detail=json.dumps({"requested": len(ids), "failures": failures[:20], 'stage_time_exhausted':stage_ended}))
     return store.report()
 
 
