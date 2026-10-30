@@ -12,6 +12,7 @@ from .career_rules import classify, valid_orcid, QUALIFICATION_RULE_VERSION
 from .career_normalization import interpretation, POLICY_SHA256 as NORMALIZATION_POLICY
 from .official_profiles import RULE as PROFILE_RULE, profile_url
 from .orcid_stream import private_person
+from .career_store import member_evidence_sql
 from .task import BudgetStop, digest
 
 VERSION = 'official-self-corroboration/1'
@@ -52,8 +53,7 @@ def decisions(store, *, allowed_sources=None):
         LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE c.rule_version=? AND c.status='official-underlying-source-confirmed'
         AND c.origin_relation='same-origin-as-wikidata-reference' AND e.source='wikidata'
-        AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
-            AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
+        AND ''' + member_evidence_sql() + '''
         ORDER BY e.id,c.url''', (PROFILE_RULE,))
     for event_id, payload, institution, url, page_hash, field_hash in checks:
         official = json.loads(payload)
@@ -67,8 +67,7 @@ def decisions(store, *, allowed_sources=None):
         candidates = store.db.execute('''SELECT e.id,e.payload,COALESCE(a.institution,e.institution)
             FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
             WHERE e.person=? AND e.source='orcid-public-api'
-            AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
-                AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
+            AND ''' + member_evidence_sql() + '''
             ORDER BY e.id LIMIT 4097''', (official['person'],))
         for index, (other_id, other_payload, other_institution) in enumerate(candidates):
             if index >= 4096:

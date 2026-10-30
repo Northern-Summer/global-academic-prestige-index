@@ -14,6 +14,7 @@ from pathlib import Path
 from .ranking import DEFAULT_CONFIG, pagerank
 from .career_rules import classify
 from .storage import project_root
+from .career_store import member_evidence_sql
 from .task import BudgetStop, canonical, digest
 from .publication import public_sources
 
@@ -139,8 +140,7 @@ def relation_rows(store, *, allowed_sources=None):
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
     cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source,e.id""" + columns + """
         FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution""" + join + """
-        WHERE EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
-          AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
+        WHERE """ + member_evidence_sql() + """
         ORDER BY e.person,e.id""", (VERSION, POLICY_SHA256) if enriched else ())
     person, events = None, []
     def relations(items):
@@ -301,8 +301,7 @@ def rank_global(store, *, public=False, publication_policy=None):
             LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?
             WHERE COALESCE(i.kind,e.kind) IN ('education','training')
             AND COALESCE(i.status,e.status) IN ('observed','corroborated')
-            AND EXISTS(SELECT 1 FROM members m WHERE m.source=e.source AND m.status='observed'
-                AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))
+            AND """ + member_evidence_sql() + """
             AND (e.source!='orcid-2026-summary' OR EXISTS(
                 SELECT 1 FROM runs r WHERE r.source=e.source AND r.status='verified'))"""
         params = (VERSION, POLICY_SHA256)

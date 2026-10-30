@@ -455,9 +455,20 @@ affiliation pair and retains its own pseudonymous person key. The original stays
 pending with its failure and retry deadline, so redirects cannot manufacture a
 100% successful retrieval rate. Nothing is written to a raw archive/XML cache.
 
-A live bulk `api.php` experiment was rejected by robots before the entity request;
-it created no bridge decisions. This route has been removed. Entity acquisition
-continues only through the previously allowed individual `Special:EntityData`
-URLs. No authentication, robot rule or access limit is bypassed. Oversized entity
+An earlier bulk `api.php` experiment was rejected by the website-crawling gate
+before the entity request; it created no bridge decisions. That bridge experiment
+remains retired. The later bounded `wbgetentities` ingestion route described above
+uses the documented read-only API contract, alongside `Special:EntityData`;
+it does not restore the retired bridge route or change any observed access denial.
+No authentication or server access limit is bypassed. Oversized entity
 responses receive an explicit unresolved rejection count, allowing later entities
 to continue without sampling or promoting the rejected identity.
+
+Evidence-membership SQL is owned by `career_store.member_evidence_sql`. Canonical
+exact/base locators use the existing `(source,locator)` primary-key index; nested
+and historical locators retain the original predicate as a fallback. Ranking and
+corroboration require observed members; quality auditing can inspect all member
+states without changing that admission rule. The paired same-frozen-input
+benchmark is `python scripts/benchmark-member-evidence.py`. It checks the output
+hash against the current public manifest and saves aggregate timings, never raw
+responses or person-level rows. A timing observation is not a throughput guarantee.

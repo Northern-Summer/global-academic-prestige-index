@@ -16,6 +16,22 @@ from .task import Task, canonical, digest
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
+
+def member_evidence_sql(*, observed_only=True):
+    """Membership predicate for an events table aliased as e.
+
+    Indexed exact/base matches cover canonical locators. The original predicate
+    remains authoritative for nested fragments and historical LIKE semantics.
+    Quality auditing can inspect all member states without promoting them.
+    """
+    state = " AND m.status='observed'" if observed_only else ''
+    prefix = f"SELECT 1 FROM members m WHERE m.source=e.source{state} AND "
+    return ("(CASE WHEN EXISTS(" + prefix + "m.locator=e.locator) THEN 1 "
+        "WHEN instr(e.locator,'#')>0 AND EXISTS(" + prefix +
+        "m.locator=substr(e.locator,1,instr(e.locator,'#')-1)) THEN 1 "
+        "ELSE EXISTS(" + prefix +
+        "(m.locator=e.locator OR e.locator LIKE m.locator||'#%')) END)")
+
 DDL = """
 CREATE TABLE IF NOT EXISTS runs(
  source TEXT PRIMARY KEY, identity TEXT NOT NULL, status TEXT NOT NULL,

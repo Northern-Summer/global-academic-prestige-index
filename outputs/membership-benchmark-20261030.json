@@ -1,0 +1,23 @@
+{
+  "schema_version": "gapi-membership-benchmark/v1",
+  "scope": "same private frozen input, sequential same-process public graph computation",
+  "frozen_input_sha256": "6cbd9597865e882818914e793fa9d221c9d801f94496fb8250706a71e2fcea6a",
+  "measurements": [
+    {
+      "kind": "legacy",
+      "seconds": 46.090132,
+      "sha256": "1607ae4d8044b44e2c845860d431cd083411b68f87c4132ed28816bceea259d4",
+      "bytes": 4138293
+    },
+    {
+      "kind": "indexed",
+      "seconds": 26.300399,
+      "sha256": "1607ae4d8044b44e2c845860d431cd083411b68f87c4132ed28816bceea259d4",
+      "bytes": 4138293
+    }
+  ],
+  "same_output_bytes": true,
+  "network_access": false,
+  "raw_input_saved": false,
+  "limitations": "single paired observation; warm caches and machine load may affect timing"
+}

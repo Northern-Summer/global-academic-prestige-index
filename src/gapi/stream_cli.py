@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from .career_store import CareerStore
+from .career_store import CareerStore, member_evidence_sql
 from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
 from .orcid_stream import stream_archive
 from .source_http import PublicHTTP, StageDeadline
@@ -150,9 +150,8 @@ def execute_task(task, args):
         elif args.command == "quality":
             result = store.report()
             result["sqlite_integrity"] = store.db.execute("PRAGMA quick_check").fetchone()[0]
-            result['events_without_member_evidence'] = store.db.execute('''SELECT count(*) FROM events e
-                WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=e.source
-                AND (m.locator=e.locator OR e.locator LIKE m.locator||'#%'))''').fetchone()[0]
+            result['events_without_member_evidence'] = store.db.execute(
+                'SELECT count(*) FROM events e WHERE NOT ' + member_evidence_sql(observed_only=False)).fetchone()[0]
             result['provisional_archive_events'] = store.db.execute('''SELECT count(*) FROM events e JOIN runs r ON r.source=e.source
                 WHERE e.source='orcid-2026-summary' AND r.status!='verified' ''').fetchone()[0]
             raw_files = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.zip','.tar','.xml')]
