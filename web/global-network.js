@@ -82,6 +82,9 @@ export function showNetwork(container, slice, onPick) {
   renderer.domElement.addEventListener('pointerleave',leave);
   const resize = new ResizeObserver(() => { const w=Math.max(240,container.clientWidth); renderer.setSize(w,height); camera.aspect=w/height; camera.updateProjectionMatrix(); render(); });
   resize.observe(container); render();
+  // Completion readback describes the scene actually created, not UI intent.
+  renderer.domElement.dataset.renderedNodes = String(meshes.length);
+  renderer.domElement.dataset.renderedEdges = String(arrows.length);
   return () => {
     resize.disconnect(); controls.dispose(); renderer.domElement.removeEventListener('click',click);
     renderer.domElement.removeEventListener('pointermove',move); renderer.domElement.removeEventListener('pointerleave',leave);

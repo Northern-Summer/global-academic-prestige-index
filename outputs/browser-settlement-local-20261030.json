@@ -1,0 +1,78 @@
+{
+  "tested_url": "http://127.0.0.1:4173/global-academic-prestige-index/",
+  "load": "版本已校验 · 数据持续采集中 · 正式全球排名尚未发布",
+  "table_ready_ms": 984,
+  "version": {
+    "snapshot": "global-765523a4bf2d9f9c.json",
+    "expected": "765523a4bf2d9f9c02c79b88eff93df1fb9ad327e61752f4b99a4a01493c4965",
+    "actual": "765523a4bf2d9f9c02c79b88eff93df1fb9ad327e61752f4b99a4a01493c4965",
+    "institutions": 6606,
+    "events": 25091,
+    "edges": 412,
+    "people": 6659,
+    "relations": 478,
+    "scored": 465,
+    "award_recipients": 1028,
+    "award_attribution_labels": 384
+  },
+  "coverage_counts_match": true,
+  "acquisition_progress_matches_snapshot": true,
+  "typography": {
+    "hero_family": "\"Playfair Display\", Georgia, serif",
+    "hero_italic": "italic",
+    "heading_family": "\"Playfair Display\", \"GAPI Song\", \"Songti SC\", SimSun, serif",
+    "heading_weight": "400",
+    "fonts": [
+      {
+        "family": "Playfair Display",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Playfair Display",
+        "style": "italic",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Sans",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Mono",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "GAPI Song",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ]
+  },
+  "table_min_font_px": 14,
+  "public_source_isolation": true,
+  "search_filter_sort_keyboard_details": true,
+  "csv_download": true,
+  "official_award_attribution": true,
+  "official_awards": true,
+  "relationship_pagination": true,
+  "webgl": true,
+  "network_focus_counts": {
+    "nodes": 74,
+    "edges": 40
+  },
+  "network_hover_label": "Lady Davis Institute for Medical Research",
+  "network_all_counts": {
+    "nodes": 465,
+    "edges": 412
+  },
+  "network_rapid_switch_settles_latest": true,
+  "network_focus_and_full_preserve_table": true,
+  "direction": "二维列表含当前筛选的全部 80 条关系，可翻页查看。3D 显示 65 个节点、40 条边；当前视图上限为 80 个节点 / 40 条边。",
+  "mobile": true,
+  "webgl_fallback": true,
+  "hostile_number_rejected": true,
+  "hostile_label_escaped": true,
+  "page_errors": []
+}

@@ -66,6 +66,24 @@ export async function fetchBounded(url,maximum,{fetchImpl=fetch,sleep=ms=>new Pr
   }
 }
 
+export async function waitForPublicManifest(expected,{read=()=>fetchBounded(SITE+'site-manifest.json',1024*1024),
+  now=()=>performance.now(),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  timeoutMs=180000,intervalMs=5000,onReadError=()=>{}}={}) {
+  if(!Number.isFinite(timeoutMs)||timeoutMs<=0||!Number.isFinite(intervalMs)||intervalMs<=0)
+    throw new Error('Invalid public settlement time bound');
+  const deadline=now()+timeoutMs;
+  while(now()<deadline){
+    try {
+      const body=await read();
+      if(now()<=deadline&&JSON.stringify(JSON.parse(body))===JSON.stringify(expected))return true;
+    }catch(error){onReadError(error);}
+    const remaining=deadline-now();
+    if(remaining<=0)break;
+    await sleep(Math.min(intervalMs,remaining));
+  }
+  return false;
+}
+
 async function main(){
   const root=resolve(fileURLToPath(new URL('..',import.meta.url))),outDir=join(root,'dist');
   const git=(args,input,env)=>execFileSync('git',args,{cwd:root,input,env:env??process.env,maxBuffer:2*1024*1024,stdio:['pipe','pipe','pipe']}).toString().trim();
@@ -111,13 +129,8 @@ async function main(){
     // configured legacy build explicitly with the narrowly scoped pages token.
     receipt.pages_build=await ensurePagesBuild(api,siteCommit,()=>{receipt.state='pages-build-request-prepared';save();});save();
     // Pages is asynchronous. This bounded wait belongs to the actual deployment.
-    let readback=false;
-    for(let attempt=0;attempt<12;attempt++){
-      try{const body=await fetchBounded(SITE+'site-manifest.json',1024*1024);
-        if(JSON.stringify(JSON.parse(body))===JSON.stringify(proof.site_manifest)){readback=true;break;}}
-      catch(error){receipt.last_readback_error=String(error.message).slice(0,200);}
-      await new Promise(resolve=>setTimeout(resolve,5000));
-    }
+    const readback=await waitForPublicManifest(proof.site_manifest,{
+      onReadError:error=>{receipt.last_readback_error=String(error.message).slice(0,200);}});
     if(!readback)throw new Error('Pages manifest has not settled before bounded deadline');
     for(const [path,bytes]of files){const live=await fetchBounded(SITE+path,Math.max(bytes.length+1,1024),{
       onRetry:retry=>{receipt.asset_readback_retries??=[];receipt.asset_readback_retries.push({path,...retry});save();}});

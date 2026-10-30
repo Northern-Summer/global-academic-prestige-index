@@ -131,6 +131,11 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       assert.match(focusedStatus,/当前视图上限为 80 个节点 \/ 40 条边/);
       const counts=focusedStatus.match(/3D 显示 (\d+) 个节点、(\d+) 条边/);
       assert.ok(counts && Number(counts[1])<=80 && Number(counts[2])<=40);
+      const waitForScene=async counts=>page.waitForFunction(([nodes,edges])=>{
+        const canvas=document.querySelector('#global-network canvas');
+        return canvas?.dataset.renderedNodes===nodes && canvas?.dataset.renderedEdges===edges;
+      },counts);
+      await waitForScene([counts[1],counts[2]]);
       results.network_focus_counts={nodes:Number(counts[1]),edges:Number(counts[2])};
       const canvas=page.locator('#global-network canvas');
       await canvas.scrollIntoViewIfNeeded();
@@ -146,9 +151,19 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       await page.waitForFunction(()=>document.querySelector('.network-tooltip')?.hidden);
       const tableRows=await page.locator('#global-edges').innerText();
       await page.locator('#global-network-view').selectOption('all');
-      assert.match(await page.locator('#global-edge-status').innerText(),/500 个节点 \/ 2,000 条边/);
+      const allStatus=await page.locator('#global-edge-status').innerText();
+      assert.match(allStatus,/500 个节点 \/ 2,000 条边/);
+      const allCounts=allStatus.match(/3D 显示 (\d+) 个节点、(\d+) 条边/);
+      await waitForScene([allCounts[1],allCounts[2]]);
+      results.network_all_counts={nodes:Number(allCounts[1]),edges:Number(allCounts[2])};
       assert.equal(await page.locator('#global-edges').innerText(),tableRows);
       await page.locator('#global-network-view').selectOption('focus');
+      await waitForScene([counts[1],counts[2]]);
+      await page.locator('#global-network-view').selectOption('all');
+      await page.locator('#global-network-view').selectOption('focus');
+      await waitForScene([counts[1],counts[2]]);
+      assert.equal(await page.locator('#global-network canvas').count(),1);
+      results.network_rapid_switch_settles_latest=true;
       results.network_focus_and_full_preserve_table=true;
     }
     await page.locator('#global-stage').selectOption('postdoc');

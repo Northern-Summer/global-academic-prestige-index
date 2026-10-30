@@ -4,7 +4,7 @@ import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
-import {deploymentIdentity,capture,ensurePagesBuild,fetchBounded} from '../scripts/deploy-pages.mjs';
+import {deploymentIdentity,capture,ensurePagesBuild,fetchBounded,waitForPublicManifest} from '../scripts/deploy-pages.mjs';
 
 test('automatic deployment only accepts exact trusted push identity',()=>{
   const head='a'.repeat(40),env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'push',
@@ -60,4 +60,28 @@ test('public read retry bound preserves permanent and oversized failures',async(
     }),/HTTP|byte bound/);
     assert.equal(calls,mode==='persistent503'?3:1);
   }
+});
+
+test('public manifest settlement accepts a 65.55-second Pages build without repeating writes',async()=>{
+  let clock=0,reads=0;const expected={source_commit:'frozen',files:{'index.html':'hash'}},errors=[];
+  const settled=await waitForPublicManifest(expected,{
+    now:()=>clock,sleep:async ms=>{clock+=ms;},
+    read:async()=>{reads++;if(reads===1)throw new TypeError('transient read');return Buffer.from(JSON.stringify(clock<65550?{source_commit:'previous'}:expected));},
+    onReadError:error=>errors.push(error.message)
+  });
+  assert.equal(settled,true);assert.equal(clock,70000);assert.equal(errors.length,1);
+  assert.ok(reads<40);
+});
+
+test('public settlement stays bounded and rejects stale, malformed and late manifests',async()=>{
+  for(const mode of ['stale','malformed','late']){
+    let clock=0,calls=0;
+    const settled=await waitForPublicManifest({source_commit:'expected'},{timeoutMs:12000,intervalMs:5000,
+      now:()=>clock,sleep:async ms=>{clock+=ms;},read:async()=>{
+        calls++;if(mode==='late'){clock+=13000;return '{"source_commit":"expected"}';}
+        return mode==='malformed'?'invalid json':'{"source_commit":"previous"}';
+      }});
+    assert.equal(settled,false);assert.equal(clock,mode==='late'?13000:12000);assert.ok(calls<=3);
+  }
+  await assert.rejects(waitForPublicManifest({}, {timeoutMs:Infinity}),/time bound/);
 });
