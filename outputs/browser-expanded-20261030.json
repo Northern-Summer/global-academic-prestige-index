@@ -1,0 +1,67 @@
+{
+  "tested_url": "http://127.0.0.1:4173/global-academic-prestige-index/",
+  "load": "版本已校验 · 数据持续采集中 · 正式全球排名尚未发布",
+  "table_ready_ms": 998,
+  "version": {
+    "snapshot": "global-e5b80e4d979e48f0.json",
+    "expected": "e5b80e4d979e48f09b08c922e04aaccdf7cfd56042bbb39f409c14bd52bfa5ac",
+    "actual": "e5b80e4d979e48f09b08c922e04aaccdf7cfd56042bbb39f409c14bd52bfa5ac",
+    "institutions": 4962,
+    "events": 17207,
+    "edges": 303,
+    "people": 4509,
+    "relations": 351,
+    "scored": 366,
+    "award_recipients": 1028,
+    "award_attribution_labels": 384
+  },
+  "coverage_counts_match": true,
+  "acquisition_progress_matches_snapshot": true,
+  "typography": {
+    "hero_family": "\"Playfair Display\", Georgia, serif",
+    "hero_italic": "italic",
+    "heading_family": "\"Playfair Display\", \"GAPI Song\", \"Songti SC\", SimSun, serif",
+    "heading_weight": "400",
+    "fonts": [
+      {
+        "family": "Playfair Display",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Playfair Display",
+        "style": "italic",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Sans",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "DM Mono",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "GAPI Song",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ]
+  },
+  "table_min_font_px": 14,
+  "public_source_isolation": true,
+  "search_filter_sort_keyboard_details": true,
+  "csv_download": true,
+  "official_award_attribution": true,
+  "official_awards": true,
+  "relationship_pagination": true,
+  "webgl": true,
+  "direction": "二维列表含当前筛选的全部 65 条关系，可翻页查看。3D 显示 105 个节点、65 条边，上限为 500 / 2,000。",
+  "mobile": true,
+  "webgl_fallback": true,
+  "hostile_number_rejected": true,
+  "hostile_label_escaped": true,
+  "page_errors": []
+}
