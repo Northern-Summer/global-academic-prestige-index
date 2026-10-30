@@ -103,7 +103,10 @@ class CareerStore:
         except OSError:
             self.lock.close()
             raise RuntimeError("another task writer is active")
-        self.db = sqlite3.connect(task.root / "careers.sqlite", timeout=0)
+        # The OS lock above excludes other writers. Short read-only monitoring
+        # transactions can still hold SQLite's shared lock during a commit;
+        # wait at most five seconds instead of aborting an otherwise valid batch.
+        self.db = sqlite3.connect(task.root / "careers.sqlite", timeout=5)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")

@@ -339,6 +339,13 @@ live connection to private inputs. Even a fully processed candidate selection
 cannot claim global coverage. Browser validation rejects inconsistent totals,
 duplicate source rows and a fabricated world denominator before rendering.
 
+The writer's SQLite connection allows up to five seconds for a brief read-only
+monitor transaction to release its shared lock. The separate OS writer lock still
+rejects a second writer immediately. Longer reader locks can still interrupt a
+batch; the uncommitted member rolls back and remains queued. Monitor readers
+should use bounded queries and close their transaction promptly, preferably
+reading frozen inputs when they do not need current progress.
+
 ## Evidence decisions and qualification checks
 
 `corroboration.py` derives a versioned, hashed decision from frozen structured

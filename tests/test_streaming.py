@@ -58,6 +58,33 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual(rows[0]["year_end"], 2000)
         self.assertEqual(rows[0]["institution"], "ror:03vek6s52")
 
+    def test_brief_readonly_monitor_does_not_interrupt_member_commit(self):
+        import sqlite3
+        import threading
+        s=self.store(archive([]))
+        s.start('wikidata')
+        reader=sqlite3.connect((s.task.root/'careers.sqlite').as_uri()+'?mode=ro',uri=True,check_same_thread=False)
+        reader.execute('BEGIN')
+        reader.execute('SELECT count(*) FROM members').fetchone()
+        release=threading.Timer(.2,reader.rollback)
+        release.start()
+        try:
+            with s.member('wikidata','Q1@1'):
+                s.finish_member('wikidata','Q1@1','a'*64)
+            self.assertIsNotNone(s.seen('wikidata','Q1@1'))
+        finally:
+            release.join()
+            reader.close()
+            s.close()
+
+    def test_reader_wait_does_not_admit_a_second_writer(self):
+        s=self.store(archive([]))
+        try:
+            with self.assertRaisesRegex(RuntimeError,'another task writer'):
+                CareerStore(s.task)
+        finally:
+            s.close()
+
     def test_realistic_stream_complete_and_idempotent_replay(self):
         data = archive([(f"summaries/097/{PERSON}.xml", XML)])
         class Bounded(io.BytesIO):
