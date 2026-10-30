@@ -117,15 +117,23 @@ export function selectEdges(data, {stage = 'all', country = '', selected = ''} =
     .filter(e => e.visible_weight > 0).sort((a,b) => b.visible_weight - a.visible_weight || a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
 }
 
-export function networkSlice(data, filters = {}) {
+// Rendering limits only; table selection and ranking inputs remain complete.
+export const NETWORK_VIEWS = Object.freeze({
+  focus: Object.freeze({nodes:80, edges:40}),
+  all: Object.freeze({nodes:500, edges:2000})
+});
+
+export function networkSlice(data, filters = {}, view = 'all') {
+  const limits = Object.hasOwn(NETWORK_VIEWS, view) ? NETWORK_VIEWS[view] : null;
+  if (!limits) throw new Error('Unknown network view');
   const edges = selectEdges(data, filters);
   const ids = new Set();
   const visible = [];
   for (const edge of edges) {
     const extra = Number(!ids.has(edge.source)) + Number(!ids.has(edge.target));
-    if (ids.size + extra > 500) continue;
+    if (ids.size + extra > limits.nodes) continue;
     ids.add(edge.source); ids.add(edge.target); visible.push(edge);
-    if (visible.length === 2000) break;
+    if (visible.length === limits.edges) break;
   }
   return {nodes: data.nodes.filter(n => ids.has(n.institution_id)), edges: visible, totalEdges: edges.length};
 }

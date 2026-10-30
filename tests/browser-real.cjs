@@ -125,7 +125,32 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await page.locator('#global-show-network').click();
     await page.waitForFunction(() => document.querySelector('#global-network canvas') || /暂不可用/.test(document.querySelector('#global-network')?.textContent || ''));
     results.webgl = await page.locator('#global-network canvas').count() === 1;
-    if (results.webgl) await page.locator('#global-network').screenshot({path:screenshotPath('network')});
+    if (results.webgl) {
+      assert.equal(await page.locator('#global-network-view').inputValue(),'focus');
+      const focusedStatus=await page.locator('#global-edge-status').innerText();
+      assert.match(focusedStatus,/当前视图上限为 80 个节点 \/ 40 条边/);
+      const counts=focusedStatus.match(/3D 显示 (\d+) 个节点、(\d+) 条边/);
+      assert.ok(counts && Number(counts[1])<=80 && Number(counts[2])<=40);
+      results.network_focus_counts={nodes:Number(counts[1]),edges:Number(counts[2])};
+      const canvas=page.locator('#global-network canvas');
+      await canvas.scrollIntoViewIfNeeded();
+      await page.locator('#global-network').screenshot({path:screenshotPath('network')});
+      const box=await canvas.boundingBox();
+      // First node is at (0,32,0) in the declared fixed sphere layout. This
+      // exercises the real raycaster, text label and pointer-leave behavior.
+      await page.mouse.move(box.x+box.width/2,box.y+box.height/2-(32/110)*(box.height/2/Math.tan(Math.PI/8)));
+      await page.waitForFunction(()=>{const t=document.querySelector('.network-tooltip');return t&&!t.hidden&&t.textContent.length>0;});
+      results.network_hover_label=await page.locator('.network-tooltip').innerText();
+      await page.locator('#global-network').screenshot({path:screenshotPath('network-hover')});
+      await page.mouse.move(0,0);
+      await page.waitForFunction(()=>document.querySelector('.network-tooltip')?.hidden);
+      const tableRows=await page.locator('#global-edges').innerText();
+      await page.locator('#global-network-view').selectOption('all');
+      assert.match(await page.locator('#global-edge-status').innerText(),/500 个节点 \/ 2,000 条边/);
+      assert.equal(await page.locator('#global-edges').innerText(),tableRows);
+      await page.locator('#global-network-view').selectOption('focus');
+      results.network_focus_and_full_preserve_table=true;
+    }
     await page.locator('#global-stage').selectOption('postdoc');
     results.direction = await page.locator('#global-edge-status').innerText();
     await page.locator('#global-stage').selectOption('all');

@@ -104,3 +104,19 @@ identity does not become a zero university award/composite score.
 graph-to-score replay using only the standard library. It checks the public bytes,
 edges, scores, mass and ordering; personal facts and unknown global missingness
 remain outside its verification scope. See [OOD.md](OOD.md) for pressure fixtures.
+
+## Network display and complete relationship table
+
+The default 3D view selects the first 40 edges ordered by their visible
+stage-weighted relationship quantity, with stable institution-ID tie breaking.
+It displays at most 80 endpoints. The full view retains the existing 500-node /
+2,000-edge rendering limits. These are display selections: they do not truncate
+ranking inputs, change scores, or remove relationships from the paginated 2D
+table. The page reports the actual displayed and total relationship counts.
+
+Pointer hover identifies the institution and highlights its direct incident
+edges in their original direction; pointer exit restores the overview. Clicking
+a node opens its evidence and score details. The sphere layout expresses no
+geography, chronology, distance or prestige; node size is the reference network
+score and color is region. The keyboard-accessible institution and relationship
+tables remain the primary way to inspect exact names and values.

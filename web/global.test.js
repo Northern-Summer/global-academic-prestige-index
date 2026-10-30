@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {csv,networkSlice,selectRows,validateGlobal} from './global-data.js';
+import {csv,networkSlice,selectEdges,selectRows,validateGlobal} from './global-data.js';
 
 const node = (id,score,country='CN') => ({institution_id:id,name:id,country,network_score:score,award_score:null,composite_score:null,relations:1,corroborated_relations:0,source_classes:[],traceability:null,observed_rank:null,formal_rank:null,rank_range:null,unranked_reasons:['independent_review_pending']});
 const dataset = () => ({schema_version:'gapi-global-observed/v1',dataset_kind:'real/global-public-observations',algorithm:{config:{alpha:.85}},coverage:{events:3,people:1},nodes:[node('a',.7),node('b',.3,'DE'),node('missing',null)],edges:[{source:'b',target:'a',weight:2,stages:{doctorate:2}}]});
@@ -48,6 +48,23 @@ test('institution CSV neutralizes formulas and preserves missing values',()=>{
   assert.match(data,/'=HYPERLINK/);
   assert.match(data,/'\t=1\+1/);
   assert.doesNotMatch(data,/undefined|null/);
+});
+
+test('focused network caps rendering without dropping table relations or changing scores',()=>{
+  const data={nodes:Array.from({length:122},(_,i)=>node(String(i),1/122)),
+    edges:Array.from({length:61},(_,i)=>({source:String(i*2),target:String(i*2+1),weight:61-i,stages:{doctorate:61-i}}))};
+  const original=JSON.stringify(data),focus=networkSlice(data,{},'focus');
+  assert.equal(focus.edges.length,40);
+  assert.equal(focus.nodes.length,80);
+  assert.equal(focus.totalEdges,61);
+  assert.deepEqual(focus.edges.map(e=>e.weight),Array.from({length:40},(_,i)=>61-i));
+  assert.equal(networkSlice(data,{},'all').edges.length,61);
+  assert.equal(selectEdges(data).length,61);
+  assert.equal(JSON.stringify(data),original);
+  assert.deepEqual(networkSlice({...data,edges:[...data.edges].reverse()},{},'focus'),focus);
+  assert.equal(networkSlice(data,{stage:'postdoc'},'focus').edges.length,0);
+  assert.throws(()=>networkSlice(data,{},'__proto__'));
+  assert.throws(()=>networkSlice(data,{},'unknown'));
 });
 
 test('official award inventory validates counts without imputing university scores',()=>{

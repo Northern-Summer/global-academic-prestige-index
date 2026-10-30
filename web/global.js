@@ -1,5 +1,5 @@
 import { verifySnapshotBytes } from './snapshot.js';
-import { csv, networkSlice, selectEdges, selectRows, validateGlobal } from './global-data.js';
+import { csv, NETWORK_VIEWS, networkSlice, selectEdges, selectRows, validateGlobal } from './global-data.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stageNames = {bachelor:'本科',master:'硕士',doctorate:'博士',postdoc:'博士后训练'};
@@ -31,6 +31,8 @@ root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">01 / INSTITU
 <aside id="global-details" aria-live="polite"><p>点击一个机构，查看分数来源、培养阶段和证据缺口。</p></aside>
 <div class="network-heading global-heading"><div><p class="eyebrow">02 / THE NETWORK</p><h3>人才流动网络</h3></div><div class="table-tools"><label>培养阶段<select id="global-stage"><option value="all">全部阶段</option><option value="doctorate">博士</option><option value="master">硕士</option><option value="bachelor">本科</option><option value="postdoc">博士后训练</option></select></label><button type="button" id="global-show-network">打开 3D 网络</button><button type="button" id="global-reset">全部关系</button></div></div>
 <p class="scope-caption">箭头固定为“聘用机构 → 培养机构”。节点大小表示参考网络份额，颜色表示地区；灰色为未知。位置不代表地理或时间。国家筛选保留至少一端位于该国的关系。</p>
+<label class="network-view-control">三维显示范围<select id="global-network-view"><option value="focus">重点关系（前 40 条）</option><option value="all">全部关系（有渲染上限）</option></select></label>
+<p class="scope-caption">重点视图按阶段加权关系量选取前 40 条边；下方二维列表保留当前筛选的全部关系。拖动旋转，滚轮缩放；指向节点查看机构与直接连接，点击查看详情。</p>
 <div id="global-network" role="region" aria-label="可选三维人才关系网络"></div><p id="global-edge-status" role="status"></p>
 <div class="table-wrap" tabindex="0" aria-label="可分页的有向关系列表"><table class="directory-table"><thead><tr><th scope="col">聘用机构 →</th><th scope="col">培养机构</th><th scope="col">阶段加权关系量</th></tr></thead><tbody id="global-edges"></tbody></table></div>
 <div class="directory-pagination"><span id="global-edge-page"></span><div><button type="button" id="global-edge-prev" aria-label="上一页关系">←</button><button type="button" id="global-edge-next" aria-label="下一页关系">→</button></div></div>`;
@@ -67,9 +69,9 @@ function renderTable(){
   $('#global-scenario-note').textContent=scenario ? `当前情景只改变序位；份额列仍显示参考设置。${scenario.prior_only?'本情景没有有效关系，仅余先验分布。':''} 固定网络采用 ${scenario.edges} / ${scenario.available_edges??scenario.edges} 条可用边。${expanded ? `另有扩展网络对照：${expanded.node_count} 个节点、${expanded.edges} 条边；新增机构不会被当成“名次稳定”。` : ''}` : '当前为参考设置。情景范围只描述已观测网络；未知全球缺失不在范围内。';
 }
 async function renderNetwork(){
-  const generation=++networkGeneration,slice=networkSlice(data,filters()),edges=selectEdges(data,filters()),names=new Map(data.nodes.map(n=>[n.institution_id,n.name]));
+  const generation=++networkGeneration,view=$('#global-network-view').value,limits=NETWORK_VIEWS[view],slice=networkSlice(data,filters(),view),edges=selectEdges(data,filters()),names=new Map(data.nodes.map(n=>[n.institution_id,n.name]));
   edgePage=Math.min(edgePage,Math.max(0,Math.ceil(edges.length/50)-1));
-  $('#global-edge-status').textContent=`二维列表含当前筛选的全部 ${integer(edges.length)} 条关系，可翻页查看。3D 显示 ${slice.nodes.length} 个节点、${slice.edges.length} 条边，上限为 500 / 2,000。`;
+  $('#global-edge-status').textContent=`二维列表含当前筛选的全部 ${integer(edges.length)} 条关系，可翻页查看。3D 显示 ${slice.nodes.length} 个节点、${slice.edges.length} 条边；当前视图上限为 ${limits.nodes} 个节点 / ${integer(limits.edges)} 条边。`;
   $('#global-edges').innerHTML=edges.slice(edgePage*50,edgePage*50+50).map(e=>`<tr><td>${esc(names.get(e.source))} →</td><td>${esc(names.get(e.target))}</td><td>${esc(e.visible_weight.toFixed(2))}</td></tr>`).join('')||'<tr><td colspan="3">当前范围暂无有效关系；缺失不等于没有影响力。</td></tr>';
   $('#global-edge-page').textContent=`${edges.length?edgePage*50+1:0}—${Math.min(edges.length,edgePage*50+50)} / ${integer(edges.length)} 条关系`;
   $('#global-edge-prev').disabled=edgePage===0;$('#global-edge-next').disabled=(edgePage+1)*50>=edges.length;
@@ -118,6 +120,7 @@ async function load(){
     for(const id of ['#global-search','#global-country','#global-sort','#global-scenario'])$(id).addEventListener('input',()=>{page=0;edgePage=0;renderTable();renderNetwork();});
     $('#global-prev').onclick=()=>{page--;renderTable();};$('#global-next').onclick=()=>{page++;renderTable();};
     $('#global-rows').addEventListener('click',e=>{const id=e.target.closest('[data-institution]')?.dataset.institution;if(id)details(id);});
+    $('#global-network-view').onchange=()=>renderNetwork();
     $('#global-stage').onchange=()=>{edgePage=0;renderNetwork();};$('#global-show-network').onclick=()=>{networkEnabled=true;renderNetwork();};$('#global-reset').onclick=()=>{selected='';edgePage=0;renderNetwork();};
     $('#global-edge-prev').onclick=()=>{edgePage--;renderNetwork();};$('#global-edge-next').onclick=()=>{edgePage++;renderNetwork();};
     $('#global-csv').onclick=()=>{const url=URL.createObjectURL(new Blob([csv(selectRows(data,fields()))],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='gapi-real-observed-institutions.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
