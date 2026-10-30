@@ -38,7 +38,7 @@ discovery pages or raw archives were enabled.
 The ORCID candidate set is now 1,293, with 1,287 committed and six originals still
 pending. The expanded denominator includes the two new destination candidates;
 this is not a claim that two of the six original failures disappeared. Wikidata's
-3,865 candidates remain fully processed. The three classes of original error
+3,865 candidates remain fully processed. The four classes of original error
 remain visible: two verified redirect routes with unresolved original identity,
 two HTTP conflicts, one not-found response and one previously observed path
 mismatch whose backoff has not elapsed. World coverage remains unknown.
@@ -54,3 +54,24 @@ No frontend typography, scoring policy, formal ranking qualification, source
 permissions, external accounts or services were changed. Frozen predecessor
 inputs and error evidence remain available. Independent third-party dual-track
 review is still pending. No formal global ranking or new release tag is issued.
+
+## Frozen-input acceptance after recovery
+
+- Input/code owner: `35a02db0b0efb8270b647962ba3b062524d5270b`.
+- Private normalized input: `4461b7b61b49d46f2d6affb527fe8c508441241f1a03b5c27470d473535677f1.sqlite`,
+  37,642,240 bytes, outside Git. Its filename hash was checked against file bytes.
+- Public snapshot: `global-5dfe5e90a13b4242.json`, SHA-256
+  `5dfe5e90a13b42428434ea50ef45ca924f55d3789ca7c993bce0d649f723493c`.
+- Initial export and frozen replay receipts are byte-identical, SHA-256
+  `d6434865a6737ce6c60a1306693eb255a578411c688e4a02f889f01020c0c073`.
+- Every institution node and edge is exactly equal to the preceding expanded
+  slice. Separately implemented graph replay again passed with 366 endpoints,
+  303 edges, 21 iterations, mass within floating-point rounding of one, and
+  maximum score difference `3.469446951953614e-18`.
+- Frontend regression: 30/30 passed. SQLite integrity, member evidence, archive
+  exclusion, zero raw files, budget and candidate counters passed the executable
+  acceptance check. See `redirect-acceptance-20261030.json` and
+  `public-replay-redirect-recovery-20261030.json`.
+
+This section is local acceptance. The subsequent source commit and deployment
+receipt identify the final public revision; transport alone is not settlement.

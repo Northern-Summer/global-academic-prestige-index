@@ -1,0 +1,53 @@
+{
+  "schema_version": "gapi-redirect-recovery-acceptance/v1",
+  "status": "passed",
+  "checked_at": "2026-10-30T03:23:22.929976+00:00",
+  "code_commit": "35a02db0b0efb8270b647962ba3b062524d5270b",
+  "snapshot_sha256": "5dfe5e90a13b42428434ea50ef45ca924f55d3789ca7c993bce0d649f723493c",
+  "private_input_sha256": "4461b7b61b49d46f2d6affb527fe8c508441241f1a03b5c27470d473535677f1",
+  "frozen_replay_receipt_sha256": "d6434865a6737ce6c60a1306693eb255a578411c688e4a02f889f01020c0c073",
+  "nodes_and_edges_byte_values_unchanged": true,
+  "official_301_candidate_routes": 2,
+  "additional_members": 2,
+  "additional_career_events": 0,
+  "python_tests": 178,
+  "frontend_tests": 30,
+  "sqlite_integrity": "ok",
+  "events_without_member_evidence": 0,
+  "provisional_archive_events": 0,
+  "raw_source_files": 0,
+  "storage_bytes_at_check": 333940905,
+  "budget_bytes": 2147483648,
+  "reserve_bytes": 268435456,
+  "acquisition_progress": {
+    "complete_global_census": false,
+    "scope": "current-discovered-candidates-only",
+    "sources": [
+      {
+        "candidates": 3865,
+        "enumeration_complete": true,
+        "observed_members": 3865,
+        "pending": 0,
+        "pending_with_errors": 0,
+        "processed": 3865,
+        "rejected_members": 0,
+        "selection_sha256": "c94bb1a2942d68291d99c08170c1eff4a2c0b693dd0a93cd57339af7109abbde",
+        "source": "wikidata"
+      },
+      {
+        "candidates": 1293,
+        "enumeration_complete": false,
+        "observed_members": 1287,
+        "pending": 6,
+        "pending_with_errors": 6,
+        "processed": 1287,
+        "rejected_members": 0,
+        "selection_sha256": "07aa19fd03694cc855cfafe93f543ef5ba618ebe6ee111adbb0f0bbda86c0663",
+        "source": "orcid-public-api"
+      }
+    ],
+    "world_personnel_denominator": null
+  },
+  "independent_third_party_review": "pending",
+  "complete_global_census": false
+}
