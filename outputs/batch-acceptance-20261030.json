@@ -1,0 +1,81 @@
+{
+  "schema_version": "gapi-batch-acceptance/v1",
+  "source_code_commit": "d7bd2c1fce271e4e95636a7d8cafb7317dd93372",
+  "statistics": {
+    "people": 4999,
+    "events": 18864,
+    "country_region_codes": 99,
+    "directory_identifiers": 5323,
+    "scored_endpoints": 438,
+    "relations": 440,
+    "edges": 376
+  },
+  "acquisition_progress": {
+    "complete_global_census": false,
+    "scope": "current-discovered-candidates-only",
+    "sources": [
+      {
+        "candidates": 4262,
+        "enumeration_complete": true,
+        "observed_members": 4262,
+        "pending": 0,
+        "pending_with_errors": 0,
+        "processed": 4262,
+        "rejected_members": 0,
+        "selection_sha256": "0502208a896c9592454b3b359efbf9d32d761130f5069afb662cbd4d3a70d829",
+        "source": "wikidata"
+      },
+      {
+        "candidates": 1683,
+        "enumeration_complete": false,
+        "observed_members": 1677,
+        "pending": 6,
+        "pending_with_errors": 6,
+        "processed": 1677,
+        "rejected_members": 0,
+        "selection_sha256": "91212c86b798e19418d17d88e2c992f1f68a8ae7f2e2a50641f29ba14c4ed146",
+        "source": "orcid-public-api"
+      }
+    ],
+    "world_personnel_denominator": null
+  },
+  "sqlite_integrity": "ok",
+  "events_without_member_evidence": 0,
+  "raw_source_files_detected": 0,
+  "raw_source_bytes_detected": 0,
+  "frozen_replay_byte_identical": true,
+  "file_hashes": {
+    "global-1607ae4d8044b44e.json": "1607ae4d8044b44e2c845860d431cd083411b68f87c4132ed28816bceea259d4",
+    "manifest.json": "028d023c35d9bcc538c3dae2dff374ee6166471d813c4518f9223583aeb29df7",
+    "SHA256SUMS": "039216808b437ec30ecc7ceba1e0b0e8483d414e0145fa323139877f1fc9c884"
+  },
+  "independent_algorithm_replay": {
+    "edges": 376,
+    "iterations": 21,
+    "l1_residual": 5.138205399352058e-13,
+    "manifest_sha256": "028d023c35d9bcc538c3dae2dff374ee6166471d813c4518f9223583aeb29df7",
+    "max_score_error": 1.734723475976807e-18,
+    "not_verified": [
+      "underlying personal facts",
+      "source independence",
+      "world coverage",
+      "source rights",
+      "third-party auditor identity"
+    ],
+    "ordering_consistent": true,
+    "probability_mass": 1.0000000000000002,
+    "schema_version": "gapi-public-independent-replay/v1",
+    "scope": "independently implemented public graph-to-score replay; no canonical gapi ranking imports",
+    "scored_nodes": 438,
+    "snapshot_sha256": "1607ae4d8044b44e2c845860d431cd083411b68f87c4132ed28816bceea259d4",
+    "status": "passed"
+  },
+  "python_tests_passed": 191,
+  "node_tests_passed": 30,
+  "ood_cases": 9,
+  "ood_invariants": 26,
+  "storage_bytes": 338518271,
+  "storage_budget": 2147483648,
+  "independent_third_party_review": false,
+  "global_complete": false
+}
