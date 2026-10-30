@@ -49,7 +49,11 @@ class SummaryParser:
             root=self.section or 'record'
             expected_path='/'+self.expected_orcid+('/'+self.section if self.section else '')
             if local!=root or attrs.get('path')!=expected_path:
-                raise ValueError("ORCID XML root identity does not match frozen member locator")
+                # Keep a bounded diagnostic without copying the unexpected
+                # identity (which could be a different person's identifier).
+                shape = 'missing' if 'path' not in attrs else 'empty' if not attrs['path'] else 'different'
+                raise ValueError("ORCID XML root identity does not match frozen member locator"
+                    f"; element={local[:64]!r}; identity_path={shape}")
         self.path.append(local)
         if len(self.path) > 64:
             raise ValueError("XML nesting exceeds bound")

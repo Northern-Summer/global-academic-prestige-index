@@ -58,6 +58,18 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual(rows[0]["year_end"], 2000)
         self.assertEqual(rows[0]["institution"], "ror:03vek6s52")
 
+    def test_wrong_root_diagnostic_does_not_disclose_unexpected_person_identifier(self):
+        rows=[]
+        parser=SummaryParser('p','source',PERSON,rows.append,section='educations')
+        unexpected='/private-other-person/educations'
+        with self.assertRaisesRegex(ValueError,"element='educations'; identity_path=different") as raised:
+            parser.feed(f'<educations path="{unexpected}"/>'.encode(),True)
+        self.assertNotIn(unexpected,str(raised.exception))
+        self.assertEqual(rows,[])
+        parser=SummaryParser('p','source',PERSON,rows.append,section='educations')
+        with self.assertRaisesRegex(ValueError,'identity_path=missing'):
+            parser.feed(b'<educations/>',True)
+
     def test_brief_readonly_monitor_does_not_interrupt_member_commit(self):
         import sqlite3
         import threading
