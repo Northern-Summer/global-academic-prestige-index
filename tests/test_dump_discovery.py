@@ -149,3 +149,54 @@ class DumpTests(unittest.TestCase):
         data=json.loads(p.read_text());data['url']='https://dumps.wikimedia.org/latest.json.bz2'
         p.write_text(json.dumps(data))
         with self.assertRaises(ValueError):load_feed(p)
+
+    def test_short_replay_keeps_longest_observed_prefix_for_next_ceiling(self):
+        from unittest.mock import patch
+        import gapi.dump_discovery as module
+        body = dump_bytes(600)
+        s = self.store(archive([]))
+        original = module.bounded_lines
+        def stop_after(stream):
+            for i, item in enumerate(original(stream)):
+                if i == 300:
+                    raise BudgetStop('injected boundary after committed prefix')
+                yield item
+        try:
+            with patch.object(module, 'bounded_lines', stop_after):
+                discover_dump(s, HTTP(body), spec_for(body))
+            before = s.db.execute('SELECT compressed_bytes,sha256,lines,prefix_sha256 FROM discovery_feeds').fetchone()
+            result = discover_dump(s, HTTP(body), spec_for(body), max_bytes=16)
+            self.assertEqual(result['compressed_bytes'], 16)
+            self.assertGreater(before[0], 16)
+            self.assertEqual(before, s.db.execute(
+                'SELECT compressed_bytes,sha256,lines,prefix_sha256 FROM discovery_feeds').fetchone())
+            self.assertEqual(discover_dump(s, HTTP(body), spec_for(body))['status'], 'verified')
+        finally:
+            s.close()
+
+    def test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes(self):
+        from unittest.mock import patch
+        import gapi.dump_discovery as module
+        body = dump_bytes(600)
+        s = self.store(archive([]))
+        original = module.bounded_lines
+        def stop_after(stream):
+            for i, item in enumerate(original(stream)):
+                if i == 300:
+                    raise BudgetStop('injected boundary after committed prefix')
+                yield item
+        class Unavailable:
+            def open(self, url):
+                raise OSError('injected source unavailable')
+        try:
+            with patch.object(module, 'bounded_lines', stop_after):
+                discover_dump(s, HTTP(body), spec_for(body))
+            before = s.db.execute('SELECT compressed_bytes,sha256,lines,prefix_sha256 FROM discovery_feeds').fetchone()
+            with self.assertRaisesRegex(OSError, 'unavailable'):
+                discover_dump(s, Unavailable(), spec_for(body))
+            self.assertEqual(before, s.db.execute(
+                'SELECT compressed_bytes,sha256,lines,prefix_sha256 FROM discovery_feeds').fetchone())
+            self.assertEqual(s.db.execute('SELECT status FROM discovery_feeds').fetchone()[0], 'failed')
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0], 0)
+        finally:
+            s.close()

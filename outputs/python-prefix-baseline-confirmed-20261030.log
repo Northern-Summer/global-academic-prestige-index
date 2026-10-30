@@ -1,0 +1,46 @@
+test_short_replay_keeps_longest_observed_prefix_for_next_ceiling (test_dump_discovery.DumpTests.test_short_replay_keeps_longest_observed_prefix_for_next_ceiling) ... FAIL
+test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes (test_dump_discovery.DumpTests.test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes) ... FAIL
+
+======================================================================
+FAIL: test_short_replay_keeps_longest_observed_prefix_for_next_ceiling (test_dump_discovery.DumpTests.test_short_replay_keeps_longest_observed_prefix_for_next_ceiling)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\MzgyM\Documents\Codex\2026-10-21\oo\tests\test_dump_discovery.py", line 171, in test_short_replay_keeps_longest_observed_prefix_for_next_ceiling
+    self.assertEqual(before, s.db.execute(
+AssertionError: Tuples differ: (992, 'd193b90f4bbaf037fde889ff49c95c845ea[99 chars]d00') != (16, '53bfffe6bd2f06befff4512d51786d1a89a4[98 chars]d00')
+
+First differing element 0:
+992
+16
+
+- (992,
+-  'd193b90f4bbaf037fde889ff49c95c845ead5ba583e19f7be889485701404bb1',
++ (16,
++  '53bfffe6bd2f06befff4512d51786d1a89a46e02652afebdb0f3435a7237c770',
+   300,
+BOTH_BASELINE_DEFECTS_REPRODUCED
+   '188e8ad6a6cc45e2f8562e86fbbc152be6662e1935edec43d095d55459e40d00')
+
+======================================================================
+FAIL: test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes (test_dump_discovery.DumpTests.test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\MzgyM\Documents\Codex\2026-10-21\oo\tests\test_dump_discovery.py", line 197, in test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes
+    self.assertEqual(before, s.db.execute(
+AssertionError: Tuples differ: (992, 'd193b90f4bbaf037fde889ff49c95c845ea[99 chars]d00') != (0, None, 300, '188e8ad6a6cc45e2f8562e86fb[35 chars]d00')
+
+First differing element 0:
+992
+0
+
+- (992,
+-  'd193b90f4bbaf037fde889ff49c95c845ead5ba583e19f7be889485701404bb1',
++ (0,
++  None,
+   300,
+   '188e8ad6a6cc45e2f8562e86fbbc152be6662e1935edec43d095d55459e40d00')
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.479s
+
+FAILED (failures=2)

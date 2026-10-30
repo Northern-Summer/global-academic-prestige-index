@@ -89,7 +89,7 @@ def bounded_lines(stream):
 def discover_dump(store, http, spec, *, max_seconds=300, max_bytes=None, progress=None):
     feed = spec['id']
     identity = canonical(spec).decode()
-    previous = store.db.execute('SELECT spec,status,lines,candidates,rejected,prefix_sha256 FROM discovery_feeds WHERE id=?',(feed,)).fetchone()
+    previous = store.db.execute('SELECT spec,status,lines,candidates,rejected,prefix_sha256,compressed_bytes,sha256 FROM discovery_feeds WHERE id=?',(feed,)).fetchone()
     if previous and previous[0] != identity:
         raise ValueError('discovery feed changed; frozen replay forbidden')
     if previous and previous[1] == 'verified':
@@ -105,11 +105,19 @@ def discover_dump(store, http, spec, *, max_seconds=300, max_bytes=None, progres
     start_marker = end_marker = False
     def flush():
         store.task.check(1024**2)
+        # A short replay or failed open must not shrink the next scan ceiling.
+        # Keep the byte count and its matching hash as one observed-prefix pair;
+        # the returned compressed_bytes still describes only this attempt.
+        old_bytes = previous[6] if previous else 0
+        if reader is not None and reader.size >= old_bytes:
+            observed_bytes, observed_hash = reader.size, reader.sha256.hexdigest()
+        else:
+            observed_bytes, observed_hash = old_bytes, previous[7] if previous else None
         with store.db:
             store.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',batch)
             store.db.execute('''UPDATE discovery_feeds SET status=?,compressed_bytes=?,lines=?,candidates=?,rejected=?,sha256=?,detail=?,prefix_sha256=? WHERE id=?''',
-                (status,reader.size if reader else 0,max(lines,replay_until),candidates,rejected,
-                 reader.sha256.hexdigest() if reader else None,detail,
+                (status,observed_bytes,max(lines,replay_until),candidates,rejected,
+                 observed_hash,detail,
                  prefix.hexdigest() if lines > replay_until or not previous else previous[5],feed))
         batch.clear()
     try:

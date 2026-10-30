@@ -1,0 +1,23 @@
+{
+  "schema_version": "gapi-stream-progress/v1",
+  "source": "wikidata-20261026-all",
+  "status": "provisional",
+  "before": {
+    "compressed_bytes": 268435456,
+    "lines": 80966,
+    "candidates": 3088
+  },
+  "after": {
+    "compressed_bytes": 457310208,
+    "lines": 174536,
+    "candidates": 4688,
+    "rejected": 1
+  },
+  "source_size_bytes": 103565615653,
+  "full_source_verified": false,
+  "raw_source_files_detected": 0,
+  "raw_source_bytes_detected": 0,
+  "career_events_created_by_discovery": 0,
+  "scope": "candidate discovery; API reacquisition required before canonical career evidence",
+  "global_complete": false
+}

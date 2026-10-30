@@ -1,0 +1,15 @@
+test_changed_feed_identity_refuses_resume (test_dump_discovery.DumpTests.test_changed_feed_identity_refuses_resume) ... ok
+test_changed_replay_prefix_is_rejected_repeatedly_without_rebasing (test_dump_discovery.DumpTests.test_changed_replay_prefix_is_rejected_repeatedly_without_rebasing) ... ok
+test_compressed_budget_stops_without_promotion (test_dump_discovery.DumpTests.test_compressed_budget_stops_without_promotion) ... ok
+test_exact_official_feed_validation (test_dump_discovery.DumpTests.test_exact_official_feed_validation) ... ok
+test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes (test_dump_discovery.DumpTests.test_failed_open_preserves_prefix_and_does_not_claim_this_attempt_bytes) ... ok
+test_hash_mismatch_and_truncation_never_verify_or_create_events (test_dump_discovery.DumpTests.test_hash_mismatch_and_truncation_never_verify_or_create_events) ... ok
+test_interruption_replay_deduplicates_and_checks_prefix (test_dump_discovery.DumpTests.test_interruption_replay_deduplicates_and_checks_prefix) ... ok
+test_oversized_line_is_drained_and_next_line_retained (test_dump_discovery.DumpTests.test_oversized_line_is_drained_and_next_line_retained) ... ok
+test_realistic_bulk_discovery_no_raw_or_canonical_events (test_dump_discovery.DumpTests.test_realistic_bulk_discovery_no_raw_or_canonical_events) ... ok
+test_short_replay_keeps_longest_observed_prefix_for_next_ceiling (test_dump_discovery.DumpTests.test_short_replay_keeps_longest_observed_prefix_for_next_ceiling) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.727s
+
+OK
