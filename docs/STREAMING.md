@@ -406,6 +406,24 @@ refetching already stored snapshots; their original evidence remains in the
 versioned ledger. Each rejected predecessor is excluded from active aliases.
 Source snapshots and issue indexes are hashed in the release manifest.
 
+## ORCID identity redirects
+
+The HTTP boundary stops ORCID redirects before following them, closes the old
+response and preserves request accounting. Only HTTP 301/308 from the exact
+requested public v3 affiliation URL to another checksum-valid ORCID on that same
+host, version and section can discover a new candidate. Temporary redirects,
+changed sections, query/fragment URLs, credentials and invalid identifiers cannot
+queue targets. This rule never merges people or treats a redirect as career evidence.
+
+The existing discovery-page ledger stores normalized redirect metadata: the
+original URL, status, destination URL, retrieval time and metadata SHA-256. This
+is explicitly a header-metadata hash, not an unseen raw response-body checksum.
+Repeated observations are idempotent. Any partial education/employment transaction
+for the old identity is rolled back. The target requires its own complete verified
+affiliation pair and retains its own pseudonymous person key. The original stays
+pending with its failure and retry deadline, so redirects cannot manufacture a
+100% successful retrieval rate. Nothing is written to a raw archive/XML cache.
+
 A live bulk `api.php` experiment was rejected by robots before the entity request;
 it created no bridge decisions. This route has been removed. Entity acquisition
 continues only through the previously allowed individual `Special:EntityData`
