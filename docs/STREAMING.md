@@ -300,6 +300,21 @@ source backoff retain their reserved capacity. No separate queue is created.
 Successful parsing, stable identity and independent corroboration remain separate
 results. Adapter tests alone do not establish real independent confirmations.
 
+For storage-constrained publication, `--freeze-input --freeze-format rows` streams
+normalized table rows directly into a private `HASH.rows.xz` archive without a
+temporary SQLite copy. The logical row stream is SHA-256 addressed; its schema,
+table counts, frozen acquisition progress and original binary payloads are retained.
+Every line is bounded to 1 MiB. The archive is fully decoded and hash checked
+before promotion. A fresh export scores the unchanged live tables under the same
+exclusive writer lock. It does not restore a second database locally.
+
+`--frozen-input HASH.rows` restores the verified archive into an owned temporary
+SQLite file only after separate disk and memory admission. Failure cleans only
+that temporary file and its journal. Restoration may require more space than is
+available beside the live database; the archive is not a claim that full-scale
+local restoration has passed. Raw source responses and excluded acquisition tables
+are not included. This format is a private ranking input, not an acquisition backup.
+
 For historical reproduction, `--freeze-input` creates a content-addressed private
 SQLite projection of normalized events/evidence/crosswalks in the external task's
 `frozen-inputs` directory. These are structured computation inputs, not original
