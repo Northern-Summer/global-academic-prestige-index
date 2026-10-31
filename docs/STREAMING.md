@@ -969,3 +969,41 @@ order. Empty, paused and invocation-suspended sources are skipped. Existing
 60-second stage windows, batch caps, request spacing, retry reservations and
 single-writer rules are unchanged. Returned service times describe this
 invocation only; they are neither global coverage nor a throughput guarantee.
+
+### Slow HTTP body reads
+
+The shared HTTP boundary uses the standard library's `HTTPResponse.read1` for
+available body bytes, including the single reusable HTTPS connection. Ordinary
+file-like adapters retain their existing read contract. Filling a 64 KiB buffer
+with `read` can hide several successful socket reads from the stage deadline;
+short reads allow the existing consumer loop to recheck its deadline between
+body fragments. This does not increase concurrency, request frequency, retry
+limits or source permissions. A blocked socket and chunked-protocol framing can
+still overrun a stage window by their admitted timeout; this is not a hard total
+wall-clock guarantee.
+
+`tests/test_http_trickle.py` exercises the actual standard-library HTTP buffer
+with deterministic, one-byte simulated arrivals and no sleeps or source files.
+The old filling read consumed ten arrivals before returning; the new path checks
+the two-tick stage limit between arrivals for both connection types. Complete
+identity, chunked and gzip bodies retain their bytes and hashes. Corrupt gzip
+trailers and truncated chunked bodies fail closed and close the connection.
+This establishes the buffering mechanism, not the cause of every slow upstream
+batch or a measured production throughput improvement.
+
+### Reusing event pages without an extra database
+
+`python -m gapi repack-event-pages --max-events 20000 --max-seconds 60`
+rebalances at most 128 contiguous event rows per transaction under the ordinary
+exclusive writer lock. It preserves SQLite rowids, every stored value and payload
+byte, checks the full batch before committing, and rolls back an unfinished
+batch. It refuses event triggers and incoming foreign keys. Source facts,
+interpretations, schemas and codecs are unchanged. Resume only from a successfully
+returned `--after-rowid`; starting again is logically idempotent.
+
+This operation reuses the existing member write admission and transaction
+reserve. It creates no second database, raw file, checkpoint table or temporary
+sort. It cannot promise savings: allocated pages can remain unchanged and later
+rows may reduce the freelist. Report net reusable pages across the whole run;
+do not describe them as filesystem bytes reclaimed. New ingestion can consume
+the freed pages while retaining the same total file size.
