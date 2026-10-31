@@ -123,6 +123,37 @@ CREATE TABLE IF NOT EXISTS failures(
 """
 
 
+@contextmanager
+def exclusive_writer(task):
+    """Existing task writer exclusion, also usable without opening SQLite.
+
+    Immutable-file maintenance must still exclude snapshot readers/collectors,
+    but does not need the database constructor's 4 MiB schema allowance.
+    Each maintenance writer separately admits its actual file allocations.
+    """
+    task.require_frozen()
+    task.check(64*1024)
+    lock = (task.root / 'writer.lock').open('a+b')
+    try:
+        try:
+            lock.seek(0)
+            if lock.read(1) == b'':
+                lock.write(b'0');lock.flush()
+            lock.seek(0)
+            import os
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise RuntimeError('another task writer is active') from None
+        yield lock
+    finally:
+        lock.close()
+
+
 class CareerStore:
     def __init__(self, task: Task, *, source_compression=True):
         if type(source_compression) is not bool:raise ValueError('invalid source compression option')
@@ -130,23 +161,8 @@ class CareerStore:
         self.task = task
         task.require_frozen()
         task.check(4 * 1024**2)
-        self.lock = (task.root / "writer.lock").open("a+b")
-        try:
-            self.lock.seek(0)
-            if self.lock.read(1) == b"":
-                self.lock.write(b"0")
-                self.lock.flush()
-            self.lock.seek(0)
-            import os
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(self.lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self.lock.close()
-            raise RuntimeError("another task writer is active")
+        self._writer_context = exclusive_writer(task)
+        self.lock = self._writer_context.__enter__()
         # The OS lock above excludes other writers. Short read-only monitoring
         # transactions can still hold SQLite's shared lock during a commit;
         # wait at most five seconds instead of aborting an otherwise valid batch.
@@ -169,7 +185,7 @@ class CareerStore:
         seeds=getattr(self,'_event_codec_seeds',None)
         if seeds is not None:seeds.clear()
         self.db.close()
-        self.lock.close()
+        self._writer_context.__exit__(None,None,None)
 
     def start(self, source: str) -> None:
         self.task.require_frozen()

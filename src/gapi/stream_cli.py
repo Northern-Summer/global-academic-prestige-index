@@ -13,12 +13,13 @@ from .task import Task
 
 
 def register(sub):
-    projections=sub.add_parser('repack-projection-pages',help='losslessly block-pack private derivative payloads under the writer lock')
+    projections=sub.add_parser('repack-projection-pages',help='losslessly pack private derivative payloads under the writer lock')
     projections.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     projections.add_argument('--table',choices=('easy_careers','easy_full_delta'),default='easy_careers')
     projections.add_argument('--after-row',type=int,default=0)
     projections.add_argument('--max-rows',type=int,default=10000)
     projections.add_argument('--max-seconds',type=float,default=60)
+    projections.add_argument('--codec',choices=('blocks','dictionary'),default='blocks')
     repack=sub.add_parser('repack-event-pages',help='rebalance event pages without changing stored rows or rowids')
     repack.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     repack.add_argument('--after-rowid',type=int,default=0)
@@ -113,6 +114,7 @@ def register(sub):
             parser.add_argument('--publication-policy',type=Path)
             parser.add_argument('--freeze-format',choices=('sqlite','rows'),default='sqlite')
             parser.add_argument('--freeze-base',help='retained full HASH.rows baseline for bounded row differences')
+            parser.add_argument('--allow-delta-base',action='store_true',help='explicitly permit a retained delta base; dependency depth capped at four')
             parser.add_argument('--compress-snapshot',action='store_true',help='keep a hash-bound gzip aggregate in the repository; build serves decoded JSON')
             group=parser.add_mutually_exclusive_group()
             group.add_argument('--freeze-input',action='store_true')
@@ -190,8 +192,9 @@ def execute_task(task, args):
                           max_seconds=args.max_seconds,
                           progress=lambda r:print(json.dumps({'bulk_progress':r}),flush=True))
         elif args.command == 'repack-projection-pages':
-            from .projection_storage import repack
-            result=repack(store,table=args.table,after_row=args.after_row,
+            from .projection_storage import repack, repack_dictionary
+            repacker=repack_dictionary if args.codec=='dictionary' else repack
+            result=repacker(store,table=args.table,after_row=args.after_row,
                           max_rows=args.max_rows,max_seconds=args.max_seconds)
         elif args.command == 'repack-event-pages':
             from .event_storage import repack_event_pages
@@ -300,9 +303,11 @@ def execute_task(task, args):
             fresh_rows=args.freeze_input and getattr(args,'freeze_format','sqlite')=='rows'
             base=getattr(args,'freeze_base',None)
             if base and not fresh_rows:raise ValueError('freeze-base requires freeze-input with row format')
+            allow_delta=getattr(args,'allow_delta_base',False)
+            if allow_delta and (not fresh_rows or not base):raise ValueError('allow-delta-base requires a fresh row freeze and explicit base')
             if fresh_rows:
                 from .row_snapshot import freeze_rows
-                snapshot=freeze_rows(store,base_filename=base)
+                snapshot=freeze_rows(store,base_filename=base,allow_delta_base=allow_delta)
             else:snapshot=freeze_input(store,scope='global-ranking') if args.freeze_input else None
             if args.frozen_input:
                 import re

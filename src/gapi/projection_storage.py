@@ -17,6 +17,9 @@ from threading import RLock
 
 LEGACY_MAGIC = b'GAPIp1\0'
 MAGIC = b'GAPIp2\0'
+DICTIONARY_MAGIC = b'GAPIp3\0'
+DICTIONARY_BYTES = 8192
+DICTIONARY_HEADER = len(DICTIONARY_MAGIC)+32+4
 TABLE = 'easy_projection_blocks'
 DDL = f'CREATE TABLE IF NOT EXISTS {TABLE}(digest BLOB PRIMARY KEY, packed BLOB NOT NULL)'
 MAX_ROWS = 128
@@ -138,6 +141,7 @@ def referenced_plain(db,value):
 
 def original_payload(db,value):
     if not isinstance(value,bytes):raise ValueError('projection payload must be bytes')
+    if value.startswith(DICTIONARY_MAGIC):return zlib.compress(dictionary_plain(db,value),6)
     if not value.startswith((MAGIC,LEGACY_MAGIC)):return value
     return zlib.compress(referenced_plain(db,value),6)
 
@@ -146,15 +150,52 @@ def plain_payload(db,value):
     # Preserve the pre-existing legacy reader contract; the stricter bound is
     # for newly admitted blocks, not a reclassification of retained records.
     if value.startswith((MAGIC,LEGACY_MAGIC)):return referenced_plain(db,value)
+    if value.startswith(DICTIONARY_MAGIC):return dictionary_plain(db,value)
     return zlib.decompress(value)
 
 
-def repack(store,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=60):
-    """Resume in primary-key order; each <=128-row replacement is atomic.
+@_bounded_block_cache
+def decode_dictionary(key,packed,legacy=False):
+    raw=inflate(packed,DICTIONARY_BYTES)
+    if not raw or hashlib.sha256(raw).digest()!=key:
+        raise ValueError('projection dictionary identity mismatch')
+    return (raw,)
 
-    Freed SQLite pages are reusable capacity, not reclaimed filesystem bytes.
-    The caller owns CareerStore's sole writer and must not hold a transaction.
-    """
+
+def dictionary_plain(db,value):
+    header=DICTIONARY_HEADER
+    if not isinstance(value,bytes) or not value.startswith(DICTIONARY_MAGIC) or not header<len(value)<=MAX_ROW+header+65536:
+        raise ValueError('invalid projection dictionary framing')
+    key=value[len(DICTIONARY_MAGIC):len(DICTIONARY_MAGIC)+32]
+    size=int.from_bytes(value[header-4:header],'big')
+    if not 0<size<=MAX_ROW:raise ValueError('projection dictionary row bound')
+    reader=db.cursor();reader.row_factory=None
+    try:row=reader.execute(f'SELECT packed FROM {TABLE} WHERE digest=?',(key,)).fetchone()
+    finally:reader.close()
+    if row is None:raise ValueError('projection dictionary missing')
+    dictionary=decode_dictionary(key,row[0])[0]
+    decoder=zlib.decompressobj(zdict=dictionary)
+    try:raw=decoder.decompress(value[header:],MAX_ROW+1)
+    except zlib.error as exc:raise ValueError('invalid dictionary projection compression') from exc
+    if len(raw)!=size or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError('invalid projection dictionary row framing')
+    return raw
+
+
+def dictionary_payload(original,dictionary):
+    """One independently decoded row; retain legacy bytes when not beneficial."""
+    if not isinstance(dictionary,bytes) or not 0<len(dictionary)<=DICTIONARY_BYTES:
+        raise ValueError('invalid projection dictionary size')
+    raw=inflate(original,MAX_ROW)
+    if zlib.compress(raw,6)!=original:
+        raise ValueError('legacy projection codec is not exactly reversible')
+    encoder=zlib.compressobj(6,zdict=dictionary)
+    packed=(DICTIONARY_MAGIC+hashlib.sha256(dictionary).digest()+len(raw).to_bytes(4,'big')
+            +encoder.compress(raw)+encoder.flush())
+    return packed if len(packed)+16<len(original) else original
+
+
+def _validate_repack(store,table,after_row,max_rows,max_seconds):
     if table not in ('easy_careers','easy_full_delta'):raise ValueError('unsupported projection table')
     if type(after_row) is not int or after_row<0:raise ValueError('invalid projection cursor')
     if type(max_rows) is not int or not 1<=max_rows<=100000:
@@ -167,6 +208,79 @@ def repack(store,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=6
     for (name,) in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
         if any(r[2]==table for r in store.db.execute('PRAGMA foreign_key_list('+quoted(name)+')')):
             raise ValueError('projection repack forbids incoming foreign keys')
+
+
+def projection_dictionary(db,table='easy_careers',*,max_bytes=4096):
+    """Stable, bounded seed from original row content, independent of encoding."""
+    if table not in ('easy_careers','easy_full_delta'):raise ValueError('unsupported projection table')
+    if type(max_bytes) is not int or not 0<max_bytes<=DICTIONARY_BYTES:
+        raise ValueError('invalid projection dictionary size')
+    dictionary=b''
+    reader=db.cursor();reader.row_factory=None
+    try:
+        for (value,) in reader.execute(f'SELECT payload FROM {table} ORDER BY row_number LIMIT 128'):
+            dictionary=(dictionary+plain_payload(db,value))[-max_bytes:]
+    finally:reader.close()
+    if not dictionary:raise ValueError('no projection rows for dictionary')
+    return dictionary
+
+
+def repack_dictionary(store,dictionary=None,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=60):
+    """Bounded, resumable row replacement using the existing block-object owner.
+
+    Does not migrate old block references, drop indexes or copy the database.
+    Exact legacy BLOBs are verified inside each <=128-row commit. Freed pages
+    are reusable by ingestion; the physical database file does not shrink.
+    """
+    _validate_repack(store,table,after_row,max_rows,max_seconds)
+    if dictionary is None:dictionary=projection_dictionary(store.db,table)
+    if not isinstance(dictionary,bytes) or not 0<len(dictionary)<=DICTIONARY_BYTES:
+        raise ValueError('invalid projection dictionary size')
+    key=hashlib.sha256(dictionary).digest();packed_dictionary=zlib.compress(dictionary,6)
+    before=store.db.execute('PRAGMA freelist_count').fetchone()[0]
+    pages_before=store.db.execute('PRAGMA page_count').fetchone()[0]
+    cursor=after_row;scanned=changed=saved=0;deadline=time.monotonic()+max_seconds
+    while scanned<max_rows and time.monotonic()<deadline:
+        store.task.check_memory()
+        rows=store.db.execute(f'SELECT row_number,person,row_sha256,payload AS projected_payload FROM {table} WHERE row_number>? ORDER BY row_number LIMIT ?',
+            (cursor,min(MAX_ROWS,max_rows-scanned))).fetchall()
+        if not rows:break
+        converted=[]
+        for row in rows:
+            if row[3].startswith((MAGIC,LEGACY_MAGIC,DICTIONARY_MAGIC)):continue
+            # Oversized legacy rows keep their pre-existing reader contract.
+            if len(row[3])>8192:continue
+            replacement=dictionary_payload(row[3],dictionary)
+            if replacement!=row[3]:converted.append((row,(*row[:3],replacement)))
+        if converted:
+            store.task.check(4*1024**2)
+            with store.member('storage-dictionary-repack',table):
+                store.db.execute(DDL)
+                store.db.execute(f'INSERT OR IGNORE INTO {TABLE} VALUES(?,?)',(key,packed_dictionary))
+                store.db.executemany(f'DELETE FROM {table} WHERE row_number=?',[(old[0],) for old,_ in converted])
+                store.db.executemany(f'INSERT INTO {table} VALUES(?,?,?,?)',[new for _,new in converted])
+                for old,_ in converted:
+                    actual=store.db.execute(f'SELECT row_number,person,row_sha256,payload AS projected_payload FROM {table} WHERE row_number=?',(old[0],)).fetchone()
+                    if (*actual[:3],original_payload(store.db,actual[3]))!=tuple(old):
+                        raise ValueError('dictionary replacement changed row identity')
+                store.task.check_memory()
+            changed+=len(converted);saved+=sum(len(old[3])-len(new[3]) for old,new in converted)
+        scanned+=len(rows);cursor=rows[-1][0]
+    free=store.db.execute('PRAGMA freelist_count').fetchone()[0]
+    pages=store.db.execute('PRAGMA page_count').fetchone()[0]
+    return {'table':table,'scanned_rows':scanned,'repacked_rows':changed,'after_row':cursor,
+        'dictionary_sha256':key.hex(),'payload_saving_bytes':saved,
+        'net_reusable_bytes':((pages_before-before)-(pages-free))*store.db.execute('PRAGMA page_size').fetchone()[0],
+        'physical_file_bytes_reclaimed':0,'logical_row_bytes_unchanged':True}
+
+
+def repack(store,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=60):
+    """Resume in primary-key order; each <=128-row replacement is atomic.
+
+    Freed SQLite pages are reusable capacity, not reclaimed filesystem bytes.
+    The caller owns CareerStore's sole writer and must not hold a transaction.
+    """
+    _validate_repack(store,table,after_row,max_rows,max_seconds)
     deadline=time.monotonic()+max_seconds;cursor=after_row;scanned=changed=saved=blocks=0
     free_before=store.db.execute('PRAGMA freelist_count').fetchone()[0]
     while scanned<max_rows and time.monotonic()<deadline:
@@ -176,7 +290,7 @@ def repack(store,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=6
         if not rows:break
         candidates=[];size=0
         for row in rows:
-            if row[3].startswith(MAGIC):continue
+            if row[3].startswith((MAGIC,DICTIONARY_MAGIC)):continue
             original=original_payload(store.db,row[3])
             raw=inflate(original,MAX_ROW)
             if size+4+len(raw)>MAX_BLOCK:break
@@ -203,7 +317,7 @@ def repack(store,*,table='easy_careers',after_row=0,max_rows=10000,max_seconds=6
                             raise ValueError('projection page replacement changed row identity')
                 changed+=len(candidates);saved+=benefit;blocks+=1
         # If a decoded block fills early, remaining rows must be revisited.
-        last=candidates[-1][0] if candidates and len(candidates)<sum(not r[3].startswith(MAGIC) for r in rows) else rows[-1][0]
+        last=candidates[-1][0] if candidates and len(candidates)<sum(not r[3].startswith((MAGIC,DICTIONARY_MAGIC)) for r in rows) else rows[-1][0]
         scanned+=sum(r[0]<=last for r in rows);cursor=last
     free_after=store.db.execute('PRAGMA freelist_count').fetchone()[0]
     return {'table':table,'scanned_rows':scanned,'repacked_rows':changed,'after_row':cursor,
@@ -224,9 +338,10 @@ def prune_unreferenced(store):
     referenced=set()
     for table in ('easy_careers','easy_full_delta'):
         if not store.db.execute("SELECT 1 FROM sqlite_master WHERE name=?",(table,)).fetchone():continue
-        for key,size in store.db.execute(f'''SELECT substr(payload,?,32),length(payload) FROM {table}
-                WHERE substr(payload,1,?) IN (?,?)''',(len(MAGIC)+1,len(MAGIC),MAGIC,LEGACY_MAGIC)):
-            if size!=REFERENCE_SIZE:raise ValueError('invalid projection reference framing')
+        for key,size,magic in store.db.execute(f'''SELECT substr(payload,?,32),length(payload),substr(payload,1,7) FROM {table}
+                WHERE substr(payload,1,?) IN (?,?,?)''',(len(MAGIC)+1,len(MAGIC),MAGIC,LEGACY_MAGIC,DICTIONARY_MAGIC)):
+            valid=(DICTIONARY_HEADER<size<=MAX_ROW+65536+DICTIONARY_HEADER) if magic==DICTIONARY_MAGIC else size==REFERENCE_SIZE
+            if not valid:raise ValueError('invalid projection reference framing')
             referenced.add(key)
             if len(referenced)>100000:raise ValueError('projection live-block set exceeds bound')
         store.task.check_memory()

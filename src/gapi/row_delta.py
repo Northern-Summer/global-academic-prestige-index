@@ -1,8 +1,9 @@
-"""Bounded, lossless row-stream differences against one immutable full baseline.
+"""Bounded, lossless row-stream differences against immutable retained inputs.
 
 The delta is a storage representation, never a scientific data correction. Both
-baseline and reconstructed target hashes must match. Chains are deliberately not
-accepted: every delta depends on exactly one full, independently retained input.
+baseline and reconstructed target hashes must match. Legacy /1 and /2 retain
+their full-baseline contract. Explicit /3 archives may reference a retained
+delta, with a hard dependency depth and cycle checks; no implicit chains.
 """
 from collections import deque
 import base64
@@ -16,6 +17,8 @@ from .task import canonical
 
 FORMAT='gapi-private-ranking-row-delta/1'
 FORMAT_V2='gapi-private-ranking-row-delta/2'
+FORMAT_V3='gapi-private-ranking-row-delta/3'
+MAX_DEPTH=4
 WINDOW=32
 WINDOW_BYTES=4*1024**2
 MAX_RUN=1000000
@@ -69,28 +72,75 @@ def restore_addition(record):
     return value
 
 
-def baseline(task, filename):
+def baseline(task, filename, *, allow_delta=False):
     if not isinstance(filename,str) or not re.fullmatch(r'[a-f0-9]{64}\.rows',filename):
         raise ValueError('delta baseline requires a content-addressed row filename')
     folder=task.root/'frozen-inputs'
     if folder.is_symlink() or getattr(folder,'is_junction',lambda:False)():
         raise ValueError('linked snapshot directory forbidden')
     path=folder/(filename+'.xz')
+    if allow_delta and not path.exists() and not path.is_symlink():
+        path=folder/(filename+'.delta.xz')
     if path.is_symlink() or not path.is_file():
         raise ValueError('delta requires a retained full row baseline; chains forbidden')
     return path
 
 
-def decoded_lines(path, task):
+def dependency_depth(path,task,ancestors=()):
+    """Inspect only bounded headers; full byte identities are checked on replay."""
+    from .row_snapshot import _packed_lines
+    identity=str(path.absolute())
+    if path.is_symlink() or identity in ancestors:raise ValueError('row delta dependency cycle or link')
+    if not path.name.endswith('.rows.delta.xz'):return 0
+    if len(ancestors)>=MAX_DEPTH:raise ValueError('row delta dependency depth exceeded')
+    records=_packed_lines(path,task)
+    try:header=json.loads(next(records))
+    except StopIteration:raise ValueError('incomplete row delta') from None
+    finally:records.close()
+    if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2,FORMAT_V3):
+        raise ValueError('unsupported row delta')
+    base=baseline(task,header.get('base'),allow_delta=header['format']==FORMAT_V3)
+    return 1+dependency_depth(base,task,(*ancestors,identity))
+
+
+def _rebase_graph_depth(task,path,base_path):
+    """Protect all existing descendants, not only the input being replaced."""
+    from .row_snapshot import _packed_lines
+    edges={}
+    for candidate in sorted(path.parent.glob('*.rows.delta.xz')):
+        if len(edges)>=10000:raise ValueError('row delta dependency inventory exceeds bound')
+        if candidate.is_symlink():raise ValueError('linked row delta dependency')
+        records=_packed_lines(candidate,task)
+        try:header=json.loads(next(records))
+        except StopIteration:raise ValueError('incomplete row delta') from None
+        finally:records.close()
+        if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2,FORMAT_V3):
+            raise ValueError('unsupported row delta')
+        edges[candidate]=baseline(task,header.get('base'),allow_delta=header['format']==FORMAT_V3)
+    edges[path]=base_path
+    def depth(node,ancestors=()):
+        if node in ancestors:raise ValueError('row delta dependency cycle')
+        if node not in edges:return 0
+        if len(ancestors)>=MAX_DEPTH:raise ValueError('row delta dependent depth exceeded')
+        return 1+depth(edges[node],(*ancestors,node))
+    for node in edges:depth(node)
+    return depth(path)
+
+
+def decoded_lines(path, task, ancestors=()):
     from .row_snapshot import _packed_lines, lines, MAX_LINE
+    identity=str(path.absolute())
+    if path.is_symlink() or identity in ancestors:raise ValueError('row delta dependency cycle or link')
+    if len(ancestors)>=MAX_DEPTH:raise ValueError('row delta dependency depth exceeded')
     records=iter(_packed_lines(path,task,max_line=MAX_LINE+1))
     base=None
     try:
         header=json.loads(next(records))
-        if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2):
+        if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2,FORMAT_V3):
             raise ValueError('unsupported row delta')
-        base_path=baseline(task,header.get('base'))
-        base=iter(lines(base_path,task))
+        base_path=baseline(task,header.get('base'),allow_delta=header['format']==FORMAT_V3)
+        base=iter(decoded_lines(base_path,task,(*ancestors,identity))
+                  if base_path.name.endswith('.rows.delta.xz') else lines(base_path,task))
         old_hash=hashlib.sha256();new_hash=hashlib.sha256();total=0;ended=False
         def consume():
             value=next(base,None)
@@ -103,7 +153,7 @@ def decoded_lines(path, task):
                 values=(record[1:],)
                 if len(values[0])>MAX_LINE or values[0]==b'\n':
                     raise ValueError('invalid delta addition')
-            elif record.startswith(b'E') and header['format']==FORMAT_V2:
+            elif record.startswith(b'E') and header['format'] in (FORMAT_V2,FORMAT_V3):
                 values=(restore_addition(record),)
             elif re.fullmatch(rb'[CS] [1-9][0-9]{0,6}\n',record):
                 count=int(record[2:])
@@ -174,14 +224,8 @@ def commands(old, new):
             yield 'A',right.popleft()
 
 
-def freeze_delta(store, filename, *, compression_preset=3):
-    from .row_snapshot import FORMAT as ROW_FORMAT, inspect, ranking_lines, lines, validate_compression_preset
-    validate_compression_preset(compression_preset)
-    task=store.task;initial_used=task.check(1024**2);task.check_memory()
-    if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
-    base_path=baseline(task,filename);folder=base_path.parent
-    temporary=folder/'normalized-row-delta.xz.partial'
-    created=False;old=None;new=None
+def _emit_delta(old,new,base_path,emit,target_format):
+    """One command/identity owner for fresh freezes and immutable rebasing."""
     old_hash=hashlib.sha256();new_hash=hashlib.sha256();total=0
     def observed(source,sha,target=False):
         nonlocal total
@@ -189,6 +233,35 @@ def freeze_delta(store, filename, *, compression_preset=3):
             sha.update(line)
             if target:total+=len(line)
             yield line
+    emit(canonical({'format':target_format,'base':base_path.name[:64]+'.rows'})+b'\n')
+    operation=None;run=0
+    def flush():
+        nonlocal run
+        if run:emit(f'{operation} {run}\n'.encode());run=0
+    for op,value in commands(iter(observed(old,old_hash)),iter(observed(new,new_hash,True))):
+        if op=='A':flush();operation=None;emit(addition_record(value))
+        else:
+            if operation!=op or run==MAX_RUN:flush()
+            operation=op;run+=1
+    flush()
+    if old_hash.hexdigest()!=base_path.name[:64]:raise ValueError('row baseline identity mismatch')
+    checksum=new_hash.hexdigest()
+    emit(b'F '+canonical({'sha256':checksum,'bytes':total})+b'\n')
+    return checksum,total
+
+
+def freeze_delta(store, filename, *, compression_preset=3, allow_delta_base=False):
+    from .row_snapshot import FORMAT as ROW_FORMAT, inspect, ranking_lines, lines, validate_compression_preset
+    validate_compression_preset(compression_preset)
+    if type(allow_delta_base) is not bool:raise ValueError('allow_delta_base must be boolean')
+    task=store.task;initial_used=task.check(1024**2);task.check_memory()
+    if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
+    base_path=baseline(task,filename,allow_delta=allow_delta_base);folder=base_path.parent
+    depth=dependency_depth(base_path,task)+1
+    if depth>MAX_DEPTH:raise ValueError('row delta dependency depth exceeded')
+    target_format=FORMAT_V3 if base_path.name.endswith('.rows.delta.xz') else FORMAT_V2
+    temporary=folder/'normalized-row-delta.xz.partial'
+    created=False;old=None;new=None
     try:
         with temporary.open('xb') as output:
             created=True
@@ -202,22 +275,8 @@ def freeze_delta(store, filename, *, compression_preset=3):
                 packed=encoder.compress(value)
                 if packed:
                     write(packed)
-            emit(canonical({'format':FORMAT_V2,'base':filename})+b'\n')
             old=lines(base_path,task);new=ranking_lines(store)
-            operation=None;run=0
-            def flush():
-                nonlocal run
-                if run:emit(f'{operation} {run}\n'.encode());run=0
-            for op,value in commands(iter(observed(old,old_hash)),iter(observed(new,new_hash,True))):
-                if op=='A':
-                    flush();operation=None;emit(addition_record(value))
-                else:
-                    if operation!=op or run==MAX_RUN:flush()
-                    operation=op;run+=1
-            flush()
-            if old_hash.hexdigest()!=base_path.name[:64]:raise ValueError('row baseline identity mismatch')
-            checksum=new_hash.hexdigest()
-            emit(b'F '+canonical({'sha256':checksum,'bytes':total})+b'\n')
+            checksum,total=_emit_delta(old,new,base_path,emit,target_format)
             packed=encoder.flush();write(packed)
             output.flush();os.fsync(output.fileno())
         # Name-independent full reconstruction validates both inputs before promotion.
@@ -233,13 +292,16 @@ def freeze_delta(store, filename, *, compression_preset=3):
         if chosen!=full:
             from .row_snapshot import _packed_lines
             records=_packed_lines(chosen,task)
-            try:actual_format=json.loads(next(records))['format']
+            try:
+                actual_header=json.loads(next(records));actual_format=actual_header['format']
             finally:records.close()
         result={'sha256':checksum,'filename':checksum+'.rows','bytes':total,
             'packed_bytes':chosen.stat().st_size,'format':actual_format,
             'contains_personal_input':True,'publicly_bundled':False,
             'restoration_requires_separate_resource_admission':True}
-        if chosen!=full:result.update(base_filename=filename,logical_format=ROW_FORMAT)
+        if chosen!=full:
+            result.update(base_filename=actual_header['base'],logical_format=ROW_FORMAT)
+            if actual_format==FORMAT_V3:result['dependency_depth']=dependency_depth(chosen,task)
         return result
     finally:
         if old is not None:old.close()
@@ -253,6 +315,81 @@ def inspect_delta(path,task):
         sha.update(line);total+=len(line);count+=1
     if count<2:raise ValueError('incomplete reconstructed row archive')
     return sha.hexdigest(),total
+
+
+def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=False):
+    """Atomically replace one retained delta after exact, complete reconstruction.
+
+    Keep every logical input and dependency. Caller owns writer exclusion;
+    the new compressed stream must fit beside its predecessor within budget.
+    No live database rows or old public manifests are modified.
+    """
+    from .frozen_input import snapshot_path,file_hash
+    from .row_snapshot import _packed_lines,lines,validate_compression_preset
+    validate_compression_preset(compression_preset)
+    if type(dry_run) is not bool:raise ValueError('dry_run must be boolean')
+    if store.db.in_transaction:raise ValueError('cannot rebase unfinished transaction')
+    path=snapshot_path(store,filename).with_suffix('.rows.delta.xz')
+    if not filename.endswith('.rows') or not path.is_file():raise ValueError('retained row delta required')
+    task=store.task;base_path=baseline(task,base_filename,allow_delta=True)
+    depth=_rebase_graph_depth(task,path,base_path)
+    if depth>MAX_DEPTH:raise ValueError('row delta dependency depth exceeded')
+    records=_packed_lines(path,task)
+    try:header=json.loads(next(records))
+    except StopIteration:raise ValueError('incomplete row delta') from None
+    finally:records.close()
+    if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2,FORMAT_V3):
+        raise ValueError('unsupported row delta')
+    if header.get('format')==FORMAT_V3 and header.get('base')==base_filename:
+        if inspect_delta(path,task)[0]!=filename[:64]:raise ValueError('retained delta identity mismatch')
+        return {'filename':filename,'already_rebased':True,'saved_bytes':0,'dependency_depth':depth}
+    before=path.stat().st_size;original_hash=file_hash(path)
+    if dry_run:
+        encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=compression_preset);written=0
+        def measure(value):
+            nonlocal written
+            written+=len(encoder.compress(value));task.check_memory()
+        old=lines(base_path,task);new=lines(path,task)
+        try:
+            checksum,total=_emit_delta(old,new,base_path,measure,
+                FORMAT_V3 if base_path.name.endswith('.delta.xz') else FORMAT_V2)
+            written+=len(encoder.flush())
+        finally:old.close();new.close()
+        if checksum!=filename[:64] or file_hash(path)!=original_hash:raise ValueError('retained delta identity mismatch')
+        return {'filename':filename,'base_filename':base_filename,'dry_run':True,
+            'sha256':checksum,'bytes':total,'candidate_bytes':written,'previous_packed_bytes':before,
+            'estimated_saved_bytes':before-written,'dependency_depth':depth}
+    initial=task.check(65536);task.check_memory()
+    temporary=path.with_suffix('.xz.rebase.partial');created=False;old=new=None
+    target_format=FORMAT_V3 if base_path.name.endswith('.delta.xz') else FORMAT_V2
+    try:
+        with temporary.open('xb') as output:
+            created=True;written=0
+            encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=compression_preset)
+            def write(value):
+                nonlocal written
+                task.check(len(value)+65536,minimum_used=initial+written);task.check_memory()
+                output.write(value);written+=len(value)
+            def emit(value):
+                packed=encoder.compress(value)
+                if packed:write(packed)
+            old=lines(base_path,task);new=lines(path,task)
+            checksum,total=_emit_delta(old,new,base_path,emit,target_format)
+            if checksum!=filename[:64]:raise ValueError('retained delta identity mismatch')
+            write(encoder.flush());output.flush();os.fsync(output.fileno())
+        if inspect_delta(temporary,task)!=(checksum,total):raise ValueError('rebased reconstruction mismatch')
+        if file_hash(path)!=original_hash:raise ValueError('retained delta changed during rebase')
+        after=temporary.stat().st_size
+        if after>=before:return {'filename':filename,'retained_predecessor':True,'saved_bytes':0}
+        os.replace(temporary,path)
+        return {'filename':filename,'base_filename':base_filename,'sha256':checksum,'bytes':total,
+            'previous_packed_bytes':before,'packed_bytes':after,'saved_bytes':before-after,
+            'previous_storage_sha256':original_hash,'storage_sha256':file_hash(path),
+            'format':target_format,'dependency_depth':depth,'logical_identity_unchanged':True}
+    finally:
+        if old is not None:old.close()
+        if new is not None:new.close()
+        if created:temporary.unlink(missing_ok=True)
 
 
 def repack_delta(store, filename):
@@ -277,7 +414,7 @@ def repack_delta(store, filename):
     temporary=path.with_suffix('.xz.repack.partial');created=False
     try:
         header=json.loads(next(records))
-        if header['format']==FORMAT_V2:
+        if header['format'] in (FORMAT_V2,FORMAT_V3):
             return {'filename':filename,'sha256':expected[0],'bytes':expected[1],
                     'already_repacked':True,'saved_bytes':0,'packed_bytes':before}
         if header['format']!=FORMAT:raise ValueError('unsupported retained delta')

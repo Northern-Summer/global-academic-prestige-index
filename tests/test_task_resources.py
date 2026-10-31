@@ -15,6 +15,25 @@ class ResourceTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_file_maintenance_reuses_writer_lock_without_database_allowance(self):
+        from gapi.career_store import CareerStore,exclusive_writer
+        from gapi.task import BudgetStop
+        s=self.store(archive([]));task=s.task
+        with self.assertRaisesRegex(RuntimeError,'another task writer'):
+            with exclusive_writer(task):pass
+        s.close()
+        used=task.config['budget_bytes']-task.config['reserve_bytes']-512*1024
+        with patch.object(task,'used',return_value=used):
+            with self.assertRaises(BudgetStop):CareerStore(task)
+            with patch('gapi.career_store.sqlite3.connect',side_effect=AssertionError('unexpected database open')):
+                with exclusive_writer(task):
+                    with self.assertRaisesRegex(RuntimeError,'another task writer'):
+                        with exclusive_writer(task):pass
+                with exclusive_writer(task):pass
+        with self.assertRaisesRegex(ValueError,'maintenance failed'):
+            with exclusive_writer(task):raise ValueError('maintenance failed')
+        with exclusive_writer(task):pass
+
     def test_small_source_transaction_uses_enforced_available_capacity(self):
         from gapi.task import BudgetStop
         s=self.store(archive([]))

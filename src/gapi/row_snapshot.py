@@ -115,11 +115,12 @@ def validate_compression_preset(preset):
     return preset
 
 
-def freeze_rows(store, *, base_filename=None, compression_preset=3):
+def freeze_rows(store, *, base_filename=None, compression_preset=3, allow_delta_base=False):
     validate_compression_preset(compression_preset)
+    if type(allow_delta_base) is not bool:raise ValueError('allow_delta_base must be boolean')
     if base_filename is not None:
         from .row_delta import freeze_delta
-        return freeze_delta(store,base_filename,compression_preset=compression_preset)
+        return freeze_delta(store,base_filename,compression_preset=compression_preset,allow_delta_base=allow_delta_base)
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
     task = store.task;initial_used=task.check(1024**2);task.check_memory()
     folder = task.root/'frozen-inputs'
