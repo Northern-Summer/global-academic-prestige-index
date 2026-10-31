@@ -1,0 +1,40 @@
+{
+  "scope": "bounded ordered schema-only dictionary feasibility, not representative",
+  "samples": [
+    {
+      "lower": 0,
+      "rows": 1000,
+      "payload_bytes": 167015,
+      "dictionary_bytes": 137718,
+      "saved": 29297,
+      "changed": 1000
+    },
+    {
+      "lower": 500000,
+      "rows": 1000,
+      "payload_bytes": 166566,
+      "dictionary_bytes": 137086,
+      "saved": 29480,
+      "changed": 999
+    },
+    {
+      "lower": 1500000,
+      "rows": 1000,
+      "payload_bytes": 165373,
+      "dictionary_bytes": 137071,
+      "saved": 28302,
+      "changed": 1000
+    },
+    {
+      "lower": 4000000,
+      "rows": 1000,
+      "payload_bytes": 161994,
+      "dictionary_bytes": 132781,
+      "saved": 29213,
+      "changed": 1000
+    }
+  ],
+  "original_compressed_bytes_reconstruct_exactly": true,
+  "no_private_samples_saved": true,
+  "migration_performed": false
+}

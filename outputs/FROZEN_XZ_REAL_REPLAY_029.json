@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "snapshot_filename": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f.sqlite",
+  "public_score_sha256": "90463d6a2aa66f8c39ba268d7f3f0652de756306d318e1bae878352b97074b5e",
+  "matches_published": true,
+  "repeat_preserves_packed_mtime": true,
+  "reader_temporaries_remaining": 0,
+  "seconds": 25.531,
+  "logical_personal_input_exported": false
+}

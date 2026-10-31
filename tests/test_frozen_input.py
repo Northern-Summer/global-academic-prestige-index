@@ -14,6 +14,60 @@ class FrozenInputTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_xz_repack_preserves_frozen_scores_identity_and_repeat_mtime(self):
+        from gapi.frozen_input import repack_snapshot
+        s=self.store(archive([]))
+        try:
+            analysis.AnalysisTests.seed(self,s)
+            with s.db:
+                s.db.execute('CREATE TABLE test_padding(data BLOB)')
+                s.db.execute('INSERT INTO test_padding VALUES(zeroblob(2097152))')
+            expected=canonical(rank_global(s,public=True));snapshot=freeze_input(s)
+            compress_snapshot(s,snapshot['filename'])
+            result=repack_snapshot(s,snapshot['filename'])
+            self.assertGreater(result['saved_bytes'],0)
+            path=s.task.root/'frozen-inputs'/snapshot['filename'];packed=path.with_suffix('.sqlite.xz')
+            self.assertFalse(path.exists());self.assertFalse(path.with_suffix('.sqlite.gz').exists())
+            self.assertTrue(verified_packed_snapshot(s,packed));mtime=packed.stat().st_mtime_ns
+            self.assertTrue(repack_snapshot(s,snapshot['filename'])['already_repacked'])
+            self.assertEqual(packed.stat().st_mtime_ns,mtime)
+            self.assertTrue(compress_snapshot(s,snapshot['filename'])['already_compressed'])
+            self.assertEqual(freeze_input(s),snapshot)
+            with frozen_reader(s,snapshot['filename']):
+                self.assertEqual(canonical(rank_global(s,public=True)),expected)
+            self.assertEqual(list(path.parent.glob('frozen-read-*')),[])
+        finally:s.close()
+
+    def test_xz_repack_failure_corruption_truncation_and_decoder_memory_bound(self):
+        import lzma
+        from unittest.mock import patch
+        from gapi.frozen_input import repack_snapshot,_unpack
+        s=self.store(archive([]))
+        try:
+            snapshot=freeze_input(s);compress_snapshot(s,snapshot['filename'])
+            path=s.task.root/'frozen-inputs'/snapshot['filename'];gz=path.with_suffix('.sqlite.gz')
+            before=gz.read_bytes()
+            with patch.object(s.task,'check',side_effect=BudgetStop('full')),self.assertRaises(BudgetStop):
+                repack_snapshot(s,snapshot['filename'])
+            self.assertEqual(gz.read_bytes(),before);self.assertFalse(list(path.parent.glob('*.partial')))
+            # A predecessor's unfinished staging belongs to recovery, not cleanup.
+            temporary=path.with_suffix('.sqlite.xz.partial');temporary.write_bytes(b'recovery')
+            with self.assertRaises(FileExistsError):repack_snapshot(s,snapshot['filename'])
+            self.assertEqual(temporary.read_bytes(),b'recovery');temporary.unlink()
+            xz=path.with_suffix('.sqlite.xz')
+            raw=__import__('gzip').decompress(before)
+            for content,error in ((lzma.compress(raw,preset=3)[:-5],EOFError),
+                                  (lzma.compress(raw,preset=3)+b'trailing',ValueError),
+                                  (lzma.compress(b'different',preset=3),ValueError)):
+                xz.write_bytes(content)
+                with self.assertRaises(error):repack_snapshot(s,snapshot['filename'])
+                self.assertEqual(gz.read_bytes(),before)
+                self.assertFalse(verified_packed_snapshot(s,xz))
+            xz.write_bytes(lzma.compress(raw,filters=[{'id':lzma.FILTER_LZMA2,'dict_size':64*1024**2}]))
+            with self.assertRaises(lzma.LZMAError):_unpack(s.task,xz)
+            self.assertFalse(verified_packed_snapshot(s,xz))
+        finally:s.close()
+
     def test_ranking_projection_replays_scores_preserves_raw_payload_and_is_idempotent(self):
         import json
         from gapi.event_storage import pack

@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import gzip
+import lzma
 import tempfile
 from .event_storage import configure_reader
 from contextlib import contextmanager,closing
@@ -25,34 +26,105 @@ def snapshot_path(store, filename):
     if folder.is_symlink() or getattr(folder,'is_junction',lambda:False)():
         raise ValueError('linked snapshot directory forbidden')
     path=folder/filename
-    for candidate in (path,path.with_suffix('.sqlite.gz')):
+    for candidate in (path,path.with_suffix('.sqlite.gz'),path.with_suffix('.sqlite.xz')):
         if candidate.is_symlink():raise ValueError('linked snapshot forbidden')
     return path
 
 
+def _snapshot_chunks(packed):
+    """One owned XZ stream, bounded dictionary and output; legacy gzip stays readable."""
+    if '.xz' not in packed.suffixes:
+        with gzip.open(packed, 'rb') as stream:
+            while chunk := stream.read(SNAPSHOT_CHUNK):
+                yield chunk
+        return
+    decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=32*1024**2)
+    with packed.open('rb') as stream:
+        while not decoder.eof:
+            data = stream.read(SNAPSHOT_CHUNK) if decoder.needs_input else b''
+            if not data and decoder.needs_input:
+                raise EOFError('truncated private XZ snapshot')
+            chunk = decoder.decompress(data, max_length=SNAPSHOT_CHUNK)
+            if chunk:
+                yield chunk
+        if decoder.unused_data or stream.read(1):
+            raise ValueError('trailing private XZ snapshot data')
+
+
+def _packed_path(path):
+    legacy = path.with_suffix('.sqlite.gz')
+    return legacy if legacy.exists() else path.with_suffix('.sqlite.xz')
+
+
 def _unpack(task, packed, destination=None):
-    """Bounded gzip verification; raw SHA remains the historical identity."""
+    """Bounded verification; raw SHA remains the historical identity."""
     sha=hashlib.sha256()
     total=0
-    with gzip.open(packed,'rb') as stream:
-        while chunk:=stream.read(SNAPSHOT_CHUNK):
-            total+=len(chunk)
-            if total>task.config['budget_bytes']:raise ValueError('snapshot exceeds task budget')
-            task.check(len(chunk));task.check_memory()
-            sha.update(chunk)
-            if destination is not None:destination.write(chunk)
+    for chunk in _snapshot_chunks(packed):
+        total+=len(chunk)
+        if total>task.config['budget_bytes']:raise ValueError('snapshot exceeds task budget')
+        task.check(len(chunk));task.check_memory()
+        sha.update(chunk)
+        if destination is not None:destination.write(chunk)
     return sha.hexdigest()
 
 
 def verified_packed_snapshot(store, path):
     """Quality classification requires location AND full original content hash."""
-    if path.parent!=store.task.root/'frozen-inputs' or not re.fullmatch(r'[a-f0-9]{64}\.sqlite\.gz',path.name):
+    if path.parent!=store.task.root/'frozen-inputs' or not re.fullmatch(r'[a-f0-9]{64}\.sqlite\.(gz|xz)',path.name):
         return False
     try:
-        snapshot_path(store,path.name.removesuffix('.gz'))
+        snapshot_path(store,path.name.rsplit('.',1)[0])
         return _unpack(store.task,path)==path.name[:64]
-    except (OSError,EOFError,ValueError):
+    except (OSError,EOFError,ValueError,lzma.LZMAError):
         return False
+
+
+def repack_snapshot(store, filename):
+    """Stream a verified derived gzip to XZ, never materializing the SQLite file.
+
+    Caller holds the existing task writer lock. Each successor is fully decoded
+    and hash-checked before its predecessor is retired. No new input identity.
+    """
+    path=snapshot_path(store,filename)
+    if path.exists():raise ValueError('compress raw normalized snapshot before repacking')
+    source=path.with_suffix('.sqlite.gz');target=path.with_suffix('.sqlite.xz')
+    expected=filename[:-7]
+    if not source.exists():
+        if _unpack(store.task,target)!=expected:raise ValueError('packed snapshot hash mismatch')
+        return {'filename':filename,'already_repacked':True,'packed_bytes':target.stat().st_size}
+    before=source.stat().st_size
+    temporary=target.with_suffix('.xz.partial');created=False
+    try:
+        if not target.exists():
+            with temporary.open('xb') as output:
+                created=True
+                compressor=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+                raw_hash=hashlib.sha256();total=0
+                for chunk in _snapshot_chunks(source):
+                    total+=len(chunk)
+                    if total>store.task.config['budget_bytes']:raise ValueError('snapshot exceeds task budget')
+                    store.task.check(len(chunk)*2+65536);store.task.check_memory()
+                    raw_hash.update(chunk)
+                    encoded=compressor.compress(chunk)
+                    store.task.check(len(encoded)+65536)
+                    output.write(encoded)
+                encoded=compressor.flush()
+                store.task.check(len(encoded)+65536);store.task.check_memory()
+                output.write(encoded);output.flush();os.fsync(output.fileno())
+            if raw_hash.hexdigest()!=expected:raise ValueError('source snapshot hash mismatch')
+            if _unpack(store.task,temporary)!=expected:raise ValueError('successor snapshot hash mismatch')
+            if temporary.stat().st_size>=before:
+                temporary.unlink()
+                return {'filename':filename,'already_repacked':False,'retained_gzip':True,'saved_bytes':0}
+            os.replace(temporary,target)
+        if _unpack(store.task,target)!=expected:raise ValueError('successor snapshot hash mismatch')
+        if _unpack(store.task,source)!=expected:raise ValueError('source snapshot changed during repack')
+        source.unlink()
+        return {'filename':filename,'already_repacked':False,'gzip_bytes':before,
+                'packed_bytes':target.stat().st_size,'saved_bytes':before-target.stat().st_size}
+    finally:
+        if created and temporary.exists():temporary.unlink()
 
 
 def compress_snapshot(store, filename):
@@ -66,6 +138,7 @@ def compress_snapshot(store, filename):
     packed=path.with_suffix('.sqlite.gz')
     expected=filename[:-7]
     if not path.exists():
+        packed=_packed_path(path)
         if _unpack(store.task,packed)!=expected:raise ValueError('packed snapshot hash mismatch')
         return {'filename':filename,'already_compressed':True,'packed_bytes':packed.stat().st_size}
     if file_hash(path)!=expected:raise ValueError('private frozen input hash mismatch')
@@ -122,8 +195,8 @@ def freeze_input(store, *, scope='full'):
         if target.exists():
             if file_hash(target)!=sha:raise ValueError('existing frozen input hash mismatch')
             temporary.unlink()
-        elif target.with_suffix('.sqlite.gz').exists():
-            packed=target.with_suffix('.sqlite.gz')
+        elif target.with_suffix('.sqlite.gz').exists() or target.with_suffix('.sqlite.xz').exists():
+            packed=_packed_path(target)
             if packed.is_symlink() or _unpack(store.task,packed)!=sha:
                 raise ValueError('existing packed input hash mismatch')
             temporary.unlink()
@@ -151,7 +224,7 @@ def frozen_reader(store,filename):
             with tempfile.NamedTemporaryFile(mode='wb',prefix='frozen-read-',suffix='.sqlite',
                     dir=path.parent,delete=False) as target:
                 temporary=type(path)(target.name)
-                if _unpack(store.task,path.with_suffix('.sqlite.gz'),target)!=filename[:-7]:
+                if _unpack(store.task,_packed_path(path),target)!=filename[:-7]:
                     raise ValueError('packed snapshot hash mismatch')
             path=temporary
         except BaseException:

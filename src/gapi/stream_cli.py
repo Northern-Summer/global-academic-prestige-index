@@ -16,6 +16,7 @@ def register(sub):
     compact_snapshots=sub.add_parser('compact-frozen-inputs',help='losslessly pack selected private derived snapshots under the writer lock')
     compact_snapshots.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     compact_snapshots.add_argument('--filenames',nargs='+',required=True)
+    compact_snapshots.add_argument('--codec',choices=('gzip','xz'),default='gzip')
     browser = sub.add_parser('export-easy-orcid-web',help='export verified aggregate scores as bounded browser assets')
     browser.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     browser.add_argument('--out',type=Path,default=Path('outputs/easy-orcid-web'))
@@ -145,10 +146,11 @@ def execute_task(task, args):
     try:
         http = PublicHTTP(task,reuse_connections=True)
         if args.command == 'compact-frozen-inputs':
-            from .frozen_input import compress_snapshot,snapshot_path
+            from .frozen_input import compress_snapshot,repack_snapshot,snapshot_path
             # Validate every requested identity before the first mutation.
             for filename in args.filenames:snapshot_path(store,filename)
-            result={'snapshots':[compress_snapshot(store,filename) for filename in args.filenames]}
+            compact=repack_snapshot if getattr(args,'codec','gzip')=='xz' else compress_snapshot
+            result={'snapshots':[compact(store,filename) for filename in args.filenames]}
         elif args.command == 'export-easy-orcid-web':
             from .easy_orcid_landing import rank_projection
             from .derived_export import write_bundle
@@ -257,7 +259,7 @@ def execute_task(task, args):
             result['provisional_archive_events'] = store.db.execute('''SELECT count(*) FROM events e JOIN runs r ON r.source=e.source
                 WHERE e.source='orcid-2026-summary' AND r.status!='verified' ''').fetchone()[0]
             from .frozen_input import verified_packed_snapshot
-            archives = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.zip','.tar','.xml')]
+            archives = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.xz','.zip','.tar','.xml')]
             packed_inputs=[p for p in archives if verified_packed_snapshot(store,p)]
             raw_files=[p for p in archives if p not in packed_inputs]
             result['verified_private_packed_inputs']=len(packed_inputs)

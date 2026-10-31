@@ -1,0 +1,146 @@
+{
+  "status": "complete",
+  "before_bytes": 1667486912,
+  "after_bytes": 1624430314,
+  "saved_bytes": 43064085,
+  "seconds": 152.093,
+  "results": [
+    {
+      "filename": "46a6db18607450e6017942e88595e9381a869ca043f54e3ae238a43351e57be9.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 1530567,
+      "packed_bytes": 1099200,
+      "saved_bytes": 431367,
+      "seconds": 0.984,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "682d7efa1adaff9de8286ebf9d771601b57d6436fcdb9fa8f85d2a59eb4538cf.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 2184670,
+      "packed_bytes": 1576720,
+      "saved_bytes": 607950,
+      "seconds": 1.422,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "78229f01e097d51f1654c4901d6c6366c404be49e3f2f34c4e0771aabf8c6732.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 2187011,
+      "packed_bytes": 1577500,
+      "saved_bytes": 609511,
+      "seconds": 1.297,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "bf75e15157483d10e027b6e5ca9c035c8531ab272d4d0b2783984b4573a08fdb.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 2691205,
+      "packed_bytes": 1927032,
+      "saved_bytes": 764173,
+      "seconds": 1.797,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "be12616d6bab17616a0fa3bb3b4ea56bc4f88922acb3e4566a51911c757527c1.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 3177618,
+      "packed_bytes": 2300964,
+      "saved_bytes": 876654,
+      "seconds": 2.047,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "2485c02ea89e48712f014199116fabd582d3c05dfcd0a33a48a0a93713b42324.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 3301837,
+      "packed_bytes": 2404460,
+      "saved_bytes": 897377,
+      "seconds": 2.266,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "30733299128b74661745d7e895d5bdbd1d12b327509878e1fae3cdfb905a75ce.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 3497619,
+      "packed_bytes": 2531496,
+      "saved_bytes": 966123,
+      "seconds": 2.266,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "2a2085e817fa05e2769f1b9dab62dc305a357c57ca75b41f701296358cb42e1d.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 6179760,
+      "packed_bytes": 4537824,
+      "saved_bytes": 1641936,
+      "seconds": 4.219,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "86ed9ad19983f5458de5867d3a36b4b9dab7c724cd906d7e594d4f3ecd2644cf.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 6751735,
+      "packed_bytes": 5014436,
+      "saved_bytes": 1737299,
+      "seconds": 4.765,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "4461b7b61b49d46f2d6affb527fe8c508441241f1a03b5c27470d473535677f1.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 6754628,
+      "packed_bytes": 5015400,
+      "saved_bytes": 1739228,
+      "seconds": 4.609,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "6cbd9597865e882818914e793fa9d221c9d801f94496fb8250706a71e2fcea6a.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 7452625,
+      "packed_bytes": 5584424,
+      "saved_bytes": 1868201,
+      "seconds": 5.172,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "e70b309aa749482ad44258f4e7cec6c86e1b2fad0050a3d5bfd7636259893d3f.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 8139201,
+      "packed_bytes": 6165764,
+      "saved_bytes": 1973437,
+      "seconds": 6.079,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "7f11e661a4020fd1caece668ddf2199f6b5cd9ffe63d9e32ffed794df0221577.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 9731794,
+      "packed_bytes": 7406924,
+      "saved_bytes": 2324870,
+      "seconds": 6.985,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "663ae485c04c8814542f893e9b96d6f23b61f69d9615cd0e9299de05c17f8c55.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 87040699,
+      "packed_bytes": 75187364,
+      "saved_bytes": 11853335,
+      "seconds": 41.141,
+      "full_successor_verified": true
+    },
+    {
+      "filename": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f.sqlite",
+      "already_repacked": false,
+      "gzip_bytes": 113351972,
+      "packed_bytes": 98579348,
+      "saved_bytes": 14772624,
+      "seconds": 53.375,
+      "full_successor_verified": true
+    }
+  ],
+  "personal_raw_material_written": false,
+  "live_event_count": 108473
+}

@@ -1,0 +1,25 @@
+{
+  "scope": "two complete private frozen structured inputs, compressed output discarded",
+  "raw_files_written": false,
+  "migration_performed": false,
+  "results": [
+    {
+      "input": "663ae485c04c8814542f893e9b96d6f23b61f69d9615cd0e9299de05c17f8c55.sqlite.gz",
+      "gzip_bytes": 87040699,
+      "raw_bytes": 148021248,
+      "xz_preset3_bytes": 75187364,
+      "saved_bytes": 11853335,
+      "seconds": 31.203,
+      "raw_sha256_verified": true
+    },
+    {
+      "input": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f.sqlite.gz",
+      "gzip_bytes": 113351972,
+      "raw_bytes": 192020480,
+      "xz_preset3_bytes": 98579348,
+      "saved_bytes": 14772624,
+      "seconds": 40.188,
+      "raw_sha256_verified": true
+    }
+  ]
+}
