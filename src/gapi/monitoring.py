@@ -93,6 +93,10 @@ def snapshot_report(task, *, max_seconds=60):
             snapshot.set_progress_handler(query_progress,10000)
             snapshot.execute('CREATE INDEX report_discovery ON discovery(source,identifier)')
             snapshot.execute('CREATE INDEX report_members ON members(source,locator)')
+            # report_projection intentionally copies columns, not source indexes.
+            # candidate_progress checks retry membership once per candidate;
+            # without this key that correlated lookup scans all retries each time.
+            snapshot.execute('CREATE INDEX report_retries ON discovery_retries(source,identifier)')
         else:
             source = sqlite3.connect((task.root/'careers.sqlite').as_uri()+'?mode=ro',
                                      uri=True, timeout=1, isolation_level=None)

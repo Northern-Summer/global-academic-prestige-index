@@ -93,6 +93,17 @@ test('committed real slices larger than 2 MiB remain verifiable',()=>fixture(({p
   assert.equal(verify().status,'verified');
 }));
 
+test('large verified observation slice has a separate bound from application assets',()=>fixture(({put,commit,args,verify})=>{
+  const snapshot=JSON.stringify({dataset_kind:'real/global-public-observations',padding:'x'.repeat(10*1024*1024)});
+  const manifest={snapshot:'global-test.json',output_sha256:createHash('sha256').update(snapshot).digest('hex'),publication_status:'public-observations-pending-external-review'};
+  for(const prefix of ['outputs/global','dist/data/global']){
+    put(`${prefix}/global-test.json`,snapshot);put(`${prefix}/manifest.json`,JSON.stringify(manifest));
+  }
+  commit();writeBuildProvenance(args);assert.equal(verify().status,'verified');
+  put('dist/assets/unrelated.bin',Buffer.alloc(9*1024*1024));
+  writeBuildProvenance(args);assert.throws(verify,/reviewed byte bound/);
+}));
+
 test('complete historical bundle is identity-bound, committed and emitted without relaxing legacy limits',()=>fixture(({root,put,commit,args,verify})=>{
   const base=new URL('../outputs/easy-orcid-web/',import.meta.url),raw=readFileSync(new URL('manifest.json',base));
   const historical=JSON.parse(raw),selection={manifest:'outputs/easy-orcid-web/manifest.json',sha256:createHash('sha256').update(raw).digest('hex')};

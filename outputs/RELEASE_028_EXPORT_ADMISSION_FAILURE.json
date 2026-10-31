@@ -1,0 +1,9 @@
+{
+  "command": "gapi export-release --freeze-input --publication-policy configs/publication-20261029.json",
+  "exit_code": 1,
+  "stage": "export_release pre-write admission",
+  "error": "storage admission stopped: used=1819203657, anticipated=62473548, reserve=268435456",
+  "verified_snapshot_preserved": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f.sqlite",
+  "selected_snapshot_after_failure": "global-765523a4bf2d9f9c.json",
+  "resolution": "retain atomic writer 2x byte admission and memory sampling; remove redundant 4x disk admission; replay frozen input without network acquisition"
+}

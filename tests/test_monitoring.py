@@ -21,9 +21,15 @@ class MonitoringTests(unittest.TestCase):
                 store.db.execute('CREATE TABLE private_landing(payload BLOB)')
                 store.db.execute('INSERT INTO private_landing VALUES(zeroblob(2097152))')
                 store.db.execute("INSERT INTO discovery VALUES('ingest-wikidata','Q1','a','b')")
+                store.db.execute("INSERT INTO discovery_retries VALUES('ingest-wikidata','Q1',1,0,'fixture')")
             expected=store.report()
             store.task.config['memory_bytes']=1024
-            with patch.object(store.task,'check_memory',return_value=0):
+            original=CareerStore.report
+            def indexed_report(view):
+                plan=view.db.execute('EXPLAIN QUERY PLAN SELECT EXISTS(SELECT 1 FROM discovery_retries r WHERE r.source=d.source AND r.identifier=d.identifier) FROM discovery d').fetchall()
+                self.assertTrue(any('report_retries' in row[-1] for row in plan))
+                return original(view)
+            with patch.object(store.task,'check_memory',return_value=0),patch.object(CareerStore,'report',indexed_report):
                 actual=snapshot_report(store.task)
             self.assertEqual(actual,expected)
             with store.db:store.db.execute("INSERT INTO discovery VALUES('ingest-wikidata','Q2','a','b')")

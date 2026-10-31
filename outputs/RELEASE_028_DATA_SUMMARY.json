@@ -1,0 +1,15 @@
+{
+  "events": 101915,
+  "people": 28739,
+  "institutions": 21490,
+  "scored": 1474,
+  "edges": 1553,
+  "convergence": {
+    "converged": true,
+    "error": 5.447792282391173e-13,
+    "iterations": 29
+  },
+  "snapshot": "global-90463d6a2aa66f8c.json",
+  "sha256": "90463d6a2aa66f8c39ba268d7f3f0652de756306d318e1bae878352b97074b5e",
+  "source_input_sha256": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f"
+}

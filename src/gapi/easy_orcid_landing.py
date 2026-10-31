@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import gzip
+import hashlib
 from contextlib import nullcontext
 import sqlite3
 import tempfile
@@ -302,6 +303,8 @@ def rank_projection(store, *, stream_edges=False, include_full=False):
 
 def write_projection(store, target, *, include_full=False):
     """Atomic JSON or deterministic gzip, without population-sized buffers."""
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError('score export target must be a regular file')
     result=rank_projection(store,stream_edges=True,include_full=include_full)
     edges=result.pop('edges')
     temporary=target.with_suffix('.tmp');created=False;written=0;checked=0
@@ -329,10 +332,21 @@ def write_projection(store, target, *, include_full=False):
                 for key in sorted(result):
                     handle.write(b',');write(handle,key);handle.write(b':');write(handle,result[key])
                 handle.write(b'}')
-        temporary.replace(target)
+        def checksum(path):
+            result=hashlib.sha256()
+            with path.open('rb') as stream:
+                while chunk:=stream.read(1024**2):
+                    store.task.check_memory();result.update(chunk)
+            return result.hexdigest()
+        output_hash=checksum(temporary)
+        # Byte-identical reruns retain the predecessor's mtime and avoid a
+        # second filesystem write. Comparison remains bounded and exact.
+        if target.exists() and target.stat().st_size==temporary.stat().st_size and checksum(target)==output_hash:
+            temporary.unlink()
+        else:
+            temporary.replace(target)
     finally:
         if created and temporary.exists():temporary.unlink()
-    import hashlib
     with target.open('rb') as handle:
         checksum=hashlib.file_digest(handle,'sha256').hexdigest()
     return {'output':str(target),'bytes':target.stat().st_size,'sha256':checksum,

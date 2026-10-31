@@ -139,7 +139,11 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
   if (publish) {
     if (Object.keys(outputs).some(path=>path.startsWith('data/local/'))) throw new Error('Private data in public site');
     const bytes=Object.keys(outputs).reduce((sum,path)=>sum+regular(resolve(outDir,path)).length,0);
-    const bound=8*1024*1024+(proof.selection.derived_bundle?.bytes??0);
+    // The selected institution slice has its own 32 MiB input cap and exact
+    // committed hash above. Keep a separate 8 MiB allowance for application
+    // assets; growth of real observations must not admit unrelated extra files.
+    const selectedBytes=regular(resolve(root,proof.selection.snapshot)).length;
+    const bound=8*1024*1024+selectedBytes+(proof.selection.derived_bundle?.bytes??0);
     if (bytes+regular(resolve(outDir,PROVENANCE)).length>bound) throw new Error('Public site exceeds reviewed byte bound');
     result.site_manifest={source_commit:result.source_commit,build_provenance_sha256:result.provenance_sha256,
       ranking_status:'observations-only-pending-independent-review',

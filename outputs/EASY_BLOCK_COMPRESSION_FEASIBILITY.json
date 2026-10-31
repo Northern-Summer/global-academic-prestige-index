@@ -1,0 +1,47 @@
+{
+  "scope": "four bounded ordered windows, not a representative census",
+  "personal_samples_written": false,
+  "live_database_modified": false,
+  "samples": [
+    {
+      "row_lower_bound": 0,
+      "rows": 1000,
+      "read_lock_seconds": 0.0,
+      "current_logical_bytes": 239015,
+      "decoded_payload_bytes": 284542,
+      "packed_block_bytes": 140214,
+      "ratio": 0.58663,
+      "roundtrip": true
+    },
+    {
+      "row_lower_bound": 500000,
+      "rows": 1000,
+      "read_lock_seconds": 0.0,
+      "current_logical_bytes": 238566,
+      "decoded_payload_bytes": 281385,
+      "packed_block_bytes": 140118,
+      "ratio": 0.58733,
+      "roundtrip": true
+    },
+    {
+      "row_lower_bound": 1500000,
+      "rows": 1000,
+      "read_lock_seconds": 0.0,
+      "current_logical_bytes": 237373,
+      "decoded_payload_bytes": 283966,
+      "packed_block_bytes": 141210,
+      "ratio": 0.59489,
+      "roundtrip": true
+    },
+    {
+      "row_lower_bound": 4000000,
+      "rows": 1000,
+      "read_lock_seconds": 0.016,
+      "current_logical_bytes": 233994,
+      "decoded_payload_bytes": 272139,
+      "packed_block_bytes": 137033,
+      "ratio": 0.58563,
+      "roundtrip": true
+    }
+  ]
+}

@@ -131,18 +131,21 @@ class LandingTests(unittest.TestCase):
             self.assertEqual(rank_projection(s),first)
         target=s.task.root/'observed.json'
         with patch('gapi.global_analysis.resolve_institutions'):
-            receipt=write_projection(s,target);before=target.read_bytes();write_projection(s,target)
+            receipt=write_projection(s,target);before=target.read_bytes();modified=target.stat().st_mtime_ns
+            write_projection(s,target)
+            self.assertEqual(target.stat().st_mtime_ns,modified)
             self.assertEqual(receipt['sha256'],hashlib.sha256(before).hexdigest())
             self.assertEqual(receipt['distinct_retained_people'],first['distinct_retained_people'])
             self.assertEqual(receipt['convergence'],first['convergence'])
             self.assertEqual(target.read_bytes(),before)
             self.assertEqual(json.loads(before),first)
             packed=s.task.root/'observed.json.gz'
-            packed_receipt=write_projection(s,packed);packed_before=packed.read_bytes()
+            packed_receipt=write_projection(s,packed);packed_before=packed.read_bytes();packed_modified=packed.stat().st_mtime_ns
             self.assertEqual(gzip.decompress(packed_before),before)
             self.assertEqual(packed_receipt['sha256'],hashlib.sha256(packed_before).hexdigest())
             write_projection(s,packed)
             self.assertEqual(packed.read_bytes(),packed_before)
+            self.assertEqual(packed.stat().st_mtime_ns,packed_modified)
             with patch.object(s.task,'check',side_effect=[None,BudgetStop('storage full')]):
                 with self.assertRaises(BudgetStop):write_projection(s,packed)
             self.assertEqual(packed.read_bytes(),packed_before)

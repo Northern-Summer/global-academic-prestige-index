@@ -209,7 +209,11 @@ def relation_rows(store, *, allowed_sources=None):
 
 
 def rank_global(store, *, public=False, publication_policy=None):
-    store.task.check(64*1024**2)
+    # This calculation reads SQLite and builds bounded in-memory graphs. It
+    # does not create a 64 MiB disk workspace. Admit actual exports only once
+    # their byte size is known; keep disk reserve and memory checks separate.
+    store.task.check()
+    store.task.check_memory()
     allowed = public_sources(store.task,publication_policy) if public else None
     edges, stages, counts, source_counts = defaultdict(float), defaultdict(Counter), Counter(), defaultdict(set)
     corroborated = Counter()
@@ -399,11 +403,39 @@ def rank_global(store, *, public=False, publication_policy=None):
     return result
 
 
+def _write_aggregate(task, target: Path, content: bytes):
+    """Publish one aggregate atomically; identical reruns retain bytes and mtime.
+
+    The task writer serializes callers. Exclusive staging never takes ownership
+    of a predecessor's unfinished file; failures leave the published file intact.
+    """
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError('aggregate target must be a regular file')
+    if target.exists() and target.stat().st_size == len(content):
+        with target.open('rb') as source:
+            if hashlib.file_digest(source, 'sha256').digest() == hashlib.sha256(content).digest():
+                return
+    task.check(len(content) * 2 + 65536)
+    temporary = target.with_name(target.name + '.tmp')
+    created = False
+    try:
+        with temporary.open('xb') as destination:
+            created = True
+            destination.write(content)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary, target)
+    finally:
+        if created and temporary.exists():
+            temporary.unlink()
+
+
 def export_release(store, out: Path, *, publication_policy=None, frozen_input=None):
     """Public, licensed institution aggregates only; no individual trajectories."""
     if out.resolve() != (project_root()/"outputs/global").resolve():
         raise ValueError("public release output must use the budget-accounted outputs/global directory")
-    store.task.check(64*1024**2)
+    store.task.check()
+    store.task.check_memory()
     result = rank_global(store, public=True,publication_policy=publication_policy)
     # Failing this gate prevents a misleading blank real-score release.
     if not result["edges"]:
@@ -412,13 +444,11 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         raise ValueError("non-converged scoring output cannot be released")
     out.mkdir(parents=True, exist_ok=True)
     content = canonical(result)
-    store.task.check(4*len(content))
+    store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()
     filename = f"global-{checksum[:16]}.json"
     target = out/filename
-    tmp = out/(filename+".tmp")
-    tmp.write_bytes(content)
-    os.replace(tmp,target)
+    _write_aggregate(store.task, target, content)
     allowed = public_sources(store.task,publication_policy)
     inputs = {row[0]:row[1] for row in store.db.execute("SELECT source,identity FROM runs WHERE members>0 ORDER BY source") if row[0] in allowed}
     member_hash = hashlib.sha256()
@@ -454,8 +484,9 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         manifest['official_award_source_sha256'] = awards['source_sha256']
         manifest['normalized_award_index_sha256'] = awards['normalized_award_index_sha256']
         manifest['official_award_page_index_sha256'] = awards['page_index_sha256']
-    (out/"manifest.json").write_bytes(canonical(manifest))
-    (out/"SHA256SUMS").write_text(f"{checksum}  {filename}\n",encoding="ascii")
+    _write_aggregate(store.task, out/"SHA256SUMS", f"{checksum}  {filename}\n".encode('ascii'))
+    # The manifest is the final reader-visible pointer to an already settled file.
+    _write_aggregate(store.task, out/"manifest.json", canonical(manifest))
     return manifest
 
 
@@ -463,15 +494,13 @@ def export_local(store):
     """Local aggregate view can include noncommercial API data, never public by default."""
     result = rank_global(store)
     content = canonical(result)
-    store.task.check(4 * len(content))
+    store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()
     path = store.task.root / "global-local.json"
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_bytes(content)
-    os.replace(temporary, path)
+    _write_aggregate(store.task, path, content)
     manifest = {"schema_version":"gapi-local-view/v1", "snapshot":"global-local.json", "output_sha256":checksum,
         "publication_status":"local-only-source-license-review", "config_sha256":digest(store.task.config)}
-    path.with_suffix(".json.manifest.json").write_bytes(canonical(manifest))
+    _write_aggregate(store.task, path.with_suffix(".json.manifest.json"), canonical(manifest))
     return {"manifest":manifest,"nodes":len(result["nodes"]),"relations":len(result["edges"]),"convergence":result["convergence"]}
 
 

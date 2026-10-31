@@ -74,12 +74,72 @@ class AnalysisTests(unittest.TestCase):
             self.seed(s)
             a=export_local(s)
             first=(s.task.root/'global-local.json').read_bytes()
+            paths=[s.task.root/'global-local.json',s.task.root/'global-local.json.manifest.json']
+            mtimes=[path.stat().st_mtime_ns for path in paths]
             b=export_local(s)
             self.assertEqual(first,(s.task.root/'global-local.json').read_bytes())
+            self.assertEqual(mtimes,[path.stat().st_mtime_ns for path in paths])
             self.assertEqual(a['manifest'],b['manifest'])
             result=json.loads(first)
             self.assertAlmostEqual(sum(n['network_score'] or 0 for n in result['nodes']),1)
             self.assertTrue(result['sensitivity']['delete_source_wikidata']['converged'])
+        finally:s.close()
+
+    def test_aggregate_publication_preserves_predecessor_on_failure_and_foreign_staging(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import _write_aggregate
+        s=self.store(archive([]))
+        try:
+            path=s.task.root/'aggregate.json'; staging=path.with_name(path.name+'.tmp')
+            _write_aggregate(s.task,path,b'old')
+            with patch('gapi.global_analysis.os.replace',side_effect=OSError('publication interrupted')):
+                with self.assertRaises(OSError):_write_aggregate(s.task,path,b'new')
+            self.assertEqual(path.read_bytes(),b'old')
+            self.assertFalse(staging.exists())
+            staging.write_bytes(b'predecessor recovery')
+            with self.assertRaises(FileExistsError):_write_aggregate(s.task,path,b'new')
+            self.assertEqual(staging.read_bytes(),b'predecessor recovery')
+            self.assertEqual(path.read_bytes(),b'old')
+            staging.unlink()
+            _write_aggregate(s.task,path,b'new')
+            self.assertEqual(path.read_bytes(),b'new')
+            with patch.object(s.task,'check',side_effect=RuntimeError('budget')):
+                with self.assertRaises(RuntimeError):_write_aggregate(s.task,path,b'changed')
+            self.assertEqual(path.read_bytes(),b'new')
+            self.assertFalse(staging.exists())
+        finally:s.close()
+
+    def test_readonly_score_needs_memory_but_not_fictitious_disk_workspace(self):
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            before=s.task.used()
+            s.task.config['budget_bytes']=before+s.task.config['reserve_bytes']+8192
+            result=rank_global(s,public=True)
+            self.assertTrue(result['convergence']['converged'])
+            self.assertEqual(s.task.used(),before)
+            # Actual publication still enforces its byte-dependent admission.
+            with self.assertRaises(BudgetStop):export_local(s)
+            self.assertFalse((s.task.root/'global-local.json').exists())
+            with s.task.root.joinpath('budget-violation').open('wb') as f:
+                f.write(b'x'*8193)
+            with self.assertRaises(BudgetStop):rank_global(s,public=True)
+        finally:s.close()
+
+    def test_atomic_export_admits_real_staging_and_rejects_insufficient_space(self):
+        from gapi.global_analysis import _write_aggregate
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            content=b'x'*1024**2; path=s.task.root/'sized-aggregate.json'
+            # Fits the atomic writer's 2x byte admission, but not the retired 4x.
+            s.task.config['budget_bytes']=s.task.used()+s.task.config['reserve_bytes']+3*len(content)
+            _write_aggregate(s.task,path,content)
+            self.assertEqual(path.read_bytes(),content)
+            s.task.config['budget_bytes']=s.task.used()+s.task.config['reserve_bytes']+len(content)
+            with self.assertRaises(BudgetStop):_write_aggregate(s.task,path,b'y'*len(content))
+            self.assertEqual(path.read_bytes(),content)
         finally:s.close()
 
     def test_source_deletion_rejoins_surviving_alternative_evidence(self):
