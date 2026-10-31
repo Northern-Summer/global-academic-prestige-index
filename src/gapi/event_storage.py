@@ -237,7 +237,10 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
                               (cursor,min(128,max_events-scanned))).fetchall()
         finally:reader.close()
         if not rows:break
-        with store.member('storage-page-repack','events'):
+        # At most 128 normalized <=16 KiB events; 8 MiB allows payload,
+        # scalar columns, dictionaries and index churn. SQLite enforces the
+        # physical-growth ceiling even if this estimate is insufficient.
+        with store.member('storage-page-repack','events',max_growth_bytes=8*1024**2):
             expected=[];converted=0;batch_saved=0
             for row in rows:
                 value=row[payload_index];replacement=value

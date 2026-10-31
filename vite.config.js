@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename } from 'node:path';
 import { validateGlobal } from './web/global-data.js';
 import {DOCUMENTATION,sourceInputs,writeBuildProvenance,readReleaseSnapshot} from './scripts/build-provenance.mjs';
-import {readDerivedBundle} from './scripts/derived-bundle.mjs';
+import {readDerivedBundle,readDerivedAsset} from './scripts/derived-bundle.mjs';
 
 const base = process.env.GITHUB_ACTIONS === 'true' ? '/global-academic-prestige-index/' : '/';
 
@@ -41,6 +41,14 @@ export default defineConfig({
         const filePath = historical?resolve(derivedRoot,`${historical[1]}.json`):scoreRoutes.get(requestPath);
         if (!filePath) return next();
         if (request.method !== 'GET' && request.method !== 'HEAD') return next();
+        if(historical&&historical[1]!=='manifest'){
+          try{
+            const bytes=readDerivedAsset(filePath,32*1024*1024).bytes;
+            response.setHeader('Content-Type','application/json; charset=utf-8');
+            response.setHeader('Content-Length',bytes.length);
+            return response.end(request.method==='HEAD'?undefined:bytes);
+          }catch(error){return next(error);}
+        }
         if (requestPath === '/data/global/global-local.json') {
           try {
             const manifestPath = `${globalScores}.manifest.json`;

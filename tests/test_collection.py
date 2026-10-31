@@ -189,6 +189,75 @@ class CollectionTests(unittest.TestCase):
             with self.assertRaises(ValueError):s.pending('ingest-wikidata',priority_source='wikidata')
         finally:s.close()
 
+    def test_linked_priority_validates_only_matches_but_rejects_invalid_ids(self):
+        from gapi.orcid_stream import private_person
+        from gapi.career_rules import valid_orcid
+        s=self.store(archive([]))
+        valid='0000-0002-1825-0097';invalid='0000-0002-1825-0098'
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-orcid-api',v,'a','b') for v in [valid,invalid,'unrelated',b'invalid-blob']])
+                s.db.executemany('INSERT INTO official_profile_subjects VALUES(?,?,?,?)',[
+                    ('https://experts.colorado.edu/'+str(n),'a'*64,'fixture',private_person(v))
+                    for n,v in enumerate([valid,invalid])])
+            with patch('gapi.career_rules.valid_orcid',wraps=valid_orcid) as validation:
+                result=s.pending('ingest-orcid-api',6,priority_source='wikidata')
+            # Invalid linked IDs remain ordinary candidates, never priority.
+            self.assertEqual(result[0],valid)
+            self.assertNotIn('unrelated',[call.args[0] for call in validation.call_args_list])
+            self.assertIn(invalid,[call.args[0] for call in validation.call_args_list])
+            query=('SELECT d.identifier FROM discovery d LEFT JOIN discovery_retries r '
+                   'ON r.source=d.source AND r.identifier=d.identifier WHERE d.source=?')
+            self.assertEqual(s._linked_priority(query,('ingest-orcid-api',),'wikidata',10),[valid])
+        finally:s.close()
+
+    def test_priority_window_rotates_without_starving_fresh_or_due_work(self):
+        from gapi.orcid_stream import private_person
+        s=self.store(archive([]))
+        target='0000-0002-1825-0097'
+        try:
+            # Valid target sorts after a full window of unrelated candidates.
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-orcid-api',f'0000-0000-0000-{n:04d}','a','b') for n in range(8192)])
+                s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-orcid-api',target,'a','b'))
+                s.db.execute('INSERT INTO official_profile_subjects VALUES(?,?,?,?)',
+                    ('https://experts.colorado.edu/fixture','a'*64,'fixture',private_person(target)))
+            first=s.pending('ingest-orcid-api',4,priority_source='wikidata')
+            self.assertNotIn(target,first)
+            self.assertNotEqual(s._priority_scan_after,'')
+            second=s.pending('ingest-orcid-api',4,priority_source='wikidata')
+            self.assertIn(target,second)
+            self.assertIn(first[0],second)
+            self.assertEqual(s._priority_scan_after,'')
+            s.defer('ingest-orcid-api',target,'fixture pause',now=100)
+            s.pending('ingest-orcid-api',4,now=110,priority_source='wikidata')
+            self.assertNotIn(target,s.pending('ingest-orcid-api',4,now=110,priority_source='wikidata'))
+        finally:s.close()
+
+    def test_time_limited_prefix_serves_retries_linked_and_ordinary_candidates(self):
+        s=self.store(archive([]))
+        due=[f'r{n:04d}' for n in range(100)]
+        ordinary=[f'f{n:04d}' for n in range(100)]
+        linked=[f'z{n:04d}' for n in range(100)]
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-orcid-api',value,'a','b') for value in due+ordinary+linked])
+                s.db.executemany('INSERT INTO discovery_retries VALUES(?,?,?,?,?)',
+                    [('ingest-orcid-api',value,1,100,'fixture') for value in due])
+            with patch.object(s,'_linked_priority',return_value=linked[:75]):
+                selected=s.pending('ingest-orcid-api',200,now=160,priority_source='wikidata')
+            self.assertEqual(len(selected),200)
+            self.assertEqual(len(set(selected)),200)
+            for group in [due,ordinary,linked]:
+                self.assertTrue(set(selected[:3])&set(group),selected[:3])
+            self.assertEqual(sum(value in due for value in selected),50)
+            self.assertEqual(sum(value in ordinary for value in selected),75)
+            self.assertEqual(sum(value in linked for value in selected),75)
+        finally:s.close()
+
     def test_priority_deadline_preserves_fresh_retry_queue_and_releases_handler(self):
         from unittest.mock import patch
         s=self.store(archive([]))

@@ -15,6 +15,26 @@ class ResourceTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_bounded_maintenance_growth_is_enforced_and_cap_restored(self):
+        import sqlite3
+        s=self.store(archive([]))
+        try:
+            with s.db:s.db.execute('CREATE TABLE growth_probe(value BLOB)')
+            cap=s.db.execute('PRAGMA max_page_count').fetchone()[0]
+            with s.member('maintenance','small',max_growth_bytes=65536):
+                s.db.execute('INSERT INTO growth_probe VALUES(?)',(b'x'*1000,))
+            self.assertEqual(s.db.execute('PRAGMA max_page_count').fetchone()[0],cap)
+            with self.assertRaises(sqlite3.OperationalError):
+                with s.member('maintenance','too-large',max_growth_bytes=4096):
+                    s.db.execute('INSERT INTO growth_probe VALUES(?)',(b'x'*1024**2,))
+            self.assertFalse(s.db.in_transaction)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM growth_probe').fetchone()[0],1)
+            self.assertEqual(s.db.execute('PRAGMA max_page_count').fetchone()[0],cap)
+            for invalid in (True,0,-1,50*1024**2):
+                with self.assertRaises(ValueError):
+                    with s.member('maintenance','invalid',max_growth_bytes=invalid):pass
+        finally:s.close()
+
     def test_memory_probe_reuses_native_structure_without_per_chunk_class_growth(self):
         s=self.store(archive([]))
         try:

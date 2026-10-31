@@ -125,7 +125,7 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     const built = JSON.parse(regular(resolve(outDir,'data/global/manifest.json')));
     if (JSON.stringify(built) !== JSON.stringify(JSON.parse(regular(resolve(root,current.manifest))))) throw new Error('Built/selected manifest mismatch');
     if (hash(regular(resolve(outDir,'data/global',built.snapshot))) !== current.snapshot_sha256) throw new Error('Built snapshot mismatch');
-    if(current.derived_bundle)for(const [path,expected] of Object.entries(current.derived_bundle.inputs)){
+    if(current.derived_bundle)for(const [path,expected] of Object.entries(current.derived_bundle.assets??current.derived_bundle.inputs)){
       const name=path.split('/').at(-1);
       if(hash(regular(resolve(outDir,'data/derived',name)))!==expected)throw new Error('Built historical asset mismatch');
     }

@@ -254,6 +254,18 @@ class CareerStore:
                 self.db.set_progress_handler(None, 0)
             preferred=set(priority)
             fresh=(priority+[identifier for identifier in fresh if identifier not in preferred])[:len(fresh)]
+            if not self.last_priority_deferred:
+                # A time-bounded transport often consumes only a short prefix.
+                # Interleave the reserved pools so late positions are not the
+                # only chance for ordinary fresh candidates to be requested.
+                # Full-batch membership and quotas are unchanged.
+                from itertools import zip_longest
+                missing=object()
+                pools=(due[:reserved],[value for value in fresh if value in preferred],
+                       [value for value in fresh if value not in preferred])
+                prefix=[value for group in zip_longest(*pools,fillvalue=missing)
+                        for value in group if value is not missing]
+                return prefix+due[reserved:limit-len(fresh)]
         return due[:reserved]+fresh+due[reserved:limit-len(fresh)]
 
     def _linked_priority(self, query, parameters, priority_source, slots):
@@ -269,17 +281,22 @@ class CareerStore:
             linked.add(person)
             if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
         self.task.check_memory()
-        def linked_priority(identifier):
-            if not valid_orcid(identifier):return 0
+        # Scheduling, not corroboration: rotate through a bounded candidate
+        # window rather than sorting the entire queue by a Python SQL UDF.
+        # Fresh/retry quotas remain owned by pending(). Restarting may revisit
+        # a window, but never changes evidence or excludes ordinary candidates.
+        cursor=getattr(self,'_priority_scan_after','')
+        candidates=[row[0] for row in self.db.execute(query+''' AND r.identifier IS NULL
+            AND d.identifier>? ORDER BY d.identifier LIMIT 8192''',(*parameters,cursor))]
+        priority=[]
+        for identifier in candidates:
+            if not isinstance(identifier,str):continue
             person=private_person(identifier)
-            return 2 if person in official else int(person in linked)
-        self.db.create_function('gapi_linked_person',1,linked_priority,deterministic=True)
-        try:
-            priority=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
-                AND gapi_linked_person(d.identifier)>0 ORDER BY gapi_linked_person(d.identifier) DESC,d.identifier LIMIT ?''',
-                (*parameters,slots))]
-        finally:self.db.create_function('gapi_linked_person',1,None)
-        return priority
+            if person in linked and valid_orcid(identifier):
+                priority.append((2 if person in official else 1,identifier))
+        self.task.check_memory()
+        self._priority_scan_after=candidates[-1] if len(candidates)==8192 else ''
+        return [identifier for _,identifier in sorted(priority,key=lambda row:(-row[0],row[1]))[:slots]]
 
     def defer(self, command, identifier, reason, *, now=None):
         """Persist finite backoff without dropping evidence or blocking fresh candidates."""
@@ -342,21 +359,35 @@ class CareerStore:
             with self.db:self.db.execute('UPDATE request_reservations SET requests=? WHERE id=?',(actual,reservation))
 
     @contextmanager
-    def member(self, source, locator):
+    def member(self, source, locator, *, max_growth_bytes=None):
         # The sole-writer OS lock keeps these free pages available to this
         # connection. SQLite can reuse them without growing the database file.
         # Keep the fixed task reserve intact for rollback journals/exports and
         # at least 1 MiB of physical headroom; max_page_count still caps growth.
-        reusable=self.db.execute('PRAGMA freelist_count').fetchone()[0] * self.db.execute('PRAGMA page_size').fetchone()[0]
-        self.task.check(max(1024**2,self.task.config["max_member_bytes"]*3-reusable))
-        self.db.execute("BEGIN IMMEDIATE")
+        size=self.db.execute('PRAGMA page_size').fetchone()[0]
+        reusable=self.db.execute('PRAGMA freelist_count').fetchone()[0]*size
+        maximum=self.task.config['max_member_bytes']*3
+        if max_growth_bytes is not None:
+            if type(max_growth_bytes) is not int or not 0<max_growth_bytes<=maximum:
+                raise ValueError('invalid bounded transaction growth')
+            maximum=max_growth_bytes
+        growth=max(0,maximum-reusable)
+        self.task.check(max(1024**2,growth))
+        original_cap=None
+        if max_growth_bytes is not None:
+            original_cap=self.db.execute('PRAGMA max_page_count').fetchone()[0]
+            pages=self.db.execute('PRAGMA page_count').fetchone()[0]
+            self.db.execute('PRAGMA max_page_count='+str(min(original_cap,pages+(growth+size-1)//size)))
         try:
+            self.db.execute("BEGIN IMMEDIATE")
             yield
             self.task.check(1024**2)
             self.db.commit()
         except BaseException:
             self.db.rollback()
             raise
+        finally:
+            if original_cap is not None:self.db.execute('PRAGMA max_page_count='+str(original_cap))
 
     def event(self, record: dict):
         text=canonical(record).decode()
