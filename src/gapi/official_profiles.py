@@ -16,6 +16,7 @@ from .career_rules import normalized, valid_orcid
 from .career_normalization import completed_education_stage
 from .orcid_stream import CHUNK, private_person
 from .task import digest,BudgetStop
+from .queue_storage import pack_row
 
 RULE = 'official-profile-education-lines/5'
 ADAPTERS = {
@@ -186,7 +187,7 @@ def check_official_profiles(store,http,*,limit=20):
                     # Preserve a discovered stable identity in the existing queue;
                     # the official page itself supplies the discovery evidence.
                     inserted=store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-                        ('ingest-orcid-api',next(iter(parsed.orcids)),digest({'rule':RULE,'url':url}),sha))
+                        pack_row(('ingest-orcid-api',next(iter(parsed.orcids)),digest({'rule':RULE,'url':url}),sha)))
                     queued_candidates+=inserted.rowcount
                 store.db.executemany('INSERT OR REPLACE INTO official_checks VALUES(?,?,?,?,?,?,?,?)',checked)
             confirmed+=sum(row[5]=='official-underlying-source-confirmed' for row in checked)

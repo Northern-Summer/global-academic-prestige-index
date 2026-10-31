@@ -13,9 +13,34 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 
 from .task import Task, BudgetStop, canonical, digest
-from .event_storage import pack, configure_reader
+from .event_storage import pack_event, configure_reader, DICTIONARY_DDL
+from .queue_storage import pack_row
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
+
+
+def bounded_run_detail(detail):
+    """Keep control JSON valid; full acquisition errors belong to failures/retries."""
+    if not detail:return None
+    text=str(detail)
+    if len(text)<=1024:return text
+    try:value=json.loads(text)
+    except ValueError:return text[:1024]
+    if not isinstance(value,dict):
+        raise ValueError('oversized structured run detail requires an object')
+    failures=value.get('failures')
+    if not isinstance(failures,list):
+        raise ValueError('oversized structured run detail has no reducible failure summary')
+    value=dict(value)
+    value['failure_summary_count']=len(failures)
+    value['failure_summary_truncated']=True
+    value['failures']=list(failures)
+    while True:
+        text=json.dumps(value,ensure_ascii=True,separators=(',',':'))
+        if len(text)<=1024:return text
+        if not value['failures']:
+            raise ValueError('run control fields exceed the status detail bound')
+        value['failures'].pop()
 
 
 def member_evidence_sql(*, observed_only=True):
@@ -135,7 +160,7 @@ class CareerStore:
         size = (task.root / "careers.sqlite").stat().st_size
         available = task.config["budget_bytes"] - task.used() + size - task.config["reserve_bytes"]
         self.db.execute(f"PRAGMA max_page_count={max(32, available // 4096)}")
-        self.db.executescript(DDL)
+        self.db.executescript(DDL+DICTIONARY_DDL)
         self.db.commit()
 
     def close(self):
@@ -154,7 +179,7 @@ class CareerStore:
 
     def status(self, source: str, status: str, *, byte_count=0, sha256=None, detail=None):
         self.db.execute("UPDATE runs SET status=?, bytes=?, sha256=?, detail=? WHERE source=?",
-                        (status, byte_count, sha256, str(detail)[:1024] if detail else None, source))
+                        (status, byte_count, sha256, bounded_run_detail(detail), source))
         self.db.commit()
 
     def failure(self, source, locator, reason):
@@ -264,7 +289,7 @@ class CareerStore:
         self.task.check(1024**2)
         with self.db:
             self.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-                [(command,value,query_hash,response_hash) for value in sorted(identifiers)])
+                [pack_row((command,value,query_hash,response_hash)) for value in sorted(identifiers)])
             self.db.execute('INSERT INTO discovery_pages VALUES(?,?,?,?,?,?,?)',
                 (feed,before,after,query_hash,response_hash,datetime.now(timezone.utc).isoformat(),row_count))
 
@@ -308,7 +333,12 @@ class CareerStore:
 
     @contextmanager
     def member(self, source, locator):
-        self.task.check(self.task.config["max_member_bytes"] * 3)
+        # The sole-writer OS lock keeps these free pages available to this
+        # connection. SQLite can reuse them without growing the database file.
+        # Keep the fixed task reserve intact for rollback journals/exports and
+        # at least 1 MiB of physical headroom; max_page_count still caps growth.
+        reusable=self.db.execute('PRAGMA freelist_count').fetchone()[0] * self.db.execute('PRAGMA page_size').fetchone()[0]
+        self.task.check(max(1024**2,self.task.config["max_member_bytes"]*3-reusable))
         self.db.execute("BEGIN IMMEDIATE")
         try:
             yield
@@ -325,7 +355,7 @@ class CareerStore:
         self.db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             key, record["person"], record.get("institution"), record["kind"], record.get("stage"),
             record.get("year_start"), record.get("year_end"), record.get("role"), record.get("country"),
-            record["source"], record["locator"], record["status"], pack(canonical(record).decode())))
+            record["source"], record["locator"], record["status"], pack_event(self.db,canonical(record).decode(),record)))
 
     def finish_member(self, source, locator, sha256, status="observed", reason=None):
         old = self.seen(source, locator)

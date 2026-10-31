@@ -91,7 +91,7 @@ class FrozenInputTests(unittest.TestCase):
             expected={public:canonical(rank_global(s,public=public)) for public in (True,False)}
             progress=s.candidate_progress()
             snapshot=freeze_input(s,scope='global-ranking')
-            self.assertEqual(snapshot['projection']['excluded_tables'],{'easy_careers':1,'easy_full_delta':1,'discovery':2,'dump_landing':1})
+            self.assertEqual(snapshot['projection']['excluded_tables'],{'easy_careers':1,'easy_full_delta':1,'discovery':2,'dump_landing':1,'event_dictionaries':0})
             self.assertLess(snapshot['bytes'],1024**2)
             raw=s.task.root/'frozen-inputs'/snapshot['filename']
             self.assertFalse(raw.exists())

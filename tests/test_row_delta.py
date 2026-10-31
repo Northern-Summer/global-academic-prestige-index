@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from gapi.frozen_input import frozen_reader,verified_packed_snapshot
 from gapi.global_analysis import rank_global
-from gapi.row_delta import commands
+from gapi.row_delta import commands,addition_record,restore_addition,FORMAT_V2
 from gapi.row_snapshot import freeze_rows,inspect,ranking_lines
 from gapi.task import BudgetStop,canonical
 import test_global_analysis as analysis
@@ -18,6 +18,42 @@ class RowDeltaTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def test_expanded_event_addition_reconstructs_exact_blob_and_bounds(self):
+        import base64
+        from gapi.event_storage import pack
+        text=canonical({'response_url':'https://example.org/?'+('repeated='*300),'references':[{'value':'证据'*200}]}).decode()
+        stored=pack(text);self.assertIsInstance(stored,bytes)
+        row={'t':'events','v':[['v',str(i)] for i in range(12)]+[['b',base64.b64encode(stored).decode()]]}
+        raw=canonical(row)+b'\n';encoded=addition_record(raw)
+        self.assertTrue(encoded.startswith(b'E'))
+        self.assertEqual(restore_addition(encoded),raw)
+        for changed in ('0'*64,'bad'):
+            wrong=json.loads(encoded[1:]);wrong['v'][-1][2]=changed
+            with self.assertRaises(ValueError):restore_addition(b'E'+canonical(wrong)+b'\n')
+        wrong=json.loads(encoded[1:]);wrong['v'][-1][1]='x'*20000
+        with self.assertRaises(ValueError):restore_addition(b'E'+canonical(wrong)+b'\n')
+        self.assertEqual(addition_record(canonical({'t':'other','v':row['v']})+b'\n'),b'A'+canonical({'t':'other','v':row['v']})+b'\n')
+
+    def test_v2_freeze_restores_compressed_event_and_rejects_tampering(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            base=freeze_rows(s)
+            obj=dict(person='private',institution='wd:Q1',kind='education',stage='doctorate',year_end=2000,
+                     source='wikidata',locator='one',status='observed',evidence='repeated evidence '*200)
+            with s.member('wikidata','one'):s.event(obj)
+            original=list(s.db.execute('SELECT * FROM events'))
+            frozen=freeze_rows(s,base_filename=base['filename'])
+            self.assertEqual(frozen['format'],FORMAT_V2)
+            path=s.task.root/'frozen-inputs'/(frozen['filename']+'.delta.xz')
+            packed=path.read_bytes();raw=lzma.decompress(packed)
+            self.assertIn(b'\nE',raw)
+            with frozen_reader(s,frozen['filename']):self.assertEqual(list(s.db.execute('SELECT * FROM events')),original)
+            # The old format cannot silently accept a command it cannot decode.
+            path.write_bytes(lzma.compress(raw.replace(FORMAT_V2.encode(),b'gapi-private-ranking-row-delta/1',1),preset=3))
+            with self.assertRaisesRegex(ValueError,'invalid row delta command'):inspect(path,s.task)
+            path.write_bytes(packed)
+        finally:s.close()
 
     def test_exact_stream_scores_idempotence_and_restore_with_changes(self):
         s=self.store(fixtures.archive([]))

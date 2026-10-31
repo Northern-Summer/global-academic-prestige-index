@@ -12,6 +12,7 @@ from urllib.error import HTTPError
 from .career_rules import classify, year, valid_orcid
 from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
+from .queue_storage import pack_row
 from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS, WIKIDATA_BATCH_LIMIT
 
 # Historical acquisition/v1 mapping, frozen by sources.lock.json. Q177232 was
@@ -132,7 +133,7 @@ def commit_wikidata_entity(store, qid, entity, checksum, *, batch_url=None, batc
         if len(ids)==1:
             query_hash=digest({'rule':'wikidata-explicit-orcid-followup/1','locator':locator})
             store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-                ('ingest-orcid-api',next(iter(ids)),query_hash,checksum))
+                pack_row(('ingest-orcid-api',next(iter(ids)),query_hash,checksum)))
 
 
 def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch_size=1, report=True):

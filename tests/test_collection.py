@@ -101,6 +101,31 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
         finally:s.close()
 
+    def test_large_failure_summary_keeps_deadline_and_request_controls_parseable(self):
+        import json
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            failures=[{'entity':f'Q{i}','reason':'unavailable '*40} for i in range(20)]
+            details={'requested':200,'failures':failures,'stage_time_exhausted':True}
+            s.status('wikidata','partial',detail=json.dumps(details))
+            stored=s.db.execute("SELECT detail FROM runs WHERE source='wikidata'").fetchone()[0]
+            self.assertLessEqual(len(stored),1024)
+            parsed=json.loads(stored)
+            self.assertTrue(parsed['stage_time_exhausted'])
+            self.assertEqual(parsed['requested'],200)
+            self.assertEqual(parsed['failure_summary_count'],20)
+            self.assertTrue(parsed['failure_summary_truncated'])
+            self.assertEqual(parsed['failures'],failures[:len(parsed['failures'])])
+            s.status('wikidata','partial',detail=json.dumps(details))
+            self.assertEqual(stored,s.db.execute("SELECT detail FROM runs WHERE source='wikidata'").fetchone()[0])
+            small=json.dumps({'requested':1,'failures':[],'stage_time_exhausted':False})
+            s.status('wikidata','partial',detail=small)
+            self.assertEqual(small,s.db.execute("SELECT detail FROM runs WHERE source='wikidata'").fetchone()[0])
+            with self.assertRaises(ValueError):s.status('wikidata','failed',detail=json.dumps({'control':'x'*2000}))
+            self.assertEqual(('partial',small),s.db.execute("SELECT status,detail FROM runs WHERE source='wikidata'").fetchone())
+        finally:s.close()
+
     def test_acquisition_window_exhaustion_does_not_suspend_or_fail_the_source(self):
         import json
         from gapi.source_http import StageDeadline
@@ -112,7 +137,9 @@ class CollectionTests(unittest.TestCase):
                     def ingest(store,http,ids,**kwargs):
                         store.start('wikidata')
                         if raised:raise StageDeadline('finite window ended')
-                        store.status('wikidata','partial',detail=json.dumps({'stage_time_exhausted':True}))
+                        store.status('wikidata','partial',detail=json.dumps({'requested':200,
+                            'failures':[{'reason':'source timeout '*40} for _ in range(20)],
+                            'stage_time_exhausted':True}))
                     with patch('gapi.collection.ingest_wikidata',side_effect=ingest):
                         result=collect(s,None,max_seconds=10,discovery=False)
                     self.assertNotIn('ingest-wikidata',result['suspended_sources'])

@@ -5,6 +5,7 @@ baseline and reconstructed target hashes must match. Chains are deliberately not
 accepted: every delta depends on exactly one full, independently retained input.
 """
 from collections import deque
+import base64
 import hashlib
 import json
 import lzma
@@ -14,9 +15,58 @@ import re
 from .task import canonical
 
 FORMAT='gapi-private-ranking-row-delta/1'
+FORMAT_V2='gapi-private-ranking-row-delta/2'
 WINDOW=32
 WINDOW_BYTES=4*1024**2
 MAX_RUN=1000000
+
+
+def addition_record(value):
+    """Expose repeated normalized JSON to stream compression, restoring exact BLOBs.
+
+    GAPIz1 already compressed each event before the row archive's Base64 layer.
+    For matching canonical events only, E carries its decoded text plus the old
+    BLOB digest; reconstruction must reproduce that exact original row line.
+    Unknown schemas, codecs and noncanonical rows retain the ordinary A command.
+    """
+    from .event_storage import MAGIC, pack, unpack
+    from .row_snapshot import MAX_LINE
+    row=json.loads(value)
+    if not isinstance(row,dict) or set(row)!={'t','v'} or row['t']!='events':return b'A'+value
+    cells=row['v']
+    if not isinstance(cells,list) or len(cells)!=13:return b'A'+value
+    cell=cells[-1]
+    if not isinstance(cell,list) or len(cell)!=2 or cell[0]!='b' or not isinstance(cell[1],str):return b'A'+value
+    try:stored=base64.b64decode(cell[1],validate=True)
+    except ValueError:return b'A'+value
+    if not stored.startswith(MAGIC):return b'A'+value
+    text=unpack(stored)
+    if pack(text)!=stored:return b'A'+value
+    if canonical(row)+b'\n'!=value:return b'A'+value
+    row['v'][-1]=['z1',text,hashlib.sha256(stored).hexdigest()]
+    encoded=b'E'+canonical(row)+b'\n'
+    return encoded if len(encoded)<=MAX_LINE+1 else b'A'+value
+
+
+def restore_addition(record):
+    from .event_storage import pack, MAX_BYTES
+    from .row_snapshot import MAX_LINE
+    row=json.loads(record[1:])
+    if (not isinstance(row,dict) or set(row)!={'t','v'} or row.get('t')!='events'
+            or not isinstance(row.get('v'),list) or len(row['v'])!=13):
+        raise ValueError('invalid expanded event addition')
+    cell=row['v'][-1]
+    if (not isinstance(cell,list) or len(cell)!=3 or cell[0]!='z1'
+            or not isinstance(cell[1],str) or len(cell[1].encode('utf-8'))>MAX_BYTES
+            or not isinstance(cell[2],str) or not re.fullmatch('[a-f0-9]{64}',cell[2])):
+        raise ValueError('invalid expanded event payload')
+    stored=pack(cell[1])
+    if not isinstance(stored,bytes) or hashlib.sha256(stored).hexdigest()!=cell[2]:
+        raise ValueError('expanded event reconstruction mismatch')
+    row['v'][-1]=['b',base64.b64encode(stored).decode('ascii')]
+    value=canonical(row)+b'\n'
+    if len(value)>MAX_LINE:raise ValueError('expanded event row exceeds bound')
+    return value
 
 
 def baseline(task, filename):
@@ -37,7 +87,7 @@ def decoded_lines(path, task):
     base=None
     try:
         header=json.loads(next(records))
-        if not isinstance(header,dict) or header.get('format')!=FORMAT:
+        if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2):
             raise ValueError('unsupported row delta')
         base_path=baseline(task,header.get('base'))
         base=iter(lines(base_path,task))
@@ -53,6 +103,8 @@ def decoded_lines(path, task):
                 values=(record[1:],)
                 if len(values[0])>MAX_LINE or values[0]==b'\n':
                     raise ValueError('invalid delta addition')
+            elif record.startswith(b'E') and header['format']==FORMAT_V2:
+                values=(restore_addition(record),)
             elif re.fullmatch(rb'[CS] [1-9][0-9]{0,6}\n',record):
                 count=int(record[2:])
                 if count>MAX_RUN:raise ValueError('row delta run exceeds bound')
@@ -149,7 +201,7 @@ def freeze_delta(store, filename):
                 packed=encoder.compress(value)
                 if packed:
                     write(packed)
-            emit(canonical({'format':FORMAT,'base':filename})+b'\n')
+            emit(canonical({'format':FORMAT_V2,'base':filename})+b'\n')
             old=lines(base_path,task);new=ranking_lines(store)
             operation=None;run=0
             def flush():
@@ -157,7 +209,7 @@ def freeze_delta(store, filename):
                 if run:emit(f'{operation} {run}\n'.encode());run=0
             for op,value in commands(iter(observed(old,old_hash)),iter(observed(new,new_hash,True))):
                 if op=='A':
-                    flush();operation=None;emit(b'A'+value)
+                    flush();operation=None;emit(addition_record(value))
                 else:
                     if operation!=op or run==MAX_RUN:flush()
                     operation=op;run+=1
@@ -176,8 +228,14 @@ def freeze_delta(store, filename):
             if inspect(chosen,task)!=(checksum,total):raise ValueError('existing row input mismatch')
             temporary.unlink()
         else:os.replace(temporary,target)
+        actual_format=ROW_FORMAT
+        if chosen!=full:
+            from .row_snapshot import _packed_lines
+            records=_packed_lines(chosen,task)
+            try:actual_format=json.loads(next(records))['format']
+            finally:records.close()
         result={'sha256':checksum,'filename':checksum+'.rows','bytes':total,
-            'packed_bytes':chosen.stat().st_size,'format':ROW_FORMAT if chosen==full else FORMAT,
+            'packed_bytes':chosen.stat().st_size,'format':actual_format,
             'contains_personal_input':True,'publicly_bundled':False,
             'restoration_requires_separate_resource_admission':True}
         if chosen!=full:result.update(base_filename=filename,logical_format=ROW_FORMAT)

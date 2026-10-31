@@ -19,6 +19,7 @@ from .global_sources import wd_value
 from .orcid_stream import CHUNK
 from .career_rules import valid_orcid
 from .task import BudgetStop, canonical, digest
+from .queue_storage import pack_row
 from .source_http import StageDeadline
 
 MAX_LINE = 2*1024**2
@@ -167,7 +168,7 @@ def discover_dump(store, http, spec, *, max_seconds=300, max_bytes=None, progres
         else:
             observed_bytes, observed_hash = old_bytes, previous[7] if previous else None
         with store.db:
-            store.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',batch)
+            store.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',map(pack_row,batch))
             store.db.execute('''UPDATE discovery_feeds SET status=?,compressed_bytes=?,lines=?,candidates=?,rejected=?,sha256=?,detail=?,prefix_sha256=? WHERE id=?''',
                 (status,observed_bytes,max(lines,replay_until),candidates,rejected,
                  observed_hash,detail,

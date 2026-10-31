@@ -1,37 +1,60 @@
 """Lossless event-payload storage, independent of scientific interpretation.
 
-TEXT remains readable. GAPIz1 BLOBs decode to the exact original UTF-8 text at
-owned SQLite reader boundaries, so event identities and release hashes survive.
+TEXT remains readable. GAPIz1 and shared-dictionary GAPIz2 BLOBs decode to the
+exact original UTF-8 text at owned SQLite reader boundaries, so event identities
+and logical release inputs survive.
 No raw source bodies enter this format.
 """
 import hashlib
+import json
 import math
 import time
 import zlib
+from .queue_storage import COLUMNS, unpack_digest
 
 MAGIC = b'GAPIz1\0'
 MAX_BYTES = 16384
+DICT_MAGIC = b'GAPIz2\0'
+MAX_DICTIONARY_BYTES = 8192
+DICTIONARY_DDL = '''CREATE TABLE IF NOT EXISTS event_dictionaries(
+ digest BLOB PRIMARY KEY, compressed_bytes BLOB NOT NULL);'''
 
 
-def pack(text):
+def pack(text, *, dictionary=None):
     raw = text.encode('utf-8')
     if len(raw) > MAX_BYTES:
         raise ValueError('normalized event exceeds 16 KiB')
-    encoded = MAGIC + len(raw).to_bytes(4, 'big') + zlib.compress(raw, 6)
+    if dictionary is None:
+        encoded = MAGIC + len(raw).to_bytes(4, 'big') + zlib.compress(raw, 6)
+    else:
+        if not isinstance(dictionary,bytes) or not 0<len(dictionary)<=MAX_DICTIONARY_BYTES:
+            raise ValueError('invalid event dictionary size')
+        encoder=zlib.compressobj(6,zdict=dictionary)
+        encoded=(DICT_MAGIC+len(raw).to_bytes(4,'big')+hashlib.sha256(dictionary).digest()
+                 +encoder.compress(raw)+encoder.flush())
     return encoded if len(encoded) + 32 < len(raw) else text
 
 
-def unpack(value):
+def unpack(value, *, dictionary_lookup=None):
     if isinstance(value, str):
         return value
-    if not isinstance(value, bytes) or not value.startswith(MAGIC):
+    if not isinstance(value, bytes) or not value.startswith((MAGIC,DICT_MAGIC)):
         raise ValueError('unsupported event payload storage format')
     header = len(MAGIC) + 4
     expected = int.from_bytes(value[len(MAGIC):header], 'big')
     if len(value) < header or not 0 < expected <= MAX_BYTES or len(value) > MAX_BYTES:
         raise ValueError('invalid compressed event size')
     try:
-        decoder = zlib.decompressobj()
+        if value.startswith(DICT_MAGIC):
+            if dictionary_lookup is None or len(value)<header+32:
+                raise ValueError('event dictionary lookup required')
+            key=value[header:header+32];header+=32
+            dictionary=dictionary_lookup(key)
+            if (not isinstance(dictionary,bytes) or not 0<len(dictionary)<=MAX_DICTIONARY_BYTES
+                    or hashlib.sha256(dictionary).digest()!=key):
+                raise ValueError('event dictionary integrity mismatch')
+            decoder=zlib.decompressobj(zdict=dictionary)
+        else:decoder = zlib.decompressobj()
         raw = decoder.decompress(value[header:], MAX_BYTES + 1)
         if (len(raw) != expected or not decoder.eof or decoder.unused_data
                 or decoder.unconsumed_tail):
@@ -41,22 +64,80 @@ def unpack(value):
         raise ValueError('invalid compressed event payload') from exc
 
 
-def payload_row(cursor, row):
-    """Preserve tuple API, exposing payload columns as their original TEXT.
+def payload_row(cursor, row, *, decode=unpack):
+    """Preserve tuple API, exposing owned encoded columns as original TEXT.
 
     Aliasing a raw column as stored_payload explicitly inspects physical bytes.
-    No other BLOB column is interpreted or modified.
+    Candidate query_sha256/response_sha256 columns use their own lossless codec.
+    Other BLOB columns are not interpreted or modified.
     """
+    if any(column[0] in COLUMNS and isinstance(value,bytes)
+           for column,value in zip(cursor.description,row)):
+        row=tuple(unpack_digest(value) if column[0] in COLUMNS and isinstance(value,bytes)
+                  else value for column,value in zip(cursor.description,row))
     if any(column[0] == 'payload' and isinstance(value, bytes)
            for column, value in zip(cursor.description, row)):
-        return tuple(unpack(value) if column[0] == 'payload' and isinstance(value, bytes)
+        return tuple(decode(value) if column[0] == 'payload' and isinstance(value, bytes)
                      else value for column, value in zip(cursor.description, row))
     return row
 
 
 def configure_reader(db):
-    db.row_factory = payload_row
-    db.create_function('gapi_event_text', 1, unpack, deterministic=True)
+    def decode(value):return decode_event(db,value)
+    def row_factory(cursor,row):return payload_row(cursor,row,decode=decode)
+    db.row_factory = row_factory
+    db.create_function('gapi_event_text', 1, decode, deterministic=True)
+
+
+def load_dictionary(db, key):
+    # No persistent cache: every read checks its content-addressed dependency,
+    # including on restored snapshots and after a malicious database mutation.
+    reader=db.cursor();reader.row_factory=None
+    try:row=reader.execute('SELECT compressed_bytes FROM event_dictionaries WHERE digest=?',(key,)).fetchone()
+    finally:reader.close()
+    if not row:raise ValueError('event dictionary missing')
+    try:
+        decoder=zlib.decompressobj()
+        raw=decoder.decompress(row[0],MAX_DICTIONARY_BYTES+1)
+        if (not raw or len(raw)>MAX_DICTIONARY_BYTES or not decoder.eof
+                or decoder.unused_data or decoder.unconsumed_tail):
+            raise ValueError('invalid event dictionary framing')
+        return raw
+    except zlib.error as exc:raise ValueError('invalid compressed event dictionary') from exc
+
+
+def decode_event(db, value):
+    return unpack(value,dictionary_lookup=lambda key:load_dictionary(db,key))
+
+
+def snapshot_payload(db, value):
+    """Keep ranking snapshots self-contained in the existing GAPIz1 format."""
+    if isinstance(value,bytes) and value.startswith(DICT_MAGIC):
+        return pack(decode_event(db,value))
+    return value
+
+
+def response_dictionary(record):
+    url=record.get('response_url')
+    if record.get('transport')!='wikibase-claims-info-batch/v1' or not isinstance(url,str):return None
+    raw=url.encode('utf-8')
+    return raw if 0<len(raw)<=MAX_DICTIONARY_BYTES else None
+
+
+def pack_event(db, text, record):
+    """Share exact batch URL bytes; do not remove any event fact or provenance."""
+    baseline=pack(text);dictionary=response_dictionary(record)
+    if dictionary is None:return baseline
+    candidate=pack(text,dictionary=dictionary)
+    baseline_size=len(baseline.encode('utf-8')) if isinstance(baseline,str) else len(baseline)
+    if not isinstance(candidate,bytes) or len(candidate)+64>=baseline_size:return baseline
+    if not db.in_transaction:raise ValueError('dictionary and event require one transaction')
+    key=hashlib.sha256(dictionary).digest()
+    db.execute('INSERT OR IGNORE INTO event_dictionaries VALUES(?,?)',(key,zlib.compress(dictionary,6)))
+    # An existing conflicting dictionary must never be silently accepted.
+    if load_dictionary(db,key)!=dictionary:raise ValueError('event dictionary conflict')
+    if decode_event(db,candidate)!=text:raise ValueError('event dictionary roundtrip mismatch')
+    return candidate
 
 
 def logical_event_hash(db):
@@ -100,12 +181,13 @@ def compact_events(store, *, max_events=5000, max_seconds=120):
             'note': 'payload savings and reusable pages are not filesystem bytes reclaimed'}
 
 
-def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60):
-    """Rebalance bounded contiguous rows, retaining rowids and exact stored bytes.
+def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60, share_responses=False):
+    """Rebalance bounded contiguous rows, retaining rowids and decoded facts.
 
     The caller owns CareerStore's writer lock. Every <=128-row batch is one
     rollback-protected transaction; the returned cursor advances only after
-    commit. No payload codec, schema, facts or persistent checkpoint is added.
+    commit. Default mode retains physical bytes. Optional response sharing
+    changes only the payload codec, retaining every original decoded byte.
     """
     if type(after_rowid) is not int or after_rowid<0:
         raise ValueError('invalid event page cursor')
@@ -113,6 +195,7 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
         raise ValueError('invalid event page limit')
     if not math.isfinite(max_seconds) or max_seconds<=0:
         raise ValueError('invalid event page deadline')
+    if type(share_responses) is not bool:raise ValueError('invalid response sharing policy')
     if store.db.in_transaction:raise ValueError('cannot repack unfinished transaction')
     if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='events'").fetchone():
         raise ValueError('event page repack forbids triggers')
@@ -125,7 +208,8 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
     def pages():
         return (store.db.execute('PRAGMA page_count').fetchone()[0],
                 store.db.execute('PRAGMA freelist_count').fetchone()[0])
-    before=pages();deadline=time.monotonic()+max_seconds;scanned=0;cursor=after_rowid
+    payload_index=columns.index('payload')+1
+    before=pages();deadline=time.monotonic()+max_seconds;scanned=changed=saved=0;cursor=after_rowid
     while scanned<max_events and time.monotonic()<deadline:
         store.task.check_memory()
         reader=store.db.cursor();reader.row_factory=None
@@ -134,19 +218,34 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
         finally:reader.close()
         if not rows:break
         with store.member('storage-page-repack','events'):
-            store.db.executemany('DELETE FROM events WHERE rowid=?',[(row[0],) for row in rows])
-            store.db.executemany(insert,rows)
+            expected=[];converted=0;batch_saved=0
+            for row in rows:
+                value=row[payload_index];replacement=value
+                if share_responses and not (isinstance(value,bytes) and value.startswith(DICT_MAGIC)):
+                    text=decode_event(store.db,value)
+                    candidate=pack_event(store.db,text,json.loads(text))
+                    if isinstance(candidate,bytes) and candidate.startswith(DICT_MAGIC):
+                        replacement=candidate;converted+=1
+                        batch_saved+=(len(value.encode('utf-8')) if isinstance(value,str) else len(value))-len(candidate)
+                        if decode_event(store.db,candidate)!=text:raise ValueError('shared response changed event bytes')
+                expected.append((*row[:payload_index],replacement,*row[payload_index+1:]))
+            if not share_responses or converted:
+                store.db.executemany('DELETE FROM events WHERE rowid=?',[(row[0],) for row in rows])
+                store.db.executemany(insert,expected)
             store.task.check_memory()
             reader=store.db.cursor();reader.row_factory=None
             try:actual=reader.execute('SELECT rowid,* FROM events WHERE rowid>=? AND rowid<=? ORDER BY rowid',
                                      (rows[0][0],rows[-1][0])).fetchall()
             finally:reader.close()
-            if actual!=rows:raise ValueError('event page repack changed stored rows')
+            if actual!=expected:raise ValueError('event page repack changed stored rows')
+        changed+=converted;saved+=batch_saved
         scanned+=len(rows);cursor=rows[-1][0]
     after=pages();size=store.db.execute('PRAGMA page_size').fetchone()[0]
     return {'scanned_events':scanned,'after_rowid':cursor,
+            'shared_response_events':changed,'event_payload_bytes_saved':saved,
             'allocated_pages_before':before[0],'allocated_pages_after':after[0],
             'freelist_pages_before':before[1],'freelist_pages_after':after[1],
             'net_reusable_bytes':((before[0]-before[1])-(after[0]-after[1]))*size,
-            'physical_file_bytes_reclaimed':0,'stored_rows_unchanged':True,
+            'physical_file_bytes_reclaimed':0,'stored_rows_unchanged':changed==0,
+            'logical_event_bytes_unchanged':True,
             'note':'internal reusable capacity only; resume with committed after_rowid'}

@@ -13,7 +13,7 @@ from contextlib import closing
 from .task import canonical, digest
 
 POLICY = 'global-ranking-private-snapshot/1'
-EXCLUDED_TABLES = frozenset({'easy_careers', 'easy_full_delta','dump_landing','discovery'})
+EXCLUDED_TABLES = frozenset({'easy_careers', 'easy_full_delta','dump_landing','discovery','event_dictionaries'})
 METADATA_TABLE = 'gapi_snapshot_scope'
 
 
@@ -107,12 +107,14 @@ def build(store, target):
                 try:
                     for row in reader.execute('SELECT * FROM '+quoted(name)+' ORDER BY '+ordering):
                         if name=='events':
-                            from .event_storage import pack
+                            from .event_storage import pack, snapshot_payload
                             # Same lossless storage owner as live ingestion. Logical
                             # event bytes/hashes are preserved; raw GAPIz1 stays raw.
                             payload_column=next(i for i,c in enumerate(columns) if c[1]=='payload')
                             if isinstance(row[payload_column],str):
                                 row=list(row);row[payload_column]=pack(row[payload_column]);row=tuple(row)
+                            else:
+                                row=list(row);row[payload_column]=snapshot_payload(store.db,row[payload_column]);row=tuple(row)
                         size = sum(len(v.encode('utf-8')) if isinstance(v,str)
                                    else len(v) if isinstance(v,bytes) else 16 for v in row)
                         if size > store.task.config['max_member_bytes']:
