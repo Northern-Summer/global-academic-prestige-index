@@ -1,0 +1,8 @@
+{
+  "candidate": "exact members join plus materialized prefix join",
+  "disposition": "rejected; no publication",
+  "reason": "EXPLAIN moved repeated scan from exact keys to prefix keys; fresh query remained slow",
+  "execution": "cancelled with read-only comparison terminal; partial results retained",
+  "partial_log": "outputs/QUEUE_INDEX_AB_060.txt",
+  "production_resolution": "one-time IN sets; equivalence and VM negative control in 061"
+}

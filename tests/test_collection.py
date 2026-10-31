@@ -409,6 +409,54 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(s.db.execute('SELECT attempts,next_attempt_at FROM discovery_retries').fetchone(),(2,280))
         finally:s.close()
 
+    def test_pending_matches_original_membership_for_unusual_identifiers_and_retries(self):
+        s=self.store(archive([]))
+        try:
+            identifiers=['Q1','Q2','Q3','Q4','q5','Q6','Q7','Q8','Q%','Q_','',
+                'Q9\0tail','学校','A-B','due','future','orcid-only']
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-wikidata',value,'a','b') for value in identifiers])
+                s.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',[
+                    ('wikidata',value,'a'*64,status,None) for value,status in [
+                        ('Q1','observed'),('Q2@1','observed'),('Q2@2','rejected'),
+                        ('Q3@1','rejected'),('Q5@1','observed'),('Q9\0tail','observed'),
+                        ('学校@1','observed'),('A-B@1','observed')]])
+                s.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',
+                    ('orcid-public-api','orcid-only','b'*64,'observed',None))
+            for value,when in [('due',100),('future',200)]:s.defer('ingest-wikidata',value,'fixture',now=when)
+            for limit in [1,2,4,8,100]:
+                original='''SELECT d.identifier FROM discovery d LEFT JOIN discovery_retries r
+                    ON r.source=d.source AND r.identifier=d.identifier
+                    WHERE d.source='ingest-wikidata' AND COALESCE(r.next_attempt_at,0)<=160
+                    AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source='wikidata'
+                        AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%'))'''
+                due=[r[0] for r in s.db.execute(original+' AND r.identifier IS NOT NULL ORDER BY r.next_attempt_at,d.identifier LIMIT ?',(limit,))]
+                reserved=min(len(due),max(1,limit//4))
+                fresh=[r[0] for r in s.db.execute(original+' AND r.identifier IS NULL ORDER BY d.identifier LIMIT ?',(limit-reserved,))]
+                expected=due[:reserved]+fresh+due[reserved:limit-len(fresh)]
+                self.assertEqual(s.pending('ingest-wikidata',limit,now=160),expected)
+        finally:s.close()
+
+    def test_pending_avoids_quadratic_processed_prefix_scan(self):
+        # A VM-instruction ceiling is independent of machine speed. Repeating
+        # either 3,000-member join for every candidate exhausts this budget.
+        s=self.store(archive([]));ticks=[0]
+        def ceiling():
+            ticks[0]+=1
+            return int(ticks[0]>=2000)
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-wikidata',f'Q{i:06d}','a','b') for i in range(3200)])
+                s.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',[
+                    ('wikidata',f'Q{i:06d}@1','a'*64,'observed',None) for i in range(3000)])
+            s.db.set_progress_handler(ceiling,1000)
+            self.assertEqual(s.pending('ingest-wikidata',200,now=160),
+                [f'Q{i:06d}' for i in range(3000,3200)])
+            self.assertLess(ticks[0],2000)
+        finally:s.db.set_progress_handler(None,0);s.close()
+
     def test_due_retry_gets_reserved_capacity_with_many_new_candidates(self):
         s=self.store(archive([]))
         try:

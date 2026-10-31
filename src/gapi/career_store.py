@@ -176,19 +176,19 @@ class CareerStore:
             SELECT locator,CASE WHEN instr(locator,'@')>0 AND
                 (instr(locator,char(0))=0 OR instr(locator,'@')<instr(locator,char(0)))
                 THEN lower(substr(locator,1,instr(locator,'@')-1)) END AS prefix
-            FROM members WHERE source=?),
-            exact_keys AS MATERIALIZED (SELECT DISTINCT locator FROM member_keys),
-            prefix_keys AS MATERIALIZED (SELECT DISTINCT prefix FROM member_keys WHERE prefix IS NOT NULL)
+            FROM members WHERE source=?)
             SELECT d.identifier FROM discovery d
             LEFT JOIN discovery_retries r ON r.source=d.source AND r.identifier=d.identifier
-            LEFT JOIN exact_keys e ON e.locator=d.identifier
-            LEFT JOIN prefix_keys p ON p.prefix=lower(d.identifier)
             WHERE d.source=? AND COALESCE(r.next_attempt_at,0)<=?
             AND CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
                 AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
-                THEN e.locator IS NULL AND p.prefix IS NULL
+                THEN d.identifier NOT IN (SELECT locator FROM member_keys)
+                    AND lower(d.identifier) NOT IN (SELECT prefix FROM member_keys WHERE prefix IS NOT NULL)
                 ELSE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
                     AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END'''
+        # IN builds each membership set once. LEFT JOINs on materialized keys
+        # can make SQLite choose repeated scans of either exact or prefix keys.
+        # Both sets exclude NULL, preserving the original NOT EXISTS predicate.
         parameters=(sources[command],command,time.time() if now is None else now,sources[command])
         # Reserve a quarter of a normal batch for due retries so a continuing
         # stream of fresh candidates cannot starve recovered records forever.

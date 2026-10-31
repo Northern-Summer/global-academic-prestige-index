@@ -1,0 +1,21 @@
+{
+  "results": [
+    {
+      "variant": "legacy",
+      "tests": 1,
+      "failures": 0,
+      "errors": 1,
+      "interrupted": true
+    },
+    {
+      "variant": "current",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "interrupted": false
+    }
+  ],
+  "budget_vm_steps": 2000000,
+  "candidates": 3200,
+  "processed_members": 3000
+}
