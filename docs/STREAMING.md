@@ -245,7 +245,11 @@ more expensive join may time out on the public service. ORCID discovery groups
 identifiers per person to avoid splitting a conflicting identity across pages.
 
 `rank-global` creates a compact institution-only local view in the external task
-directory. Its manifest pins the exact JSON bytes. It may contain observed scores
+directory. The CLI stores deterministic gzip and its manifest pins both stored
+and decoded bytes. The development server and local production builds use the
+same bounded snapshot reader, while retaining support for legacy JSON inputs.
+The browser URL remains `global-local.json`; no personal input is exposed.
+It may contain observed scores
 but never a formal rank without the required evidence and external review. Unknown
 award and composite scores are null. A network's frozen node universe includes all
 accepted relation endpoints, irrespective of formal eligibility. Directory-only
