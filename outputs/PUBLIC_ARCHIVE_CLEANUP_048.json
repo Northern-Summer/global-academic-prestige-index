@@ -1,0 +1,18 @@
+{
+  "scope": "one inactive institution aggregates; private inputs untouched",
+  "files": [
+    {
+      "source": "global-d2bff65b7aba2444.json",
+      "archive": "global-d2bff65b7aba2444.json.gz",
+      "original_sha256": "d2bff65b7aba2444e964a6d0c9992284f19dedd971f49c029e16e09175f82e62",
+      "original_bytes": 21291700,
+      "packed_bytes": 872687,
+      "public_commit_with_original": "c5ad11aefd94c91058c3ee7dbeb7f908817ee8a7",
+      "verified_decode": true
+    }
+  ],
+  "logical_bytes_reclaimed": 20419013,
+  "selected_snapshot_preserved": "global-6ebaae7c7ae7c073.json",
+  "restore": "gzip decode locally or git show the recorded public commit",
+  "new_raw_sources_saved": false
+}

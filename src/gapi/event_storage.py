@@ -98,3 +98,55 @@ def compact_events(store, *, max_events=5000, max_seconds=120):
             'payload_bytes_saved': saved, 'database_bytes': (store.task.root/'careers.sqlite').stat().st_size,
             'freelist_pages': store.db.execute('PRAGMA freelist_count').fetchone()[0],
             'note': 'payload savings and reusable pages are not filesystem bytes reclaimed'}
+
+
+def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60):
+    """Rebalance bounded contiguous rows, retaining rowids and exact stored bytes.
+
+    The caller owns CareerStore's writer lock. Every <=128-row batch is one
+    rollback-protected transaction; the returned cursor advances only after
+    commit. No payload codec, schema, facts or persistent checkpoint is added.
+    """
+    if type(after_rowid) is not int or after_rowid<0:
+        raise ValueError('invalid event page cursor')
+    if type(max_events) is not int or not 1<=max_events<=100000:
+        raise ValueError('invalid event page limit')
+    if not math.isfinite(max_seconds) or max_seconds<=0:
+        raise ValueError('invalid event page deadline')
+    if store.db.in_transaction:raise ValueError('cannot repack unfinished transaction')
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='events'").fetchone():
+        raise ValueError('event page repack forbids triggers')
+    from .ranking_snapshot import quoted
+    for (name,) in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        if any(row[2]=='events' for row in store.db.execute('PRAGMA foreign_key_list('+quoted(name)+')')):
+            raise ValueError('event page repack forbids incoming foreign keys')
+    columns=[row[1] for row in store.db.execute('PRAGMA table_info(events)')]
+    insert='INSERT INTO events(rowid,'+','.join(map(quoted,columns))+') VALUES('+','.join('?' for _ in range(len(columns)+1))+')'
+    def pages():
+        return (store.db.execute('PRAGMA page_count').fetchone()[0],
+                store.db.execute('PRAGMA freelist_count').fetchone()[0])
+    before=pages();deadline=time.monotonic()+max_seconds;scanned=0;cursor=after_rowid
+    while scanned<max_events and time.monotonic()<deadline:
+        store.task.check_memory()
+        reader=store.db.cursor();reader.row_factory=None
+        try:rows=reader.execute('SELECT rowid,* FROM events WHERE rowid>? ORDER BY rowid LIMIT ?',
+                              (cursor,min(128,max_events-scanned))).fetchall()
+        finally:reader.close()
+        if not rows:break
+        with store.member('storage-page-repack','events'):
+            store.db.executemany('DELETE FROM events WHERE rowid=?',[(row[0],) for row in rows])
+            store.db.executemany(insert,rows)
+            store.task.check_memory()
+            reader=store.db.cursor();reader.row_factory=None
+            try:actual=reader.execute('SELECT rowid,* FROM events WHERE rowid>=? AND rowid<=? ORDER BY rowid',
+                                     (rows[0][0],rows[-1][0])).fetchall()
+            finally:reader.close()
+            if actual!=rows:raise ValueError('event page repack changed stored rows')
+        scanned+=len(rows);cursor=rows[-1][0]
+    after=pages();size=store.db.execute('PRAGMA page_size').fetchone()[0]
+    return {'scanned_events':scanned,'after_rowid':cursor,
+            'allocated_pages_before':before[0],'allocated_pages_after':after[0],
+            'freelist_pages_before':before[1],'freelist_pages_after':after[1],
+            'net_reusable_bytes':((before[0]-before[1])-(after[0]-after[1]))*size,
+            'physical_file_bytes_reclaimed':0,'stored_rows_unchanged':True,
+            'note':'internal reusable capacity only; resume with committed after_rowid'}

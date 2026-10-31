@@ -13,6 +13,11 @@ from .task import Task
 
 
 def register(sub):
+    repack=sub.add_parser('repack-event-pages',help='rebalance event pages without changing stored rows or rowids')
+    repack.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    repack.add_argument('--after-rowid',type=int,default=0)
+    repack.add_argument('--max-events',type=int,default=20000)
+    repack.add_argument('--max-seconds',type=float,default=60)
     compact_snapshots=sub.add_parser('compact-frozen-inputs',help='losslessly pack selected private derived snapshots under the writer lock')
     compact_snapshots.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     compact_snapshots.add_argument('--filenames',nargs='+',required=True)
@@ -111,7 +116,7 @@ def register(sub):
 
 def execute(args):
     names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
-    if args.command not in names and args.command not in ('compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
+    if args.command not in names and args.command not in ('repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
     task = Task(args.task)
     task.activate_runtime()
@@ -176,6 +181,10 @@ def execute_task(task, args):
             result=ingest(store,http,load_spec(args.source),max_records=args.max_records,
                           max_seconds=args.max_seconds,
                           progress=lambda r:print(json.dumps({'bulk_progress':r}),flush=True))
+        elif args.command == 'repack-event-pages':
+            from .event_storage import repack_event_pages
+            result=repack_event_pages(store,after_rowid=args.after_rowid,
+                                      max_events=args.max_events,max_seconds=args.max_seconds)
         elif args.command == 'compact-events':
             from .event_storage import compact_events
             result=compact_events(store,max_events=args.max_events,max_seconds=args.max_seconds)

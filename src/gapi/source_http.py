@@ -16,6 +16,8 @@ from urllib.parse import urlsplit, parse_qs
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from urllib.robotparser import RobotFileParser
 
+from .persistent_http import read_chunk
+
 USER_AGENT = "GAPI/0.2 (+https://github.com/Northern-Summer/global-academic-prestige-index; research)"
 # Official anonymous quota, checked 2026-10-29:
 # https://info.orcid.org/ufaqs/what-are-the-api-limits/
@@ -88,7 +90,7 @@ class SourceResponse:
         if size<0:raise ValueError('unbounded source read forbidden')
         self.check_deadline()
         try:
-            return self.response.read(min(size,65536))
+            return read_chunk(self.response,min(size,65536))
         except (TimeoutError, URLError, ConnectionError):
             # A socket uses the remaining stage time as its timeout. Preserve a
             # genuine early transport failure; classify expiration at the owner.

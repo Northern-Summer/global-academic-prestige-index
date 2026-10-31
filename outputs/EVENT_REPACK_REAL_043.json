@@ -1,0 +1,27 @@
+{
+  "scope": "next 40000 rows, exact-byte guarded continuation of passed real trial",
+  "status": "passed",
+  "raw_saved": false,
+  "full_database_copy": false,
+  "events": 140723,
+  "stored_hash_before": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "result": {
+    "scanned_events": 40000,
+    "after_rowid": 45000,
+    "allocated_pages_before": 312488,
+    "allocated_pages_after": 312488,
+    "freelist_pages_before": 1011,
+    "freelist_pages_after": 10332,
+    "net_reusable_bytes": 38178816,
+    "physical_file_bytes_reclaimed": 0,
+    "stored_rows_unchanged": true,
+    "note": "internal reusable capacity only; resume with committed after_rowid"
+  },
+  "stored_hash_after": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "score_recomputed_this_batch": false,
+  "prior_exact_input_score_evidence": "outputs/EVENT_REPACK_REAL_042.json",
+  "integrity": "ok",
+  "used_bytes": 1827322028,
+  "memory_bytes": 36651008,
+  "seconds": 23.813
+}

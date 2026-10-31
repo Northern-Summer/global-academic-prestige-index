@@ -1,0 +1,27 @@
+{
+  "scope": "5000-row in-place real event page trial under existing writer lock",
+  "status": "passed",
+  "raw_saved": false,
+  "full_database_copy": false,
+  "events": 140723,
+  "stored_hash_before": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "score_hash_before": "53b75848d737ac7faa5063bec199e7bcd6c908dd744cef8b43da178986b27941",
+  "result": {
+    "scanned_events": 5000,
+    "after_rowid": 5000,
+    "allocated_pages_before": 312488,
+    "allocated_pages_after": 312488,
+    "freelist_pages_before": 0,
+    "freelist_pages_after": 1011,
+    "net_reusable_bytes": 4141056,
+    "physical_file_bytes_reclaimed": 0,
+    "stored_rows_unchanged": true,
+    "note": "internal reusable capacity only; resume with committed after_rowid"
+  },
+  "stored_hash_after": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "score_hash_after": "53b75848d737ac7faa5063bec199e7bcd6c908dd744cef8b43da178986b27941",
+  "integrity": "ok",
+  "used_bytes": 1827317930,
+  "memory_bytes": 63664128,
+  "seconds": 214.016
+}

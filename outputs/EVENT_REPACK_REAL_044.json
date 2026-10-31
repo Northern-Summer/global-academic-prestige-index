@@ -1,0 +1,27 @@
+{
+  "scope": "remaining existing rows, exact-byte guarded continuation after row 45000",
+  "status": "passed",
+  "raw_saved": false,
+  "full_database_copy": false,
+  "events": 140723,
+  "stored_hash_before": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "result": {
+    "scanned_events": 95723,
+    "after_rowid": 140723,
+    "allocated_pages_before": 312488,
+    "allocated_pages_after": 312488,
+    "freelist_pages_before": 10332,
+    "freelist_pages_after": 10292,
+    "net_reusable_bytes": -163840,
+    "physical_file_bytes_reclaimed": 0,
+    "stored_rows_unchanged": true,
+    "note": "internal reusable capacity only; resume with committed after_rowid"
+  },
+  "stored_hash_after": "b267c9901d08095266b173dab6676b11238e5a8c3d2b81f29c9444f2a3778deb",
+  "score_recomputed_this_batch": false,
+  "prior_exact_input_score_evidence": "outputs/EVENT_REPACK_REAL_042.json",
+  "integrity": "ok",
+  "used_bytes": 1827326018,
+  "memory_bytes": 36573184,
+  "seconds": 31.422
+}

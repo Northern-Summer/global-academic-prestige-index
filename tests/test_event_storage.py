@@ -18,6 +18,46 @@ class EventStorageTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_page_repack_preserves_rows_rank_and_committed_resume(self):
+        from gapi.event_storage import repack_event_pages
+        s=self.store(archive([]))
+        try:
+            analysis.AnalysisTests.seed(self,s)
+            raw=s.db.cursor();raw.row_factory=None
+            before=raw.execute('SELECT rowid,* FROM events ORDER BY rowid').fetchall()
+            rank=canonical(rank_global(s,public=True))
+            first=repack_event_pages(s,max_events=2)
+            self.assertEqual(first['scanned_events'],2)
+            second=repack_event_pages(s,after_rowid=first['after_rowid'])
+            self.assertEqual(second['scanned_events'],len(before)-2)
+            self.assertEqual(repack_event_pages(s,after_rowid=second['after_rowid'])['scanned_events'],0)
+            self.assertEqual(raw.execute('SELECT rowid,* FROM events ORDER BY rowid').fetchall(),before)
+            repack_event_pages(s)
+            self.assertEqual(raw.execute('SELECT rowid,* FROM events ORDER BY rowid').fetchall(),before)
+            self.assertEqual(canonical(rank_global(s,public=True)),rank)
+            self.assertEqual(s.db.execute('PRAGMA quick_check').fetchone()[0],'ok')
+        finally:s.close()
+
+    def test_page_repack_rolls_back_failure_and_rejects_side_effect_schema(self):
+        from gapi.event_storage import repack_event_pages
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            analysis.AnalysisTests.seed(self,s)
+            raw=s.db.cursor();raw.row_factory=None
+            before=raw.execute('SELECT rowid,* FROM events ORDER BY rowid').fetchall()
+            with patch.object(s.task,'check_memory',side_effect=[0,BudgetStop('injected')]):
+                with self.assertRaises(BudgetStop):repack_event_pages(s)
+            self.assertFalse(s.db.in_transaction)
+            self.assertEqual(raw.execute('SELECT rowid,* FROM events ORDER BY rowid').fetchall(),before)
+            with s.db:s.db.execute('CREATE TABLE dependent(event TEXT REFERENCES events(id))')
+            with self.assertRaisesRegex(ValueError,'incoming foreign keys'):repack_event_pages(s)
+            with s.db:
+                s.db.execute('DROP TABLE dependent')
+                s.db.execute('CREATE TRIGGER event_delete AFTER DELETE ON events BEGIN SELECT 1; END')
+            with self.assertRaisesRegex(ValueError,'triggers'):repack_event_pages(s)
+        finally:s.close()
+
     def test_exact_utf8_roundtrip_and_corruption_bounds(self):
         text=json.dumps({'evidence':'研究履历'*600},ensure_ascii=False)
         packed=pack(text)

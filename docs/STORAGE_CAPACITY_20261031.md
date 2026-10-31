@@ -129,3 +129,24 @@ institution, while avoiding that population-sized payload sort. A differential
 test compares complete outputs with the previous query and verifies the new
 query plan has no temporary sort. All 348 Python tests passed. The verified
 delta is retained; the failed scoring attempt did not replace the public manifest.
+
+## Verified event-page reuse
+
+After a RAM-only simulated-layout pilot, the production event table was
+rebalanced in three finite passes of 5,000, 40,000 and 95,723 rows, with no
+concurrent collector. Every rowid and stored field was preserved, including exact
+compressed payload bytes. The complete 140,723-event physical-row hash matched
+before and after each pass. The first pass also recomputed the complete public
+score output on both sides and matched; later passes checked exact unchanged
+input bytes without claiming another score recomputation. SQLite quick_check
+passed after every pass. All 350 Python regression tests passed before migration,
+including interrupted-batch rollback, repeated execution, committed resume and
+schema-side-effect rejection.
+
+Allocated pages stayed at 312,488. Freelist pages changed from 0 to 1,011 to
+10,332 and finally 10,292: net reusable capacity is 42,156,032 bytes (about
+40.2 MiB). The last pass consumed 40 free pages rather than saving space; the
+reported benefit uses the complete sequence. No filesystem bytes were reclaimed,
+no VACUUM or second database was used, and historical recovery inputs remain.
+Evidence: `outputs/EVENT_REPACK_REAL_042.json`,
+`outputs/EVENT_REPACK_REAL_043.json`, `outputs/EVENT_REPACK_REAL_044.json`.

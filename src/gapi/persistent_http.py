@@ -8,6 +8,20 @@ from urllib.error import URLError
 from urllib.request import HTTPSHandler
 
 
+def read_chunk(response, size):
+    """Return available HTTP body bytes without filling the requested buffer.
+
+    HTTPResponse.read(size) can perform many socket reads before returning,
+    hiding a slow trickle from the caller's deadline check. read1 returns after
+    one buffered body read; protocol framing and a blocked socket still obey
+    the transport timeout, so this is not a hard total wall-clock deadline.
+    Keep ordinary file-like/custom adapters on their existing read contract.
+    """
+    if isinstance(response, http.client.HTTPResponse):
+        return response.read1(size)
+    return response.read(size)
+
+
 class ManagedResponse:
     def __init__(self,response,owner):
         self.response,self.owner=response,owner
@@ -20,7 +34,7 @@ class ManagedResponse:
         # urllib consumes redirect/error bodies with read() before close().
         # It does not need an unbounded body to process the status/Location.
         size=65536 if size is None or size<0 else min(size,65536)
-        try:return self.response.read(size)
+        try:return read_chunk(self.response,size)
         except BaseException:
             self.owner.close();raise
 
