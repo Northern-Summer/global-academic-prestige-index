@@ -19,6 +19,7 @@ import zlib
 from .easy_orcid_census import census
 from .orcid_stream import private_person
 from .task import canonical, digest
+from .projection_storage import original_payload, plain_payload
 
 POLICY = 'easy-orcid-scoring-projection/1'
 
@@ -110,6 +111,7 @@ def ingest(store, http, spec, *, max_records=None, max_seconds=1800, progress=No
             for row in pending:
                 old = store.db.execute('SELECT person,row_sha256,payload AS projected_payload FROM easy_careers WHERE row_number=?',
                                        (row[0],)).fetchone()
+                if old:old=(*old[:2],original_payload(store.db,old[2]))
                 if old and tuple(old) != row[1:]:
                     raise ValueError('committed Easy ORCID row changed on replay')
                 store.db.execute('INSERT OR IGNORE INTO easy_careers VALUES(?,?,?,?)', row)
@@ -175,7 +177,7 @@ def verified_rows(store):
     spec = json.loads(state[1])
     for number, person, checksum, payload in store.db.execute(
             'SELECT row_number,person,row_sha256,payload AS projected_payload FROM easy_careers ORDER BY row_number'):
-        rows = json.loads(zlib.decompress(payload))
+        rows = json.loads(plain_payload(store.db,payload))
         yield {'source': spec['id'], 'row_number': number, 'person': person.hex(),
                'row_sha256': checksum.hex(), 'rows': rows,
                'independent_corroboration': False, 'declaration_origin': 'unknown-in-derivative'}
@@ -219,7 +221,7 @@ def rank_projection(store, *, stream_edges=False, include_full=False):
     # Resolve only exact external identifiers, using the existing frozen ROR owner.
     wanted=set()
     for (payload,) in payloads():
-        for row in json.loads(zlib.decompress(payload)):
+        for row in json.loads(plain_payload(store.db,payload)):
             # Unknown stages cannot enter this view's relation owner. Keep them
             # in private input, but do not inflate its in-memory crosswalk with
             # identifiers that cannot contribute to any scoring edge.
@@ -257,7 +259,7 @@ def rank_projection(store, *, stream_edges=False, include_full=False):
             if person is not None:add_person(events)
             person=pid;events=[];people+=1
             if people%1000==0:store.task.check_memory()
-        for kind,stage,inst,start,end,role in json.loads(zlib.decompress(payload)):
+        for kind,stage,inst,start,end,role in json.loads(plain_payload(store.db,payload)):
             if not inst:continue
             if len(events)>=4096:raise BudgetStop('person event fanout exceeds bounded relation analysis')
             inst=aliases.get(inst,inst)

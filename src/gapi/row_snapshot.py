@@ -88,10 +88,14 @@ def _packed_lines(path, task, *, max_line=MAX_LINE):
         if total > task.config['budget_bytes'] * 4:
             raise ValueError('normalized row archive exceeds decoded bound')
         pending += chunk
-        while b'\n' in pending:
-            line, pending = pending.split(b'\n', 1)
-            if len(line) > max_line:raise ValueError('row archive line exceeds bound')
-            yield line + b'\n'
+        start = 0
+        while (end := pending.find(b'\n', start)) >= 0:
+            if end-start > max_line:raise ValueError('row archive line exceeds bound')
+            yield pending[start:end+1]
+            start = end+1
+        # Retain the unfinished tail once per decoded chunk, rather than
+        # copying the entire remaining chunk after every emitted row.
+        pending = pending[start:]
         if len(pending) > max_line:raise ValueError('row archive line exceeds bound')
     if pending:raise ValueError('unterminated normalized row archive')
 

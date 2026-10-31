@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from gapi.frozen_input import frozen_reader, verified_packed_snapshot
-from gapi.row_snapshot import freeze_rows, inspect
+from gapi.row_snapshot import freeze_rows, inspect, _packed_lines
 from gapi.task import BudgetStop, canonical
 from gapi.global_analysis import rank_global
 import test_streaming as fixtures
@@ -16,6 +16,33 @@ class RowSnapshotTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def test_line_reader_preserves_bytes_at_every_chunk_boundary(self):
+        from types import SimpleNamespace
+        task=SimpleNamespace(config={'budget_bytes':1024},check_memory=lambda:None)
+        body='a\n\n证据\r\n'.encode()+b'\x00\nlast\n'
+        expected=[b'a\n',b'\n','证据\r\n'.encode(),b'\x00\n',b'last\n']
+        for cut in range(len(body)+1):
+            for chunks in ([body[:cut],body[cut:]],[body[i:i+1] for i in range(len(body))]):
+                with patch('gapi.frozen_input._snapshot_chunks',return_value=iter(chunks)):
+                    self.assertEqual(list(_packed_lines(self.root/'unused',task)),expected)
+
+    def test_line_reader_keeps_line_total_and_unterminated_bounds(self):
+        from types import SimpleNamespace
+        task=SimpleNamespace(config={'budget_bytes':8},check_memory=lambda:None)
+        for chunks in ([b'1234',b'5678\n'],[b'12345678\n']):
+            with patch('gapi.frozen_input._snapshot_chunks',return_value=iter(chunks)):
+                self.assertEqual(list(_packed_lines(self.root/'unused',task,max_line=8)),[b'12345678\n'])
+        for chunks in ([b'123456789\n'],[b'12345',b'6789'],[b'123456789']):
+            with patch('gapi.frozen_input._snapshot_chunks',return_value=iter(chunks)):
+                with self.assertRaisesRegex(ValueError,'line exceeds bound'):
+                    list(_packed_lines(self.root/'unused',task,max_line=8))
+        with patch('gapi.frozen_input._snapshot_chunks',return_value=iter([b'unfinished'])):
+            with self.assertRaisesRegex(ValueError,'unterminated'):
+                list(_packed_lines(self.root/'unused',task))
+        with patch('gapi.frozen_input._snapshot_chunks',return_value=iter([b'x\n'*17])):
+            with self.assertRaisesRegex(ValueError,'decoded bound'):
+                list(_packed_lines(self.root/'unused',task))
 
     def test_freeze_restore_scores_and_exact_events_idempotently(self):
         s=self.store(fixtures.archive([]))

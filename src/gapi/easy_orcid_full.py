@@ -13,6 +13,7 @@ from .easy_orcid_census import census
 from .easy_orcid_landing import POLICY, person_index
 from .orcid_stream import private_person
 from .task import canonical, digest
+from .projection_storage import original_payload
 
 POLICY_FULL='easy-orcid-full-delta/1'
 
@@ -50,6 +51,7 @@ def ingest_full(store,http,spec,*,max_records=None,max_seconds=1800,progress=Non
         with store.db:
             for row in pending:
                 before=store.db.execute('SELECT person,row_sha256,payload AS projected_payload FROM easy_full_delta WHERE row_number=?',(row[0],)).fetchone()
+                if before:before=(*before[:2],original_payload(store.db,before[2]))
                 if before and tuple(before)!=row[1:]:raise ValueError('full delta row changed during replay')
                 store.db.execute('INSERT OR IGNORE INTO easy_full_delta VALUES(?,?,?,?)',row)
         pending.clear();pending_bytes=0
@@ -59,7 +61,7 @@ def ingest_full(store,http,spec,*,max_records=None,max_seconds=1800,progress=Non
         selected+=1;person=bytes.fromhex(private_person(orcid));payload=zlib.compress(canonical(rows),6)
         match=None
         for hq_number,hq_payload in store.db.execute('SELECT row_number,payload AS projected_payload FROM easy_careers WHERE person=? ORDER BY row_number',(person,)):
-            if hq_payload==payload:
+            if original_payload(store.db,hq_payload)==payload:
                 # Coverage means normalized projection content, not source row
                 # multiplicity. Every equivalent HQ row is represented here.
                 if match is None:match=hq_number

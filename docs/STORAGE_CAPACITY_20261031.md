@@ -622,3 +622,222 @@ full frontend regressions must finish before resuming collection in this tight
 budget; short public replay checks do not require the large fixtures. No budget
 was increased, no safety check was disabled, and no recovery input was deleted
 to hide this admission failure.
+
+## Release 0.2.21 settlement (095–098)
+
+Public source e0036bb7be3dc6361c03fb54f12722eb38cabefa was published without force
+or private ancestry, with only reviewed institutional outputs. GitHub run
+41211856350 passed test, real-observation-build, production-browser and
+deploy-observations. The online site manifest matched that exact public commit;
+the full online decoded aggregate matched SHA-256
+8bbff95c5859346b3e802aca93df157a6329826415f167831766395208231ecf.
+The prerelease v0.2.21-observations was then created and its tag read back against
+the same source commit. Receipts: outputs/RELEASE_095_ONLINE_READBACK.json and
+outputs/RELEASE_095_PUBLICATION.json. Independent external review remains pending.
+
+The active collector is continue-097.py, native session 12698; its subsequent
+events do not enter the frozen 187,236-event release. Latest observed completed
+batch reached 190,162 events. Resource receipt 098 measured 1,852,954,077 total
+budgeted bytes and 26,094,115 bytes of admission headroom after the fixed reserve.
+No owned frozen-input partial or gapi-stream-test directory remained. Unique
+historical source inputs, code, dependencies and evidence were retained. The
+global acquisition objective remains active and is not marked 100 percent.
+
+## Storage attribution and reader verification (099–101)
+
+The collector 097 subsequently stopped with BudgetStop (terminal exit 1).
+The latest complete database count is 197,183 API events, not a running
+collector. The full Python regression then completed: 376 tests, 58.001 s, OK
+(outputs/ROW_READER_REGRESSION_100.txt). Tests and maintenance precede any next
+collector restart to avoid temporary-fixture admission contention.
+
+A fresh read-only SQLite dbstat and directory inventory measured 1,852,970,514
+budgeted bytes before this maintenance. The database is 1,303,240,704 bytes.
+This is not storage for 197,183 events alone:
+
+| Retained object | Rows | Allocated bytes |
+| --- | ---: | ---: |
+| Historical HQ structured projections, easy_careers | 2,306,992 | 584,093,696 |
+| Historical HQ person index | same source | 105,095,168 |
+| Historical full-source additional projections, easy_full_delta | 166,956 | 33,906,688 |
+| Current API events | 197,183 | 204,722,176 |
+| Discovery queue | 881,063 | 127,479,808 |
+| Discovery unique index | same queue | 41,721,856 |
+| Per-response provenance, member_parts | 66,687 | 52,412,416 |
+
+Other external files total 486,248,798 bytes, including private historical
+recovery inputs and the analytical runtime; outputs total 63,482,851 bytes.
+The latest public institutional snapshot itself is only 993,046 compressed
+bytes. Directory sizes and row counts describe different scopes; neither
+historical projections nor discovery entries are additional verified people.
+There are 30,470,144 reusable SQLite free-page bytes inside the existing file;
+reuse is not a physical reduction. Private receipt: STORAGE_DIAGNOSIS_101.json.
+
+The normalized row reader now finds line offsets within each decoded block
+instead of copying the unconsumed suffix for every line. On the same retained
+50,000-row / 23,478,334-byte prefix, ABBA timings averaged 2.994 s before and
+0.558 s after (5.37x in this reader-only measurement). Byte count, row count
+and SHA-256 matched. Complete v0.2.21 input reconstruction also matched
+351,091,116 bytes and SHA-256
+23cf11956042693b13c8d7c65709e4f42a350310605058e7ec75b2917ba869e9,
+in 21.542 s with measured process memory 24,633,344 bytes. This is not an
+end-to-end collection or publication speed claim. The two new tests cover
+every split point, multibyte UTF-8, CRLF, empty lines, exact line limits,
+decoded limits and missing final newline; existing integrity checks remain.
+
+A bounded in-memory probe of the first 20,000 historical HQ rows measured
+4,769,011 existing row-value bytes. Compressing already compressed BLOBs in
+1,000-row blocks produced 4,571,112 bytes (4.15% reduction). Decompressing the
+payloads first and then block-compressing all row values produced 2,817,433
+bytes (40.92% reduction). All 20,000 sampled BLOBs recompressed byte-for-byte
+at the existing codec settings, and both block roundtrips matched. No raw
+file was written. This is a feasibility sample, not a deployed codec, a
+representative global estimate, or permission to discard source hashes or
+individual query/identity boundaries. Private receipt: BLOCK_FEASIBILITY_101.json.
+
+The three remaining format-1 retained deltas were subsequently upgraded using
+the existing repack_delta owner under sole-writer exclusion. Complete decoded
+identities matched before and after for all three: packed sizes changed from
+22,598,968 to 7,206,912; 17,973,232 to 5,691,540; and 7,258,116 to 3,465,060
+bytes. Total physical savings are 31,466,804 bytes. All 197,183 events remained,
+zero source records were deleted, and database quick_check returned ok.
+Maintenance completed in 119.343 s with final measured process memory
+33,271,808 bytes. Receipt: RETAINED_DELTA_REPACK_101.json.
+
+After maintenance exited successfully, fresh admission readback measured
+1,821,519,066 budgeted bytes, 57,529,126 bytes headroom after the unchanged
+268,435,456-byte reserve, and 19,861,504 bytes needed for the next member.
+No owned partial files or stream-test directories remained. This restores
+collection admission; it does not establish unlimited future capacity.
+Receipt: CONTINUATION_RESOURCE_101.json. The next collector wrapper is
+outputs/continue-101.py, with exclusive outputs/ACQUISITION_RESUMED_101.txt.
+
+## Private projection block codec and first real adoption (102)
+
+The largest retained historical table now has an optional lossless physical
+codec owned by projection_storage.py. Existing row IDs, pseudonymous person
+keys and source-line SHA-256 values remain in their original tables and
+indexes. At most 128 payloads / 2 MiB decoded bytes share a compressed block.
+Each legacy BLOB is decompressed and recompressed to verify exact byte
+reversibility before admission; the block digest binds the framed sequence of
+original compressed BLOBs. Blocks plus references are committed atomically.
+Legacy rows remain readable. Replay comparisons, HQ/full exact reuse and
+scoring all use the same payload owner. There is no change to stage, evidence,
+date, joint-appointment, direction or qualification rules.
+
+Readers fetch actual block bytes on every lookup. A bounded two-entry cache
+is keyed by both digest and actual packed bytes, so mutation/deletion cannot
+reuse stale validated content. Missing blocks, bad slots, trailing compressed
+data, decoded overrun and identity mismatch fail closed. Ranking-only frozen
+inputs exclude these derivative blocks alongside their existing excluded
+parent tables; individual derivative inputs stay private.
+
+Production-codec probing of the same first 20,000 real HQ payloads measured
+3,329,011 original payload bytes versus 2,214,909 bytes including block
+references and a conservative per-block overhead: 33.47% reduction for this
+sample. All original BLOBs were reconstructed exactly, no raw file was written,
+and source data were not modified by the probe. This is not a whole-table
+estimate. Receipt: outputs/PROJECTION_BLOCK_PROBE_102.json.
+
+Collector 101 was deliberately stopped for maintenance only after verifying
+its exact process and parent identity; native handle 30227 settled exit 1.
+Committed events reached 198,120. The pre-migration full regression passed
+381 tests in 62.726 s. A real 50,000-row migration then converted 49,992 rows
+(unbeneficial small batches retain original rows), retained all 2,306,992 HQ
+rows and all 198,120 canonical events, and passed SQLite quick_check.
+Before/after identity across all 50,000 original row tuples was identical:
+ae32520c77b4209b9f4d2c3c15cbc8f8788ca660f7e2f1655bc13eca0eb0d945.
+The ten committed batches freed 2,482,176 internal reusable bytes in total;
+physical database file bytes reclaimed are zero. Repeating the same 50,000
+rows changed zero rows, created zero blocks and freed zero additional pages.
+Elapsed time including identity scans, integrity check and repetition was
+37.266 s; measured final process memory was 33,787,904 bytes.
+Receipt: outputs/PROJECTION_REPACK_102.json. The final regression after adding
+the public CLI is recorded separately in PROJECTION_STORAGE_FINAL_102.txt.
+
+The supported bounded maintenance command is:
+
+```text
+python -B -m gapi repack-projection-pages --table easy_careers --after-row 122577 --max-rows 100000 --max-seconds 60
+```
+
+Use the returned after_row for continuation; source row numbers are sparse,
+so this is not a processed-row count. Run maintenance only after the sole
+collector is terminal. This command shares CareerStore's writer lock and
+storage admission, does not VACUUM or create a second database, and never
+converts a failed transaction into a successful cursor advance.
+
+The first CLI invocation returned exit 0 without running maintenance because
+the new parser entry was missing from execute()'s command admission list.
+This was discovered by the empty output and unchanged runtime, not treated
+as a successful migration. The admission list was corrected, and the CLI
+test now verifies execution reaches Task as well as parsing arguments. The
+original 50,000-row direct-owner migration remains valid independently.
+The actual CLI retry is recorded in PROJECTION_REPACK_CLI_102.txt; the empty
+first-attempt file is not maintenance evidence.
+
+The corrected actual CLI execution then processed the next 100,000 rows,
+ending at sparse source row 367237. It created 782 blocks, preserved every
+decoded row tuple via in-transaction readback, and increased reusable page
+capacity by 5,099,520 bytes. Together with the first 50,000-row run this is
+7,581,696 bytes of internal reuse (not filesystem shrinkage). Receipt:
+outputs/PROJECTION_REPACK_CLI_102.txt. Remaining HQ rows are not yet migrated;
+the mixed-format reader remains authoritative during continuation. Final
+post-dispatch regression receipt: PROJECTION_STORAGE_DISPATCH_FINAL_102.txt.
+
+### Person-order read regression and format-2 correction (103)
+
+Before scaling beyond 150,000 rows, a read-only check of the first 3,000 rows
+in actual person-index order encountered 196 format-1 references, with zero
+cache hits, and took 0.469 s. The first codec validated the identity by
+recompressing every row in a block; this preserved correctness but introduced
+avoidable work under the scoring reader's shuffled access order. The 102
+sequential migration evidence does not establish random-read performance.
+
+The format-2 reference uses SHA-256 of the framed decoded block. Reads validate
+that identity directly, retain decoded row bytes in the bounded two-entry
+cache, and recompress only the requested row when exact legacy BLOB comparison
+is required. The normal scoring path does no recompression. Old format-1
+references remain readable and are eligible for atomic upgrade. An explicit
+test raises if the scoring hot path calls zlib.compress, and the legacy-to-new
+upgrade test checks identical rows before and after. This correction retains
+the same row provenance and scientific rules; it does not lower integrity.
+
+All 150,000 selected rows were upgraded and their complete original tuple hash
+matched before/after:
+83d25ff9ef03d28a430192328d9b8afe2574e735d711ca40684f12ed20a518ab.
+The first 100,000-row repeat changed zero rows. All 2,306,992 HQ rows and
+198,120 canonical events remained. Under the writer lock, reachability scanning
+of both owning tables proved 1,179 predecessor blocks unreferenced and removed
+only those blocks; 1,199 referenced blocks were preserved. This released
+10,866,688 internal reusable bytes after temporary predecessor coexistence.
+Final SQLite reusable capacity was 36,388,864 bytes, budgeted total
+1,821,553,907 bytes, reserve-excluded headroom 57,494,285 bytes, and zero partial
+files. Database quick_check returned ok. Receipts:
+PROJECTION_REPACK_103.json and PROJECTION_SETTLEMENT_103.json.
+
+The same first 3,000 person-index rows still included 196 references with no
+cache hits; the format-2 read took 0.078 s versus 0.469 s for format 1, about
+6x faster in that bounded check. This is not proof of parity with legacy
+per-row compression or full-table scoring throughput. Shuffled block reads
+remain a scale-up performance consideration; no global performance guarantee
+or complete-table migration is claimed. Full final regression is recorded in
+PROJECTION_STORAGE_FINAL_103.txt. No UI appearance was changed.
+
+Final executed regression passed 383 tests in 60.405 s. The corrected source
+is committed as a515640 (with preceding implementation checkpoints retained).
+After tests exited, admission readback measured 1,821,554,595 budgeted bytes,
+36,388,864 reusable database bytes, 57,493,597 reserve-excluded bytes, and
+13,942,784 bytes required for the next member. No snapshot partial or stream
+test directory remained. The one empty first-attempt CLI output was verified
+as a zero-byte regular non-linked file and removed; its failed behavior remains
+documented above. No unique source, historical input or test evidence was
+deleted. Receipt: outputs/CONTINUATION_RESOURCE_103.json.
+
+The collector resumed as outputs/continue-102.py with exclusive log
+outputs/ACQUISITION_RESUMED_102.txt, native session 30658. The frozen public
+release is still 0.2.21; newly committed events are outside that release until
+the next explicit freeze/replay/publication. Further projection maintenance
+continues after sparse source row 367237, following actual person-order
+performance validation before full-table expansion. The global goal remains
+active, without a claim of complete acquisition or independent external review.

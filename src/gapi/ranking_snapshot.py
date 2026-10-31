@@ -13,7 +13,7 @@ from contextlib import closing
 from .task import canonical, digest
 
 POLICY = 'global-ranking-private-snapshot/1'
-EXCLUDED_TABLES = frozenset({'easy_careers', 'easy_full_delta','dump_landing','discovery','event_dictionaries'})
+EXCLUDED_TABLES = frozenset({'easy_careers', 'easy_full_delta','dump_landing','discovery','event_dictionaries','easy_projection_blocks'})
 METADATA_TABLE = 'gapi_snapshot_scope'
 
 
