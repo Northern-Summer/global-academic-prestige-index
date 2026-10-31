@@ -113,6 +113,21 @@ class Task:
             raise BudgetStop(f"storage admission stopped: used={used}, anticipated={anticipated}, reserve={needed-anticipated}")
         return used
 
+    def available_growth(self, requested: int) -> int:
+        """Admit enforceable SQLite growth while preserving reserve and 1 MiB.
+
+        The caller must enforce the returned allowance with max_page_count;
+        this is not permission for an unbounded writer to use less reservation.
+        Commit checks still include journals and concurrent owned outputs.
+        """
+        if type(requested) is not int or requested < 0:
+            raise ValueError('invalid growth request')
+        minimum=1024**2
+        used=self.check(minimum)
+        remaining=min(self.config['budget_bytes']-self.config['reserve_bytes']-used,
+                      shutil.disk_usage(self.root).free-self.config['reserve_bytes'])
+        return min(requested,max(0,remaining-minimum))
+
     def check_memory(self):
         if os.name == "nt":
             import ctypes

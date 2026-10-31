@@ -16,7 +16,8 @@ test('actual complete source decodes with conserved mass and bounded chunks',()=
   assert.ok(nodes.filter(n=>n.identity==='unresolved_external_identifier').every(n=>n.region===null));
   const corrupt=JSON.parse(raw);corrupt[0][9]='invented';
   assert.throws(()=>decodeNodes(corrupt,m),/Invalid historical institution/);
-  const edges=decodeEdges(JSON.parse(readFileSync(new URL(m.edge_chunks[0].file,base))),nodes);
+  const chunk=m.edge_chunks[0];
+  const edges=decodeEdges(JSON.parse(readDerivedAsset(fileURLToPath(new URL(chunk.file,base)),chunk.bytes).bytes),nodes);
   assert.equal(edges.length,10000);assert.ok(edges.every(e=>e.weight>0));
 });
 test('partial, formal, oversized and traversing assets fail closed',()=>{

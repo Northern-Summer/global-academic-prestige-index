@@ -271,15 +271,10 @@ class CareerStore:
     def _linked_priority(self, query, parameters, priority_source, slots):
         from .orcid_stream import private_person
         from .career_rules import valid_orcid
-        linked=set()
+        official=set()
         for (person,) in self.db.execute('SELECT DISTINCT person FROM official_profile_subjects'):
-            linked.add(person)
-            if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
-        official=set(linked)
-        for (person,) in self.db.execute('''SELECT DISTINCT e.person FROM events e
-            WHERE e.source=? AND '''+member_evidence_sql(),(priority_source,)):
-            linked.add(person)
-            if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
+            official.add(person)
+            if len(official)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
         self.task.check_memory()
         # Scheduling, not corroboration: rotate through a bounded candidate
         # window rather than sorting the entire queue by a Python SQL UDF.
@@ -289,10 +284,17 @@ class CareerStore:
         candidates=[row[0] for row in self.db.execute(query+''' AND r.identifier IS NULL
             AND d.identifier>? ORDER BY d.identifier LIMIT 8192''',(*parameters,cursor))]
         priority=[]
+        # Only ask about this bounded window. Enumerating every linked source
+        # person first grows with acquisition and can exhaust optional priority
+        # before any candidate is examined. Reuse the existing person index;
+        # the same evidence predicate remains authoritative.
+        linked_query=('SELECT 1 FROM events e INDEXED BY events_person '
+                      'WHERE e.person=? AND e.source=? AND '+member_evidence_sql()+' LIMIT 1')
         for identifier in candidates:
             if not isinstance(identifier,str):continue
             person=private_person(identifier)
-            if person in linked and valid_orcid(identifier):
+            linked=person in official or self.db.execute(linked_query,(person,priority_source)).fetchone() is not None
+            if linked and valid_orcid(identifier):
                 priority.append((2 if person in official else 1,identifier))
         self.task.check_memory()
         self._priority_scan_after=candidates[-1] if len(candidates)==8192 else ''
@@ -372,9 +374,15 @@ class CareerStore:
                 raise ValueError('invalid bounded transaction growth')
             maximum=max_growth_bytes
         growth=max(0,maximum-reusable)
-        self.task.check(max(1024**2,growth))
+        constrained=False
+        if max_growth_bytes is None:
+            allowed=self.task.available_growth(growth)
+            constrained=allowed<growth
+            growth=allowed
+        else:
+            self.task.check(max(1024**2,growth))
         original_cap=None
-        if max_growth_bytes is not None:
+        if max_growth_bytes is not None or constrained:
             original_cap=self.db.execute('PRAGMA max_page_count').fetchone()[0]
             pages=self.db.execute('PRAGMA page_count').fetchone()[0]
             self.db.execute('PRAGMA max_page_count='+str(min(original_cap,pages+(growth+size-1)//size)))
@@ -383,8 +391,11 @@ class CareerStore:
             yield
             self.task.check(1024**2)
             self.db.commit()
-        except BaseException:
+        except BaseException as exc:
             self.db.rollback()
+            if (constrained and isinstance(exc,sqlite3.OperationalError)
+                    and getattr(exc,'sqlite_errorcode',0)&255==sqlite3.SQLITE_FULL):
+                raise BudgetStop('available SQLite growth exhausted; member rolled back and remains pending') from exc
             raise
         finally:
             if original_cap is not None:self.db.execute('PRAGMA max_page_count='+str(original_cap))

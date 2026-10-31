@@ -174,8 +174,9 @@ def commands(old, new):
             yield 'A',right.popleft()
 
 
-def freeze_delta(store, filename):
-    from .row_snapshot import FORMAT as ROW_FORMAT, inspect, ranking_lines, lines
+def freeze_delta(store, filename, *, compression_preset=3):
+    from .row_snapshot import FORMAT as ROW_FORMAT, inspect, ranking_lines, lines, validate_compression_preset
+    validate_compression_preset(compression_preset)
     task=store.task;initial_used=task.check(1024**2);task.check_memory()
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
     base_path=baseline(task,filename);folder=base_path.parent
@@ -191,7 +192,7 @@ def freeze_delta(store, filename):
     try:
         with temporary.open('xb') as output:
             created=True
-            encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+            encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=compression_preset)
             written=0
             def write(packed):
                 nonlocal written

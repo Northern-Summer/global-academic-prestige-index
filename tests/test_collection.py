@@ -212,6 +212,27 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(s._linked_priority(query,('ingest-orcid-api',),'wikidata',10),[valid])
         finally:s.close()
 
+    def test_priority_checks_only_window_people_and_requires_member_evidence(self):
+        from gapi.orcid_stream import private_person
+        s=self.store(archive([]));statements=[]
+        valid='0000-0002-1825-0097'
+        try:
+            s.start('wikidata')
+            with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-orcid-api',valid,'a','b'))
+            with s.member('wikidata','Q1@1'):
+                s.event({'source':'wikidata','person':private_person(valid),'kind':'education',
+                         'locator':'Q1@1#statement','status':'unresolved'})
+            query='SELECT d.identifier FROM discovery d LEFT JOIN discovery_retries r ON r.source=d.source AND r.identifier=d.identifier WHERE d.source=?'
+            self.assertEqual(s._linked_priority(query,('ingest-orcid-api',),'wikidata',10),[])
+            with s.db:s.finish_member('wikidata','Q1@1','a'*64)
+            s.db.set_trace_callback(statements.append)
+            self.assertEqual(s._linked_priority(query,('ingest-orcid-api',),'wikidata',10),[valid])
+            s.db.set_trace_callback(None)
+            self.assertFalse(any('SELECT DISTINCT e.person FROM events e' in q for q in statements),
+                             'priority must not enumerate the entire growing source')
+            self.assertTrue(any('INDEXED BY events_person' in q for q in statements))
+        finally:s.db.set_trace_callback(None);s.close()
+
     def test_priority_window_rotates_without_starving_fresh_or_due_work(self):
         from gapi.orcid_stream import private_person
         s=self.store(archive([]))

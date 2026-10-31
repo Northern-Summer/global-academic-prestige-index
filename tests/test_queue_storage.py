@@ -70,11 +70,12 @@ class QueueStorageTests(unittest.TestCase):
     def test_member_admission_uses_real_freelist_and_preserves_reserve(self):
         s=self.store(archive([]))
         try:
-            # Same physical usage and budget: empty freelist refuses admission.
+            # Empty freelist can now admit an enforced smaller transaction.
+            # Explicit worst-case maintenance reservation still refuses it.
             used=s.task.config['budget_bytes']-s.task.config['reserve_bytes']-46*1024**2
             with patch.object(s.task,'used',return_value=used):
                 with self.assertRaises(BudgetStop):
-                    with s.member('test','empty'):pass
+                    with s.member('test','empty',max_growth_bytes=48*1024**2):pass
             with s.db:
                 s.db.execute('CREATE TABLE filler(value BLOB)')
                 s.db.executemany('INSERT INTO filler VALUES(?)',[(b'x'*8192,)]*1024)

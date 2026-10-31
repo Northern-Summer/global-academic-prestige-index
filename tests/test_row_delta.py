@@ -19,6 +19,27 @@ class RowDeltaTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_dense_compression_keeps_full_and_delta_identity(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            original=lzma.LZMACompressor
+            with patch('gapi.row_snapshot.lzma.LZMACompressor',wraps=original) as compressor:
+                base=freeze_rows(s,compression_preset=6)
+                self.assertEqual(compressor.call_args.kwargs['preset'],6)
+            analysis.AnalysisTests.seed(self,s)
+            expected=hashlib.sha256(b''.join(ranking_lines(s))).hexdigest()
+            with patch('gapi.row_delta.lzma.LZMACompressor',wraps=original) as compressor:
+                frozen=freeze_rows(s,base_filename=base['filename'],compression_preset=6)
+                self.assertEqual(compressor.call_args.kwargs['preset'],6)
+            self.assertEqual(frozen['sha256'],expected)
+            path=s.task.root/'frozen-inputs'/(frozen['filename']+'.delta.xz')
+            self.assertEqual(inspect(path,s.task)[0],expected)
+            for preset in (True,0,9,'6',None):
+                with self.assertRaisesRegex(ValueError,'compression preset'):
+                    freeze_rows(s,compression_preset=preset)
+            self.assertEqual(list(path.parent.glob('*.partial')),[])
+        finally:s.close()
+
     def legacy_delta(self,s):
         base=freeze_rows(s)
         shared=random.Random(81).randbytes(2048).hex()

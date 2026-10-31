@@ -15,6 +15,35 @@ class ResourceTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_small_source_transaction_uses_enforced_available_capacity(self):
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            with s.db:s.db.execute('CREATE TABLE growth_probe(value BLOB)')
+            cap=s.db.execute('PRAGMA max_page_count').fetchone()[0]
+            used=s.task.config['budget_bytes']-s.task.config['reserve_bytes']-2*1024**2
+            with patch.object(s.task,'used',return_value=used):
+                with s.member('source','small'):
+                    self.assertLess(s.db.execute('PRAGMA max_page_count').fetchone()[0],cap)
+                    s.db.execute('INSERT INTO growth_probe VALUES(?)',(b'x'*1000,))
+                with self.assertRaises(BudgetStop):
+                    with s.member('source','oversized'):
+                        s.db.execute('INSERT INTO growth_probe VALUES(?)',(b'x'*4*1024**2,))
+            self.assertFalse(s.db.in_transaction)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM growth_probe').fetchone()[0],1)
+            self.assertEqual(s.db.execute('PRAGMA max_page_count').fetchone()[0],cap)
+        finally:s.close()
+
+    def test_source_admission_keeps_minimum_headroom_and_fixed_reserve(self):
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            used=s.task.config['budget_bytes']-s.task.config['reserve_bytes']-1024**2+1
+            with patch.object(s.task,'used',return_value=used),self.assertRaises(BudgetStop):
+                with s.member('source','no-headroom'):self.fail('must not enter')
+            self.assertFalse(s.db.in_transaction)
+        finally:s.close()
+
     def test_bounded_maintenance_growth_is_enforced_and_cap_restored(self):
         import sqlite3
         s=self.store(archive([]))

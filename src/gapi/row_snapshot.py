@@ -108,10 +108,18 @@ def inspect(path, task):
     return sha.hexdigest(), total
 
 
-def freeze_rows(store, *, base_filename=None):
+def validate_compression_preset(preset):
+    """Physical encoding only; both choices fit the existing 32 MiB decoder."""
+    if type(preset) is not int or preset not in (3, 6):
+        raise ValueError('unsupported row archive compression preset')
+    return preset
+
+
+def freeze_rows(store, *, base_filename=None, compression_preset=3):
+    validate_compression_preset(compression_preset)
     if base_filename is not None:
         from .row_delta import freeze_delta
-        return freeze_delta(store,base_filename)
+        return freeze_delta(store,base_filename,compression_preset=compression_preset)
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
     task = store.task;initial_used=task.check(1024**2);task.check_memory()
     folder = task.root/'frozen-inputs'
@@ -123,7 +131,7 @@ def freeze_rows(store, *, base_filename=None):
     try:
         with temporary.open('xb') as output:
             created = True
-            encoder = lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+            encoder = lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=compression_preset)
             written=0
             def write(packed):
                 nonlocal written
