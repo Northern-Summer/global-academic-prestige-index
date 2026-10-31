@@ -1,4 +1,7 @@
 import copy
+import gzip
+import hashlib
+import json
 import importlib.util
 import unittest
 from pathlib import Path
@@ -35,3 +38,24 @@ class PublicReplayTests(unittest.TestCase):
         result=replay.verify(Path('outputs/global/manifest.json'))
         self.assertEqual(result['status'],'passed')
         self.assertGreater(result['scored_nodes'],0)
+
+    def test_compressed_repository_replay_verifies_stored_and_decoded_identity(self):
+        import tempfile
+        import os
+        parent=Path('D:/GAPI/global-academic-prestige-index') if os.name=='nt' else None
+        with tempfile.TemporaryDirectory(dir=parent) as tmp:
+            folder=Path(tmp);body=json.dumps(self.fixture()).encode()
+            sha=hashlib.sha256(body).hexdigest();name='global-'+sha[:16]+'.json'
+            packed=gzip.compress(body,mtime=0);(folder/(name+'.gz')).write_bytes(packed)
+            manifest={'snapshot':name,'output_sha256':sha,'repository_snapshot':{
+                'filename':name+'.gz','encoding':'gzip','sha256':hashlib.sha256(packed).hexdigest(),
+                'bytes':len(packed),'decoded_bytes':len(body)}}
+            path=folder/'manifest.json';path.write_text(json.dumps(manifest))
+            self.assertEqual(replay.verify(path)['status'],'passed')
+            for change in ({'filename':'../escape.gz'},{'encoding':'br'},{'sha256':'0'*64},
+                           {'decoded_bytes':1},{'bytes':True}):
+                modified=copy.deepcopy(manifest);modified['repository_snapshot'].update(change)
+                path.write_text(json.dumps(modified))
+                with self.subTest(change=change),self.assertRaises(ValueError):replay.verify(path)
+            path.write_text(json.dumps(manifest));(folder/(name+'.gz')).write_bytes(packed[:-1])
+            with self.assertRaisesRegex(ValueError,'identity'):replay.verify(path)

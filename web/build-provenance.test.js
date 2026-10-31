@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {gzipSync} from 'node:zlib';
 import {dirname,join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {SOURCE_FILES,PROVENANCE,sourceInputs,writeBuildProvenance,verifyBuild} from '../scripts/build-provenance.mjs';
+import {SOURCE_FILES,PROVENANCE,sourceInputs,writeBuildProvenance,verifyBuild,readReleaseSnapshot} from '../scripts/build-provenance.mjs';
 import {readDerivedBundle} from '../scripts/derived-bundle.mjs';
 
 function fixture(run) {
@@ -42,6 +43,27 @@ test('release provenance is idempotent and accepts later data-only commits',()=>
   put('release-receipt.json','{"note":"later data-only receipt"}');commit();
   const current=verify();assert.equal(current.status,'verified');
   assert.notEqual(current.source_commit,current.source_commit_at_build);
+}));
+
+test('compressed repository snapshot keeps decoded output identity and committed storage proof',()=>fixture(({root,put,commit,args,verify})=>{
+  const manifestPath=join(root,args.manifestPath),manifest=JSON.parse(readFileSync(manifestPath));
+  const bytes=readFileSync(join(root,'outputs/global',manifest.snapshot)),packed=gzipSync(bytes);
+  manifest.repository_snapshot={encoding:'gzip',filename:manifest.snapshot+'.gz',
+    sha256:createHash('sha256').update(packed).digest('hex'),bytes:packed.length,decoded_bytes:bytes.length};
+  put('outputs/global/'+manifest.repository_snapshot.filename,packed);
+  put(args.manifestPath,JSON.stringify(manifest));put('dist/data/global/manifest.json',JSON.stringify(manifest));
+  rmSync(join(root,'outputs/global',manifest.snapshot));commit();writeBuildProvenance(args);
+  assert.equal(verify().status,'verified');
+  assert.deepEqual(readReleaseSnapshot(manifestPath,manifest).bytes,bytes);
+  const first=readFileSync(join(args.outDir,PROVENANCE));writeBuildProvenance(args);
+  assert.deepEqual(readFileSync(join(args.outDir,PROVENANCE)),first);
+  const bad={...manifest,repository_snapshot:{...manifest.repository_snapshot,filename:'../escape.gz'}};
+  assert.throws(()=>readReleaseSnapshot(manifestPath,bad),/Invalid repository/);
+  for(const change of [{encoding:'br'},{sha256:'0'.repeat(64)},{bytes:1},{decoded_bytes:1}]){
+    assert.throws(()=>readReleaseSnapshot(manifestPath,{...manifest,repository_snapshot:{...manifest.repository_snapshot,...change}}));
+  }
+  put('outputs/global/'+manifest.repository_snapshot.filename,Buffer.from('tampered'));
+  assert.throws(verify,/identity mismatch/);
 }));
 
 test('source/output/selected manifest tampering fail before publication',()=>{

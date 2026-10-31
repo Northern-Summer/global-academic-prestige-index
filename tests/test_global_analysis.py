@@ -130,6 +130,29 @@ class AnalysisTests(unittest.TestCase):
             self.assertFalse(staging.exists())
         finally:s.close()
 
+    def test_compressed_public_snapshot_is_lossless_idempotent_and_capacity_bounded(self):
+        import gzip
+        import hashlib
+        from gapi.global_analysis import _write_public_snapshot
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            content=b'{"institution":"'+b'x'*100000+b'"}'
+            used=s.task.used()
+            s.task.config['budget_bytes']=used+s.task.config['reserve_bytes']+96*1024
+            with self.assertRaises(BudgetStop):
+                _write_public_snapshot(s.task,s.task.root,'global-test.json',content)
+            result=_write_public_snapshot(s.task,s.task.root,'global-test.json',content,compress=True)
+            path=s.task.root/result['filename'];packed=path.read_bytes();mtime=path.stat().st_mtime_ns
+            self.assertFalse((s.task.root/'global-test.json').exists())
+            self.assertEqual(gzip.decompress(packed),content)
+            self.assertEqual(result['sha256'],hashlib.sha256(packed).hexdigest())
+            self.assertEqual(result['decoded_bytes'],len(content))
+            self.assertEqual(_write_public_snapshot(s.task,s.task.root,'global-test.json',content,compress=True),result)
+            self.assertEqual(path.stat().st_mtime_ns,mtime)
+            self.assertEqual(path.read_bytes(),packed)
+        finally:s.close()
+
     def test_readonly_score_needs_memory_but_not_fictitious_disk_workspace(self):
         from gapi.task import BudgetStop
         s=self.store(archive([]))

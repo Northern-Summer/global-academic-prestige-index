@@ -7,6 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {existsSync,lstatSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {dirname,isAbsolute,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {gunzipSync} from 'node:zlib';
 import {readDerivedBundle} from './derived-bundle.mjs';
 
 export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md','FONTS.md','EASY_ORCID_2023_OBSERVATIONS.md'];
@@ -65,16 +66,33 @@ function git(root,...args) {
   return execFileSync('git',args,{cwd:root,maxBuffer:32*1024*1024+1,stdio:['ignore','pipe','pipe']});
 }
 
+export function readReleaseSnapshot(manifestPath,manifest) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.json$/.test(manifest.snapshot)) throw new Error('Unsafe release snapshot');
+  const storage=manifest.repository_snapshot;
+  if ('repository_snapshot' in manifest && (!storage || typeof storage!=='object' || Array.isArray(storage))) throw new Error('Invalid repository snapshot representation');
+  if(storage && (storage.encoding!=='gzip' || storage.filename!==manifest.snapshot+'.gz'
+      || !/^[a-f0-9]{64}$/.test(storage.sha256)
+      || !Number.isSafeInteger(storage.bytes) || storage.bytes<=0 || storage.bytes>32*1024*1024
+      || !Number.isSafeInteger(storage.decoded_bytes) || storage.decoded_bytes<=0 || storage.decoded_bytes>32*1024*1024)) {
+    throw new Error('Invalid repository snapshot representation');
+  }
+  const path=resolve(dirname(manifestPath),storage ? storage.filename : manifest.snapshot);
+  const stored=regular(path);
+  if(storage && (stored.length!==storage.bytes || hash(stored)!==storage.sha256)) throw new Error('Stored snapshot identity mismatch');
+  const bytes=storage ? gunzipSync(stored,{maxOutputLength:32*1024*1024}) : stored;
+  if(storage && bytes.length!==storage.decoded_bytes) throw new Error('Decoded snapshot size mismatch');
+  if(hash(bytes)!==manifest.output_sha256) throw new Error('Selected snapshot identity mismatch');
+  return {bytes,path,stored_sha256:hash(stored)};
+}
+
 function selection(root,manifestPath) {
   const path = resolve(root,manifestPath);
   const manifestBytes = regular(path);
   const manifest = JSON.parse(manifestBytes);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.json$/.test(manifest.snapshot)) throw new Error('Unsafe release snapshot');
-  const snapshotPath = resolve(dirname(path),manifest.snapshot);
-  const snapshotBytes = regular(snapshotPath);
-  if (hash(snapshotBytes) !== manifest.output_sha256) throw new Error('Selected snapshot identity mismatch');
-  return {manifest:inside(root,path),snapshot:inside(root,snapshotPath),
-    manifest_sha256:hash(manifestBytes),snapshot_sha256:hash(snapshotBytes),
+  const snapshot=readReleaseSnapshot(path,manifest);
+  return {manifest:inside(root,path),snapshot:inside(root,snapshot.path),
+    ...(manifest.repository_snapshot ? {stored_snapshot_sha256:snapshot.stored_sha256} : {}),
+    manifest_sha256:hash(manifestBytes),snapshot_sha256:hash(snapshot.bytes),
     publication_status:manifest.publication_status,
     derived_bundle:readDerivedBundle(root,manifest.derived_bundle)?.identity??null};
 }
@@ -125,7 +143,7 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
       catch { throw new Error(`Build input is not committed: ${path}`); }
       if (inputHash(path,committed) !== expected) throw new Error(`Build input differs from committed source: ${path}`);
     }
-    for (const [path,expected] of [[proof.selection.manifest,proof.selection.manifest_sha256],[proof.selection.snapshot,proof.selection.snapshot_sha256]]) {
+    for (const [path,expected] of [[proof.selection.manifest,proof.selection.manifest_sha256],[proof.selection.snapshot,proof.selection.stored_snapshot_sha256??proof.selection.snapshot_sha256]]) {
       if (hash(git(root,'show',`HEAD:${path}`)) !== expected) throw new Error(`Release input differs from committed source: ${path}`);
     }
     if(proof.selection.derived_bundle)for(const [path,expected] of Object.entries(proof.selection.derived_bundle.inputs)){
@@ -142,7 +160,7 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     // The selected institution slice has its own 32 MiB input cap and exact
     // committed hash above. Keep a separate 8 MiB allowance for application
     // assets; growth of real observations must not admit unrelated extra files.
-    const selectedBytes=regular(resolve(root,proof.selection.snapshot)).length;
+    const selectedBytes=readReleaseSnapshot(resolve(root,manifestPath),JSON.parse(regular(resolve(root,manifestPath)))).bytes.length;
     const bound=8*1024*1024+selectedBytes+(proof.selection.derived_bundle?.bytes??0);
     if (bytes+regular(resolve(outDir,PROVENANCE)).length>bound) throw new Error('Public site exceeds reviewed byte bound');
     result.site_manifest={source_commit:result.source_commit,build_provenance_sha256:result.provenance_sha256,

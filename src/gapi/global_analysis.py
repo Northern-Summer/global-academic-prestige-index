@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import math
 import os
@@ -440,7 +441,25 @@ def _write_aggregate(task, target: Path, content: bytes):
             temporary.unlink()
 
 
-def export_release(store, out: Path, *, publication_policy=None, frozen_input=None):
+def _write_public_snapshot(task, out, filename, content, *, compress=False):
+    """Store a bounded aggregate; web builds still serve its exact decoded JSON."""
+    if type(compress) is not bool:raise ValueError('snapshot compression must be boolean')
+    if not compress:
+        _write_aggregate(task,out/filename,content)
+        return None
+    if not 0<len(content)<=32*1024**2:raise ValueError('public snapshot exceeds 32 MiB bound')
+    buffer=io.BytesIO()
+    with gzip.GzipFile(filename='',mode='wb',fileobj=buffer,mtime=0,compresslevel=9) as stream:
+        stream.write(content)
+    packed=buffer.getvalue()
+    task.check_memory()
+    metadata={'encoding':'gzip','filename':filename+'.gz','sha256':hashlib.sha256(packed).hexdigest(),
+        'bytes':len(packed),'decoded_bytes':len(content)}
+    _write_aggregate(task,out/metadata['filename'],packed)
+    return metadata
+
+
+def export_release(store, out: Path, *, publication_policy=None, frozen_input=None, compress_snapshot=False):
     """Public, licensed institution aggregates only; no individual trajectories."""
     if out.resolve() != (project_root()/"outputs/global").resolve():
         raise ValueError("public release output must use the budget-accounted outputs/global directory")
@@ -457,8 +476,7 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
     store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()
     filename = f"global-{checksum[:16]}.json"
-    target = out/filename
-    _write_aggregate(store.task, target, content)
+    repository_snapshot=_write_public_snapshot(store.task,out,filename,content,compress=compress_snapshot)
     allowed = public_sources(store.task,publication_policy)
     inputs = {row[0]:row[1] for row in store.db.execute("SELECT source,identity FROM runs WHERE members>0 ORDER BY source") if row[0] in allowed}
     member_hash = hashlib.sha256()
@@ -489,6 +507,8 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         manifest['publication_policy_sha256']=digest(publication_policy)
     if frozen_input is not None:
         manifest['private_normalized_input']=frozen_input
+    if repository_snapshot is not None:
+        manifest['repository_snapshot']=repository_snapshot
     if 'official_award_inventory' in result:
         awards = result['official_award_inventory']
         manifest['official_award_source_sha256'] = awards['source_sha256']

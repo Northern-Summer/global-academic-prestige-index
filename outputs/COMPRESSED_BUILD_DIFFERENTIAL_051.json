@@ -1,0 +1,10 @@
+{
+  "scope": "production build differential against verified 0.2.15 build",
+  "changed_assets": [
+    "data/global/manifest.json",
+    "docs/STREAMING.md"
+  ],
+  "frontend_assets_identical": true,
+  "served_score_bytes_identical": true,
+  "decoded_sha256": "6ebaae7c7ae7c073ad8dedc0f4f7696324b7dc9c214012b2c14ec0161c2bdf0e"
+}

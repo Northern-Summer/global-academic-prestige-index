@@ -5,6 +5,8 @@ career inputs, source independence, licensing or complete world coverage.
 """
 import argparse
 import hashlib
+import gzip
+import io
 import json
 import math
 from pathlib import Path
@@ -57,7 +59,20 @@ def verify(manifest_path):
     manifest_bytes=bounded(manifest_path,1024**2);manifest=json.loads(manifest_bytes)
     name=manifest.get('snapshot')
     if not isinstance(name,str) or not re.fullmatch(r'global-[a-f0-9]{16}\.json',name):raise ValueError('unsafe snapshot locator')
-    body=bounded(manifest_path.parent/name);sha=hashlib.sha256(body).hexdigest()
+    storage=manifest.get('repository_snapshot')
+    if 'repository_snapshot' in manifest:
+        if (not isinstance(storage,dict) or storage.get('encoding')!='gzip'
+                or storage.get('filename')!=name+'.gz'
+                or not isinstance(storage.get('sha256'),str) or not re.fullmatch(r'[a-f0-9]{64}',storage['sha256'])
+                or any(type(storage.get(k)) is not int or not 0<storage[k]<=32*1024**2 for k in ('bytes','decoded_bytes'))):
+            raise ValueError('invalid repository snapshot representation')
+        packed=bounded(manifest_path.parent/storage['filename'])
+        if len(packed)!=storage['bytes'] or hashlib.sha256(packed).hexdigest()!=storage['sha256']:
+            raise ValueError('stored snapshot identity mismatch')
+        with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:body=stream.read(32*1024**2+1)
+        if len(body)>32*1024**2 or len(body)!=storage['decoded_bytes']:raise ValueError('decoded snapshot size mismatch')
+    else:body=bounded(manifest_path.parent/name)
+    sha=hashlib.sha256(body).hexdigest()
     if sha!=manifest['output_sha256']:raise ValueError('snapshot hash mismatch')
     data=json.loads(body);result=replay(data)
     return {'schema_version':'gapi-public-independent-replay/v1','status':'passed',
