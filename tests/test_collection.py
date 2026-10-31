@@ -19,6 +19,149 @@ class CollectionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_source_time_fairness_does_not_make_fast_transport_wait_for_equal_batch_counts(self):
+        s=self.store(archive([]));clock=[0.0];calls=[]
+        identifiers={'ingest-orcid-api':'0000-0002-1825-0097','ingest-wikidata':'Q1'}
+        def ingest(source,seconds):
+            def run(store,http,ids,**options):
+                self.assertLessEqual(len(ids),200)
+                self.assertLessEqual(options['max_seconds'],60)
+                duration=min(seconds,options['max_seconds'])
+                clock[0]+=duration
+                calls.append(source)
+                with store.member(source,str(len(calls))):
+                    store.finish_member(source,str(len(calls)),'a'*64)
+            return run
+        try:
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch.object(s,'pending',side_effect=lambda command,*a,**kw:[identifiers[command]]), \
+                 patch('gapi.collection.ingest_orcid_api',side_effect=ingest('orcid-public-api',60)), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest('wikidata',20)):
+                result=collect(s,None,max_seconds=240,discovery=False,batch_members=200)
+            self.assertEqual(calls,['orcid-public-api','wikidata','wikidata','wikidata']*2)
+            self.assertEqual(result['source_service_seconds'],{'ingest-orcid-api':120.0,'ingest-wikidata':120.0})
+            self.assertEqual(result['status'],'resumable-time-boundary')
+            self.assertFalse(result['global_complete'])
+        finally:s.close()
+
+    def test_real_reader_contention_rolls_back_member_and_keeps_candidate_resumable(self):
+        import sqlite3
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
+            s.db.execute('PRAGMA busy_timeout=10')
+            def ingest(store,http,ids,**kwargs):
+                reader=sqlite3.connect(store.task.root/'careers.sqlite')
+                try:
+                    reader.execute('BEGIN')
+                    reader.execute('SELECT count(*) FROM members').fetchone()
+                    with store.member('wikidata','Q1@1'):
+                        store.finish_member('wikidata','Q1@1','a'*64)
+                finally:reader.close()
+            with patch('gapi.collection.ingest_wikidata',side_effect=ingest) as adapter:
+                result=collect(s,None,max_seconds=10,discovery=False)
+            self.assertEqual(adapter.call_count,1)
+            self.assertEqual(result['status'],'resumable-storage-contention')
+            self.assertTrue(result['stages'][0]['storage_contended'])
+            self.assertEqual(result['suspended_sources'],[])
+            self.assertEqual(s.pending('ingest-wikidata'),['Q1'])
+            self.assertIsNone(s.seen('wikidata','Q1@1'))
+            self.assertFalse(s.db.in_transaction)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
+            def recovered(store,http,ids,**kwargs):
+                with store.member('wikidata','Q1@1'):store.finish_member('wikidata','Q1@1','a'*64)
+            with patch('gapi.collection.ingest_wikidata',side_effect=recovered):
+                collect(s,None,max_seconds=10,discovery=False)
+            self.assertFalse(s.pending('ingest-wikidata'))
+        finally:s.close()
+
+    def test_database_errors_other_than_contention_are_not_hidden(self):
+        import sqlite3
+        s=self.store(archive([]))
+        try:
+            with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
+            with patch('gapi.collection.ingest_wikidata',side_effect=sqlite3.OperationalError('unknown database defect')):
+                with self.assertRaisesRegex(sqlite3.OperationalError,'unknown database defect'):
+                    collect(s,None,max_seconds=10,discovery=False)
+        finally:s.close()
+
+    def test_queue_selection_deadline_never_starts_a_negative_network_window(self):
+        s=self.store(archive([]));clock=[0]
+        try:
+            def pending(command,*args,**kwargs):
+                clock[0]=2
+                return ['candidate']
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch.object(s,'pending',side_effect=pending), \
+                 patch('gapi.collection.ingest_orcid_api') as adapter:
+                result=collect(s,None,max_seconds=1,discovery=False)
+            adapter.assert_not_called()
+            self.assertEqual(result['stages'],[])
+            self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
+        finally:s.close()
+
+    def test_acquisition_window_exhaustion_does_not_suspend_or_fail_the_source(self):
+        import json
+        from gapi.source_http import StageDeadline
+        for raised in (False,True):
+            with self.subTest(raised=raised):
+                s=self.store(archive([]))
+                try:
+                    with s.db:s.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
+                    def ingest(store,http,ids,**kwargs):
+                        store.start('wikidata')
+                        if raised:raise StageDeadline('finite window ended')
+                        store.status('wikidata','partial',detail=json.dumps({'stage_time_exhausted':True}))
+                    with patch('gapi.collection.ingest_wikidata',side_effect=ingest):
+                        result=collect(s,None,max_seconds=10,discovery=False)
+                    self.assertNotIn('ingest-wikidata',result['suspended_sources'])
+                    self.assertTrue(result['stages'][0]['stage_time_exhausted'])
+                    self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
+                    self.assertEqual(s.pending('ingest-wikidata'),['Q1'])
+                finally:s.close()
+
+    def test_linked_orcid_priority_keeps_due_retries_fresh_work_and_evidence_unchanged(self):
+        from gapi.orcid_stream import private_person
+        from gapi.career_rules import valid_orcid
+        def identifier(n):
+            digits=f'{n:015d}';total=0
+            for digit in digits:total=(total+int(digit))*2
+            check=(12-total%11)%11;value=digits+('X' if check==10 else str(check))
+            return '-'.join(value[i:i+4] for i in range(0,16,4))
+        ids=[identifier(n) for n in range(1,11)]
+        self.assertTrue(all(map(valid_orcid,ids)))
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-orcid-api',value,'a','b') for value in ids])
+            with s.member('wikidata','Q1@1'):
+                s.event({'source':'wikidata','person':private_person(ids[-1]),'kind':'education',
+                    'stage':None,'locator':'Q1@1#statement','status':'unresolved'})
+                s.finish_member('wikidata','Q1@1','a'*64)
+            s.defer('ingest-orcid-api',ids[-2],'retry',now=100)
+            before=list(s.db.execute('SELECT * FROM events'))
+            chosen=s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata')
+            self.assertIn(ids[-1],chosen);self.assertIn(ids[-2],chosen);self.assertIn(ids[0],chosen)
+            self.assertEqual(len(set(chosen)),4)
+            self.assertEqual(chosen,s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata'))
+            self.assertEqual(before,list(s.db.execute('SELECT * FROM events')))
+            with s.db:
+                s.db.execute('INSERT INTO official_profile_subjects VALUES(?,?,?,?)',
+                    ('https://experts.colorado.edu/display/fisid_1234','a'*64,'fixture',private_person(ids[-3])))
+            preferred=s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata')
+            self.assertIn(ids[-3],preferred)
+            self.assertIn(ids[-2],preferred)
+            self.assertIn(ids[0],preferred)
+            self.assertNotIn(ids[-1],preferred)
+            self.assertEqual(s.pending('ingest-orcid-api',1,now=100,priority_source='wikidata'),[ids[0]])
+            s.defer('ingest-orcid-api',ids[-1],'linked temporarily unavailable',now=160)
+            self.assertNotIn(ids[-1],s.pending('ingest-orcid-api',4,now=170,priority_source='wikidata'))
+            with self.assertRaises(ValueError):s.pending('ingest-wikidata',priority_source='wikidata')
+        finally:s.close()
+
     def test_candidate_progress_keeps_failures_and_missing_world_denominator(self):
         s=self.store(archive([]))
         try:
@@ -70,7 +213,8 @@ class CollectionTests(unittest.TestCase):
             with s.db:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
             def ingest(store,http,ids,**kwargs):
                 with store.db:store.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',('wikidata','Q1@1','a'*64,'observed',None))
-            with patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+            with patch('gapi.collection.ingest_wikidata',side_effect=ingest) as adapter, \
+                 patch.object(s,'report',wraps=s.report) as audit, \
                  patch('gapi.collection.discover_openalex') as oa, \
                  patch('gapi.collection.discover_crossref') as cr, \
                  patch('gapi.collection.enqueue_discovery') as wd, \
@@ -79,6 +223,15 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(sum(t.call_count for t in (oa,cr,wd,dump)),0)
             self.assertFalse(r['discovery_enabled'])
             self.assertFalse(s.pending('ingest-wikidata'))
+            self.assertEqual(audit.call_count,1)
+            self.assertFalse(adapter.call_args.kwargs['report'])
+            self.assertEqual(r['stages'][0]['new_events'],0)
+            self.assertGreaterEqual(r['stages'][0]['elapsed_seconds'],0)
+            # A mocked, sub-tick batch has no measurable rate (Windows clock).
+            if r['stages'][0]['members_per_second'] is None:
+                self.assertEqual(r['stages'][0]['elapsed_seconds'],0)
+            else:
+                self.assertGreater(r['stages'][0]['members_per_second'],0)
             with self.assertRaisesRegex(ValueError,'queued-only'):
                 collect(s,None,{'id':'feed'},discovery=False)
         finally:s.close()
@@ -105,6 +258,39 @@ class CollectionTests(unittest.TestCase):
             with patch('gapi.collection.discover_openalex',return_value={}), patch('gapi.collection.ingest_wikidata',side_effect=BudgetStop('disk limit')), self.assertRaises(BudgetStop):
                 collect(s,None,{'id':'feed','size_bytes':100},max_seconds=10)
             self.assertEqual(s.pending('ingest-wikidata'),['Q1'])
+        finally:s.close()
+
+    def test_temporary_source_pause_does_not_disable_source_after_expiry(self):
+        s=self.store(archive([]));calls=[]
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-orcid-api','one','a','b'),('ingest-orcid-api','two','a','b'),
+                    ('ingest-wikidata','Q1','a','b')])
+            def orcid(store,http,ids,**kwargs):
+                store.start('orcid-public-api')
+                with store.member('orcid-public-api',ids[0]):
+                    store.finish_member('orcid-public-api',ids[0],'a'*64)
+                # Simulate expiry during independent useful work, without sleep.
+                if ids==['two']:
+                    with store.db:store.db.execute("DELETE FROM source_pauses WHERE source='wikidata'")
+            def wikidata(store,http,ids,**kwargs):
+                calls.append(ids)
+                store.start('wikidata')
+                if len(calls)==1:
+                    store.pause_source('wikidata',10**12,'maxlag')
+                    store.status('wikidata','access_failed')
+                    store.defer('ingest-wikidata','Q1','maxlag',now=0)
+                else:
+                    with store.member('wikidata','Q1@1'):
+                        store.finish_member('wikidata','Q1@1','a'*64)
+                    store.status('wikidata','partial')
+            with patch('gapi.collection.ingest_orcid_api',side_effect=orcid), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=wikidata):
+                result=collect(s,None,discovery=False,batch_members=1,max_seconds=10)
+            self.assertEqual(len(calls),2)
+            self.assertNotIn('ingest-wikidata',result['suspended_sources'])
+            self.assertFalse(s.pending('ingest-wikidata'))
         finally:s.close()
 
     def test_empty_sources_try_dump_once_and_do_not_loop_forever(self):

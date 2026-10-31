@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -66,30 +67,40 @@ class Task:
         tempfile.tempdir = tempdir
 
     def used(self) -> int:
-        total = 0
-        def size_if_present(path):
-            try:return path.stat().st_size
-            except FileNotFoundError:
-                # A journal/test directory can disappear between enumeration
-                # and stat. Permission/other observation errors still escape.
-                return 0
-        for folder, dirs, files in os.walk(self.root, followlinks=False):
-            for name in [*dirs, *files]:
-                path = Path(folder) / name
+        def tree_size(root, *, strict):
+            total = 0
+            pending = [root]
+            while pending:
+                folder = pending.pop()
                 try:
-                    linked = path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+                    with os.scandir(folder) as entries:
+                        for entry in entries:
+                            try:
+                                info = entry.stat(follow_symlinks=False)
+                                linked = stat.S_ISLNK(info.st_mode) or bool(
+                                    getattr(info, "st_file_attributes", 0) & 0x400)
+                                if strict and linked:
+                                    raise ValueError("links are forbidden in the task storage tree")
+                                if linked:
+                                    # Release file links retain their previous target-size
+                                    # accounting. Never traverse linked directories.
+                                    target = entry.stat(follow_symlinks=True)
+                                    if stat.S_ISREG(target.st_mode):total += target.st_size
+                                elif stat.S_ISDIR(info.st_mode):pending.append(entry.path)
+                                elif stat.S_ISREG(info.st_mode):total += info.st_size
+                            except FileNotFoundError:
+                                # A committed journal can vanish during observation.
+                                # Permission and other observation failures escape.
+                                continue
                 except FileNotFoundError:
-                    # Python/OS versions differ on whether a missing link probe
-                    # returns false or raises. A committed journal may disappear
-                    # at either the link check or the subsequent size check.
                     continue
-                if linked:
-                    raise ValueError("links are forbidden in the task storage tree")
-            total += sum(size_if_present(Path(folder) / name) for name in files)
+            return total
+        # No cache: every admission still scans the complete owned trees. DirEntry
+        # reuses OS enumeration metadata instead of probing each path repeatedly.
+        total = tree_size(self.root, strict=True)
         # Count new release/build outputs too; existing real input snapshots are not copied.
         for directory in (project_root() / "outputs", project_root() / "dist"):
-            if directory.exists():
-                total += sum(size_if_present(p) for p in directory.rglob("*") if p.is_file())
+            total += tree_size(directory, strict=False)
         return total
 
     def check(self, anticipated: int = 0) -> int:

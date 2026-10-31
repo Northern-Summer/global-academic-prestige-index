@@ -67,6 +67,7 @@ The existing ROR/OpenAlex directory collectors and US study importer are preserv
 ## Documentation
 
 - [Streaming, resources and exact source boundaries](docs/STREAMING.md)
+- [Real batch-career counts, scoring funnel and unresolved institution identities](docs/EASY_ORCID_2023_OBSERVATIONS.md)
 - [Methodology](docs/METHODOLOGY.md)
 - [Sources and source-specific licensing](docs/DATA_SOURCES.md)
 - [Bias and limitations](docs/BIAS_AND_LIMITATIONS.md)

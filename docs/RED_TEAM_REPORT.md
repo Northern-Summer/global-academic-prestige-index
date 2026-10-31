@@ -76,3 +76,103 @@ contains actual test counts, live acquisition measurements and deployment status
 2. Software security and reproducibility: hostile inputs, public-data leakage, dependency/build risks, frontend injection and resource exhaustion, and clean-room reproduction.
 
 The review must bind a fixed repository revision, input dataset, and config. Reviewers must disclose conflicts. Critical/high findings must be fixed and independently retested; lower-severity findings need a published disposition. Publish reviewer identity or organization, scope, methods, conflicts, findings, and retest status. Do not describe this prototype as red-team approved.
+
+### 2026-10-31: internal full-source and recovery checks
+
+A bounded read-only implementation-team review checked exact HQ reuse, person
+merging across HQ/delta, joint appointments and the full-source checksum gate.
+It reproduced a P2 false rejection when HQ contained identical duplicate rows.
+Coverage now marks every equivalent HQ projection while retaining a deterministic
+representative for the ordered reuse proof. A mismatched HQ identity is rejected
+at scoring. Both cases have executable regression fixtures.
+
+A real connection ended before the archive's gzip EOF. Its delta stayed
+provisional. Same-process range recovery now reuses the bounded transport reader;
+registered Zenodo archives without ETag require the exact pinned URL/length/MD5
+and final whole-file verification. The read-only follow-up checked range framing
+and normal continuation. End-to-end fixtures additionally reject changed suffixes,
+wrong checksums and stalled reconnections, and verify socket cleanup. Initial
+Content-Length drift is rejected before decoding. The subsequent real replay read
+the complete source and matched the earlier full-census SHA-256; it required zero
+range reconnections, so it does not constitute a real-network reconnect trial.
+
+The full regression contains 276 passing tests. The actual 487,234-edge browser
+export was checked for hashes, endpoint/chunk indexes, privacy and stage totals;
+real deterministic replay evidence is in `outputs/EASY_ORCID_FULL_ACCEPTANCE.json`
+and `outputs/EASY_ORCID_FULL_WEB_IDENTITY.json`. These checks do not establish
+career-fact accuracy, absence of unknown vulnerabilities, visual/browser
+acceptance, or independent third-party approval. The production frontend has not
+yet consumed this new browser contract.
+
+## 2026-10-31: full-source browser integration (local acceptance)
+
+The production build now consumes the complete aggregate historical bundle.
+The region omission found in the first rendered scene was repaired using fixed
+ROR metadata. All 62,103 prior node fields, including scores and ordering, were
+compared unchanged; 23,313 nodes have known regions, while 38,790 remain unknown.
+The selected institution scene rendered seven actual colors and 436 known-region
+nodes. A visible legend explains them. Historical table readiness was 1,738 ms
+in the local production-path trial, not an Internet performance guarantee.
+
+Executed checks: 276 Python tests, 38 Node tests, production build, historical
+browser acceptance and the existing production browser regression. Checks cover
+partial chunk failure without stale results, direct-link loading, filters, CSV,
+keyboard, mobile, font preservation and WebGL fallback. The initial browser
+attempt used the wrong preview base and failed; the corrected Pages base passed.
+An initial Python run also exposed two obsolete minimal entity-table fixtures;
+both were aligned with the production metadata schema and the full suite rerun.
+Failures remain in the corresponding `outputs/DERIVED_REGION_*` logs.
+
+Evidence: `outputs/DERIVED_REGION_IDENTITY.json`,
+`outputs/DERIVED_REGION_FULL_RETEST.txt`, `outputs/DERIVED_REGION_NODE_TESTS.txt`,
+`outputs/derived-region-pages.json`, and
+`outputs/DERIVED_REGION_LEGACY_BROWSER.json`. Local screenshots were inspected.
+This is internal automated and visual acceptance, not deployment, independent
+third-party review, complete global coverage or factual verification of careers.
+
+## 2026-10-31: cross-source counting and scheduling correction
+
+The earlier `cross_source_candidates=0` measurement compared raw institution
+identifiers and undercounted matches between Wikidata and ROR. A bounded
+person-grouped diagnostic now reuses adjudication's fact interpretation and
+active institution aliases. On the same 66,904-event input, it found 477 shared
+persons and 39 exact eligible fact matches. The old raw count remains available
+under an explicit name. Event statuses and official-confirmation rules did not
+change; these candidates do not prove independent origins.
+
+A four-minute finite queued collection added 544 events, reaching 67,448 events.
+Afterward, shared persons were 535 and exact fact matches 45. This is an observed
+batch result, not a controlled estimate of scheduler effectiveness. ORCID fresh
+work now uses at most half its slots for explicit stable identities present in
+Wikidata, while retaining ordinary queue and due-retry capacity. There are no new
+name-based merges, persistent selection indexes, raw downloads or evidence
+promotions. Tests cover date conflict, unfinished qualifications, ambiguous
+aliases, rejected membership, deterministic selection, retry backoff, ordinary
+work progress and aggregate-only diagnostic output.
+
+The last eight-second Wikidata window ended without a completed member. The old
+collector labeled that as suspended despite `stage_time_exhausted=true` and no
+access error. The collector now distinguishes a finite acquisition deadline from
+source failure and checks the deadline after candidate selection before opening
+a network window. Tests exercise both adapter-reported exhaustion and a raised
+`StageDeadline`. An initial test-fixture duplicate insertion failed; the fixture
+was corrected and rerun, with the failure log retained.
+
+Evidence: `outputs/CROSS_SOURCE_OVERLAP_VERIFIED.json`,
+`outputs/CROSS_SOURCE_PRIORITY_AFTER.json`,
+`outputs/CROSS_SOURCE_PRIORITY_COLLECTION.txt`, and the corresponding test logs.
+The independent official-confirmation count remains zero. This internal review
+does not satisfy the required external research or software red-team tracks.
+
+The follow-up real 90-second collection preserved both source checkpoints and
+added another 229 events. ORCID's exhausted finite window was correctly labeled
+without suspending it, and Wikidata then committed 49 members. Final counts were
+67,677 events, 554 shared persons and 50 exact normalized fact candidates; official
+confirmations remained zero. The final regression passed 282 tests. Database
+integrity was `ok`, all events had member evidence, and no provisional archive
+events or raw archive files were detected. Final receipts are
+`outputs/CROSS_SOURCE_RUNTIME_RETEST.txt`,
+`outputs/CROSS_SOURCE_SETTLED_CORROBORATION.json`,
+`outputs/CROSS_SOURCE_SETTLED_QUALITY.json`, and
+`outputs/CROSS_SOURCE_SETTLEMENT.json`. None of this completes the remaining
+source queues, global enumeration or external review.

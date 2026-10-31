@@ -5,7 +5,9 @@ import hashlib
 import ipaddress
 import json
 import math
+import re
 import time
+import zlib
 from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException
@@ -18,9 +20,11 @@ USER_AGENT = "GAPI/0.2 (+https://github.com/Northern-Summer/global-academic-pres
 # Official anonymous quota, checked 2026-10-29:
 # https://info.orcid.org/ufaqs/what-are-the-api-limits/
 ORCID_ANONYMOUS_DAILY_READS = 25000
+# Official wbgetentities paraminfo anonymous ids limit, checked 2026-10-30.
+WIKIDATA_BATCH_LIMIT = 50
 HOSTS = {"orcid.figshare.com", "ndownloader.figshare.com", "api.figshare.com", "s3-eu-west-1.amazonaws.com",
          "s3.amazonaws.com", "pub.orcid.org", "www.wikidata.org", "query.wikidata.org", "dumps.wikimedia.org",
-         "www.tamucc.edu", "api.openalex.org", "api.crossref.org", "api.nobelprize.org"}
+         "www.tamucc.edu", "experts.colorado.edu", "api.openalex.org", "api.crossref.org", "api.nobelprize.org", "zenodo.org"}
 
 
 class SourcePause(RuntimeError):
@@ -45,7 +49,7 @@ def entity_batch_route(parsed):
         return False
     import re
     ids = query.get('ids', [])
-    return (len(ids) == 1 and 1 <= len(ids[0].split('|')) <= 10
+    return (len(ids) == 1 and 1 <= len(ids[0].split('|')) <= WIKIDATA_BATCH_LIMIT
             and all(re.fullmatch(r'Q[1-9]\d*', q) for q in ids[0].split('|')))
 
 
@@ -114,7 +118,7 @@ def safe_url(url: str):
 
 
 class PublicHTTP:
-    def __init__(self, task, *, opener=None, sleep=time.sleep):
+    def __init__(self, task, *, opener=None, sleep=time.sleep,reuse_connections=False):
         class PublicRedirect(HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 try:
@@ -128,12 +132,20 @@ class PublicHTTP:
                     fp.close()
                     raise SourceRedirect(req.full_url, newurl, code)
                 return super().redirect_request(req, fp, code, msg, headers, newurl)
+        self.transport=None
+        if opener is None and reuse_connections:
+            from .persistent_http import SingleHTTPSHandler
+            self.transport=SingleHTTPSHandler()
+            opener=build_opener(PublicRedirect(),self.transport).open
         self.task, self.opener, self.sleep = task, opener or build_opener(PublicRedirect()).open, sleep
         self.robots = {}
         self.last_request = 0.0
         self.bytes_received = 0
         self.requests_count = 0
         self.deadline = None
+
+    def close(self):
+        if self.transport is not None:self.transport.close()
 
     @contextmanager
     def within(self, seconds):
@@ -155,7 +167,7 @@ class PublicHTTP:
             raise StageDeadline('retry/rate-limit delay exceeds source stage budget')
         self.sleep(seconds)
 
-    def _open(self, url, accept):
+    def _open(self, url, accept, *, headers=None, expected_status=200):
         safe_url(url)
         for attempt in range(self.task.config["max_retries"] + 1):
             self.remaining()
@@ -165,8 +177,8 @@ class PublicHTTP:
             self.last_request = time.monotonic()
             try:
                 self.requests_count+=1
-                r = self.opener(Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept}), timeout=self.remaining())
-                if r.status != 200:
+                r = self.opener(Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept, **(headers or {})}), timeout=self.remaining())
+                if r.status != expected_status:
                     code = r.status
                     r.close()
                     raise RuntimeError(f"source returned HTTP {code}; no usable body")
@@ -201,7 +213,12 @@ class PublicHTTP:
             robot_url = origin + "/robots.txt"
             try:
                 with self._open(robot_url, "text/plain") as r:
-                    body = r.read(262145)
+                    chunks, size = [], 0
+                    while chunk := r.read(min(65536,262145-size)):
+                        chunks.append(chunk)
+                        size += len(chunk)
+                        if size > 262144:break
+                    body = b''.join(chunks)
                     if len(body) > 262144:
                         raise ValueError("robots file exceeds limit")
                     if "html" in r.headers.get("Content-Type", ""):
@@ -223,7 +240,7 @@ class PublicHTTP:
         if delay:
             self.wait(delay)
 
-    def open(self, url, accept="application/octet-stream"):
+    def open(self, url, accept="application/octet-stream", *, headers=None):
         # These are documented programmatic interfaces, not website crawling.
         # Their API terms explicitly permit automated reads (ORCID: noncommercial).
         # Keep exact routes; never use this for pages, Figshare or auth/403 recovery.
@@ -242,16 +259,80 @@ class PublicHTTP:
         )
         if not documented_api:
             self.allowed(url)
-        return SourceResponse(self._open(url, accept),self.remaining)
+        return SourceResponse(self._open(url, accept, headers=headers),self.remaining)
+
+    def open_range(self, url, offset, total, initial_headers, *, expected_md5=None):
+        """Resume a fixed official dump inside the SAME decompression process.
+
+        A validator and strict Content-Range prevent concatenating a changed or
+        ignored representation. Full upstream checksum remains mandatory.
+        """
+        p = urlsplit(url)
+        from .easy_orcid_census import ARCHIVES
+        fixed_career=(url,total,expected_md5) in ARCHIVES.values()
+        fixed_dump=(p.hostname == 'dumps.wikimedia.org' and not p.query and not p.fragment
+                    and re.fullmatch(r'/wikidatawiki/entities/(\d{8})/wikidata-\1-all\.json\.(bz2|gz)', p.path))
+        if not (fixed_dump or fixed_career) or not 0 < offset < total:
+            raise ValueError('range is restricted to fixed official dump offsets')
+        etag = initial_headers.get('ETag', '')
+        modified = initial_headers.get('Last-Modified', '')
+        validator = etag if etag.startswith('"') and etag.endswith('"') else modified
+        if not validator and not fixed_career:
+            raise ValueError('dump resume requires a source identity validator')
+        if validator and validator == modified:
+            try:
+                if parsedate_to_datetime(modified).tzinfo is None:
+                    raise ValueError('missing timezone')
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise ValueError('invalid dump Last-Modified validator') from exc
+        self.allowed(url)
+        # Zenodo exposes no ETag/Last-Modified here. Only the exact registered
+        # URL, length and checksum may use this path. The census must verify
+        # the WHOLE checksum before any provisional projections are promoted.
+        headers={'Range':f'bytes={offset}-','Accept-Encoding':'identity'}
+        if validator:headers['If-Range']=validator
+        response = self._open(url, 'application/octet-stream', headers=headers, expected_status=206)
+        try:
+            match = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', response.headers.get('Content-Range',''))
+            if (not match or tuple(map(int,match.groups())) != (offset,total-1,total)
+                    or int(response.headers.get('Content-Length','-1')) != total-offset):
+                raise ValueError('dump resume Content-Range/length mismatch')
+            if response.geturl() != url or response.headers.get('Content-Encoding','identity') != 'identity':
+                raise ValueError('dump resume representation changed')
+            key = 'ETag' if validator == etag else 'Last-Modified'
+            if validator and response.headers.get(key) != validator:
+                raise ValueError('dump resume source validator changed')
+            return SourceResponse(response,self.remaining)
+        except BaseException:
+            response.close()
+            raise
 
     def json(self, url, limit=2*1024**2):
-        with self.open(url, "application/json") as response:
-            chunks, size = [], 0
-            while chunk := response.read(min(65536, limit + 1 - size)):
+        if type(limit) is not int or not 0 < limit <= 2*1024**2:
+            raise ValueError("invalid structured response bound")
+        with self.open(url, "application/json", headers={'Accept-Encoding':'gzip'}) as response:
+            encoding=response.headers.get('Content-Encoding','identity').strip().lower()
+            if encoding not in ('identity','gzip'):
+                raise ValueError('unsupported structured content encoding')
+            decoder=zlib.decompressobj(31) if encoding=='gzip' else None
+            chunks, size, wire_size = [], 0, 0
+            while chunk := response.read(min(65536, limit + 1 - wire_size)):
+                wire_size += len(chunk)
+                self.bytes_received += len(chunk)
+                if wire_size > limit:
+                    raise ValueError("structured response exceeds bound")
+                if decoder:
+                    try:
+                        chunk=decoder.decompress(chunk,limit+1-size)
+                    except zlib.error as exc:
+                        raise ValueError('invalid structured gzip response') from exc
+                    if decoder.unused_data:
+                        raise ValueError('trailing structured gzip data')
                 chunks.append(chunk)
                 size += len(chunk)
-                self.bytes_received += len(chunk)
                 if size > limit:
                     raise ValueError("structured response exceeds bound")
+            if decoder and not decoder.eof:
+                raise ValueError('truncated structured gzip response')
             body = b"".join(chunks)
         return json.loads(body), hashlib.sha256(body).hexdigest()

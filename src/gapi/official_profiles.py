@@ -12,12 +12,16 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
-from .career_rules import classify, normalized, valid_orcid
+from .career_rules import normalized, valid_orcid
+from .career_normalization import completed_education_stage
 from .orcid_stream import CHUNK, private_person
-from .task import digest
+from .task import digest,BudgetStop
 
-RULE = 'official-profile-education-lines/3'
-ADAPTERS = {'www.tamucc.edu': {'path':'/business/about/directory/', 'employer':'ror:01mrfdz82'}}
+RULE = 'official-profile-education-lines/5'
+ADAPTERS = {
+    'www.tamucc.edu': {'pattern':r'/business/about/directory/[a-z-]+\.php','employer':'ror:01mrfdz82'},
+    'experts.colorado.edu': {'pattern':r'/display/fisid_[0-9]+','employer':None},
+}
 
 
 class ProfileParser(HTMLParser):
@@ -72,7 +76,7 @@ class ProfileParser(HTMLParser):
             match=re.fullmatch(r'([^,]{1,80}),\s*([^,]{1,250}),\s*(\d{4})',text)
             if match:
                 degree,institution,date=match.groups()
-                kind,stage=classify('education',degree,completed_only=True)
+                stage=completed_education_stage(degree)
                 if stage:self.degrees.append((stage,normalized(institution),int(date),digest(text)))
                 if len(self.degrees)>100:raise ValueError('too many degree lines')
         joined=re.fullmatch(r'Joined the faculty in (\d{4})',text)
@@ -81,21 +85,29 @@ class ProfileParser(HTMLParser):
             self.academic=True
 
 
+def supported_profile_url(url):
+    if not isinstance(url,str) or any(ord(c)<=32 for c in url):return False
+    try:parsed=urlsplit(url)
+    except ValueError:return False
+    adapter=ADAPTERS.get(parsed.hostname)
+    return bool(adapter and parsed.scheme=='https' and parsed.netloc==parsed.hostname
+        and not parsed.query and not parsed.fragment and re.fullmatch(adapter['pattern'],parsed.path))
+
+
 def profile_url(event):
     for ref in event.get('references',[]):
         for snak in ref.get('snaks',{}).get('P854',[]):
             url=snak.get('datavalue',{}).get('value')
-            if not isinstance(url,str):continue
-            parsed=urlsplit(url)
-            adapter=ADAPTERS.get(parsed.hostname)
-            if (adapter and parsed.scheme=='https' and not parsed.query and not parsed.fragment
-                    and re.fullmatch(re.escape(adapter['path'])+r'[a-z-]+\.php',parsed.path)):
-                return url
+            if supported_profile_url(url):return url
     return None
 
 
 def fetch_profile(http,task,url):
-    parser=ProfileParser();hasher=hashlib.sha256();decoder=codecs.getincrementaldecoder('utf-8')('strict')
+    if urlsplit(url).hostname=='experts.colorado.edu':
+        from .vivo_profiles import VivoEducationParser
+        parser=VivoEducationParser()
+    else:parser=ProfileParser()
+    hasher=hashlib.sha256();decoder=codecs.getincrementaldecoder('utf-8')('strict')
     size=0
     with http.open(url,'text/html') as response:
         if 'text/html' not in response.headers.get('Content-Type',''):
@@ -119,14 +131,35 @@ def check_official_profiles(store,http,*,limit=20):
         event=json.loads(payload)
         url=profile_url(event)
         if url and (url in selected or len(selected)<limit):
+            if len(selected.get(url,()))>=4096:raise BudgetStop('official profile event fanout exceeds bound')
             selected.setdefault(url,[]).append((event_id,event,institution))
-    confirmed=failed=identity_bound=field_candidates=0
+    confirmed=failed=identity_bound=field_candidates=direct_candidates=queued_candidates=0
     for url,events in selected.items():
         try:
             parsed,sha=fetch_profile(http,store.task,url)
             subject=private_person(next(iter(parsed.orcids))) if len(parsed.orcids)==1 else None
             identity_bound+=int(subject is not None)
             checked=[]
+            # The reference discovers the page, not the facts on it. Its explicit
+            # stable identity may independently support another self-declared fact.
+            if subject:
+                from .corroboration import _fact
+                from .career_store import member_evidence_sql
+                candidates=store.db.execute('''SELECT e.id,e.payload,COALESCE(a.institution,e.institution),n.name
+                    FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
+                    LEFT JOIN entities n ON n.id=COALESCE(a.institution,e.institution)
+                    WHERE e.person=? AND e.source='orcid-public-api' AND '''+member_evidence_sql()+'''
+                    ORDER BY e.id LIMIT 4097''',(subject,))
+                for index,(event_id,payload,institution,label) in enumerate(candidates):
+                    if index>=4096:raise BudgetStop('official self comparison fanout exceeds bound')
+                    event=json.loads(payload);fact=_fact(event,institution)
+                    if not label or not fact or fact[1]!='education':continue
+                    matches=[h for stage,name,date,h in parsed.degrees if stage==fact[2]
+                        and name==normalized(label) and date==fact[4]]
+                    if len(matches)==1:
+                        checked.append((event_id,url,sha,RULE,datetime.now(timezone.utc).isoformat(),
+                            'official-underlying-source-confirmed','independent-official-profile',matches[0]))
+                        direct_candidates+=1
             for event_id,event,institution in events:
                 label=store.db.execute('SELECT name FROM entities WHERE id=?',(institution,)).fetchone()
                 field=None
@@ -150,12 +183,21 @@ def check_official_profiles(store,http,*,limit=20):
                 store.db.execute('DELETE FROM official_profile_subjects WHERE url=?', (url,))
                 if subject:
                     store.db.execute('INSERT INTO official_profile_subjects VALUES(?,?,?,?)',(url,sha,RULE,subject))
+                    # Preserve a discovered stable identity in the existing queue;
+                    # the official page itself supplies the discovery evidence.
+                    inserted=store.db.execute('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
+                        ('ingest-orcid-api',next(iter(parsed.orcids)),digest({'rule':RULE,'url':url}),sha))
+                    queued_candidates+=inserted.rowcount
                 store.db.executemany('INSERT OR REPLACE INTO official_checks VALUES(?,?,?,?,?,?,?,?)',checked)
             confirmed+=sum(row[5]=='official-underlying-source-confirmed' for row in checked)
             field_candidates+=sum(row[5]=='official-fields-match-identity-unresolved' for row in checked)
+        except BudgetStop:
+            raise
         except (OSError,ValueError,RuntimeError) as exc:
             store.failure('official-profile',url,str(exc));failed+=1
     return {'official_pages_checked':len(selected)-failed,'official_fields_confirmed':confirmed,
         'official_identity_bound_pages':identity_bound,'fields_with_unresolved_identity':field_candidates,
+        'official_self_field_candidates':direct_candidates,
+        'new_orcid_candidates':queued_candidates,
         'failed_pages':failed,'independent_source_promotions':0,
-        'scope':'exact supported profile layout; referenced original evidence is not an independent second source'}
+        'scope':'explicit official fields and stable identity; reference copies count once; independent self evidence is adjudicated separately'}

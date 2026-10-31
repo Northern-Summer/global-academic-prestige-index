@@ -1,0 +1,14 @@
+{
+  "id": "easy-orcid-2023.6-full",
+  "kind": "easy-orcid-jsonl-gzip/v1",
+  "url": "https://zenodo.org/records/13333068/files/records.jsonl.gz?download=1",
+  "metadata_url": "https://zenodo.org/api/records/13333068",
+  "version": "2023.6",
+  "publication_date": "2024-08-17",
+  "license": "CC0-1.0",
+  "derived_from": "10.23640/07243.24204912.v1",
+  "size_bytes": 920836363,
+  "md5": "8829b83ba498b901fc7a1d7320040520",
+  "scope": "Full published Easy ORCID 2023 derivative; not all world personnel or a current census",
+  "independent_corroboration": false
+}

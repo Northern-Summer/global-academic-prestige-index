@@ -1,1 +1,3 @@
 *.woff2 binary
+outputs/global/*.json text eol=lf
+outputs/easy-orcid-web/*.json -text

@@ -29,6 +29,17 @@ DDL = '''CREATE TABLE IF NOT EXISTS event_interpretations(
     PRIMARY KEY(event_id,rule_version));'''
 
 
+def completed_education_stage(role):
+    """Source-neutral use of the existing qualification and lexical rule owners."""
+    kind,stage=classify('education',role,completed_only=True)
+    if kind!='education' or excluded_qualification(role):return None
+    if stage:return stage
+    text=normalized(role)
+    for input_kind,candidate,expression in RULES:
+        if input_kind=='education' and re.fullmatch(expression,text):return candidate
+    return None
+
+
 def interpretation(event):
     kind = event['kind']
     if event['source'] != 'orcid-public-api': return None

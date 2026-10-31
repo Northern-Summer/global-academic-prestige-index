@@ -12,7 +12,8 @@ import time
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
-from .task import Task, canonical, digest
+from .task import Task, BudgetStop, canonical, digest
+from .event_storage import pack, configure_reader
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
@@ -123,6 +124,7 @@ class CareerStore:
         # transactions can still hold SQLite's shared lock during a commit;
         # wait at most five seconds instead of aborting an otherwise valid batch.
         self.db = sqlite3.connect(task.root / "careers.sqlite", timeout=5)
+        configure_reader(self.db)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
@@ -164,16 +166,30 @@ class CareerStore:
     def seen(self, source, locator):
         return self.db.execute("SELECT sha256,status FROM members WHERE source=? AND locator=?", (source, locator)).fetchone()
 
-    def pending(self, command, limit=200, *, now=None):
+    def pending(self, command, limit=200, *, now=None, priority_source=None):
         sources=CANDIDATE_SOURCES
         if command not in sources or not 1<=limit<=1000:
             raise ValueError('invalid pending source/batch limit')
-        query='''SELECT d.identifier FROM discovery d
+        if priority_source is not None and (command!='ingest-orcid-api' or priority_source!='wikidata'):
+            raise ValueError('cross-source priority requires explicit Wikidata-to-ORCID identity')
+        query='''WITH member_keys AS MATERIALIZED (
+            SELECT locator,CASE WHEN instr(locator,'@')>0 AND
+                (instr(locator,char(0))=0 OR instr(locator,'@')<instr(locator,char(0)))
+                THEN lower(substr(locator,1,instr(locator,'@')-1)) END AS prefix
+            FROM members WHERE source=?),
+            exact_keys AS MATERIALIZED (SELECT DISTINCT locator FROM member_keys),
+            prefix_keys AS MATERIALIZED (SELECT DISTINCT prefix FROM member_keys WHERE prefix IS NOT NULL)
+            SELECT d.identifier FROM discovery d
             LEFT JOIN discovery_retries r ON r.source=d.source AND r.identifier=d.identifier
+            LEFT JOIN exact_keys e ON e.locator=d.identifier
+            LEFT JOIN prefix_keys p ON p.prefix=lower(d.identifier)
             WHERE d.source=? AND COALESCE(r.next_attempt_at,0)<=?
-            AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
-            AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%'))'''
-        parameters=(command,time.time() if now is None else now,sources[command])
+            AND CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
+                AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
+                THEN e.locator IS NULL AND p.prefix IS NULL
+                ELSE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
+                    AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END'''
+        parameters=(sources[command],command,time.time() if now is None else now,sources[command])
         # Reserve a quarter of a normal batch for due retries so a continuing
         # stream of fresh candidates cannot starve recovered records forever.
         due=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NOT NULL
@@ -181,6 +197,33 @@ class CareerStore:
         reserved=min(len(due),max(1,limit//4))
         fresh=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
             ORDER BY d.identifier LIMIT ?''',(*parameters,limit-reserved))]
+        if priority_source and len(fresh)>1:
+            from .orcid_stream import private_person
+            from .career_rules import valid_orcid
+            linked=set()
+            for (person,) in self.db.execute('SELECT DISTINCT person FROM official_profile_subjects'):
+                linked.add(person)
+                if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
+            official=set(linked)
+            for (person,) in self.db.execute('''SELECT DISTINCT e.person FROM events e
+                WHERE e.source=? AND '''+member_evidence_sql(),(priority_source,)):
+                linked.add(person)
+                if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
+            self.task.check_memory()
+            def linked_priority(identifier):
+                if not valid_orcid(identifier):return 0
+                person=private_person(identifier)
+                return 2 if person in official else int(person in linked)
+            self.db.create_function('gapi_linked_person',1,linked_priority,deterministic=True)
+            try:
+                priority=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
+                    AND gapi_linked_person(d.identifier)>0 ORDER BY gapi_linked_person(d.identifier) DESC,d.identifier LIMIT ?''',
+                    (*parameters,len(fresh)//2))]
+            finally:self.db.create_function('gapi_linked_person',1,None)
+            # Keep ordinary fresh work and reserved due retries moving. Only a
+            # bounded half of fresh slots prefers an existing stable-person link.
+            preferred=set(priority)
+            fresh=(priority+[identifier for identifier in fresh if identifier not in preferred])[:len(fresh)]
         return due[:reserved]+fresh+due[reserved:limit-len(fresh)]
 
     def defer(self, command, identifier, reason, *, now=None):
@@ -262,7 +305,7 @@ class CareerStore:
         self.db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             key, record["person"], record.get("institution"), record["kind"], record.get("stage"),
             record.get("year_start"), record.get("year_end"), record.get("role"), record.get("country"),
-            record["source"], record["locator"], record["status"], canonical(record).decode()))
+            record["source"], record["locator"], record["status"], pack(canonical(record).decode())))
 
     def finish_member(self, source, locator, sha256, status="observed", reason=None):
         old = self.seen(source, locator)
@@ -298,20 +341,48 @@ class CareerStore:
 
     def candidate_progress(self, *, allowed_sources=None):
         """Counts committed candidate selection, not unknown world personnel."""
+        from .ranking_snapshot import candidate_progress
+        frozen=candidate_progress(self,allowed_sources=allowed_sources)
+        if frozen is not None:return frozen
         rows=[]
         for command,source in CANDIDATE_SOURCES.items():
             if allowed_sources is not None and source not in allowed_sources:continue
             index=hashlib.sha256()
             for row in self.db.execute('SELECT identifier,query_sha256,response_sha256 FROM discovery WHERE source=? ORDER BY identifier',(command,)):
                 index.update(canonical(row))
-            total,processed,observed,failed_pending=self.db.execute('''SELECT count(*),COALESCE(sum(committed),0),
+            # Materialize each source's member keys once instead of scanning all
+            # members for every candidate. Exact locators retain binary equality;
+            # @-prefix matching retains SQLite LIKE's ASCII case behavior. Only
+            # wildcard-free ASCII IDs use that projection. Legacy/unusual IDs
+            # still execute the original predicate, including its wildcards.
+            total,processed,observed,failed_pending=self.db.execute('''WITH
+                member_keys AS MATERIALIZED (
+                    SELECT locator,status,CASE WHEN instr(locator,'@')>0 AND
+                        (instr(locator,char(0))=0 OR instr(locator,'@')<instr(locator,char(0)))
+                        THEN lower(substr(locator,1,instr(locator,'@')-1)) END AS prefix
+                    FROM members WHERE source=?),
+                exact_keys AS MATERIALIZED (
+                    SELECT locator,1 AS present,max(status='observed') AS observed
+                    FROM member_keys GROUP BY locator),
+                prefix_keys AS MATERIALIZED (
+                    SELECT prefix,1 AS present,max(status='observed') AS observed
+                    FROM member_keys WHERE prefix IS NOT NULL GROUP BY prefix)
+                SELECT count(*),COALESCE(sum(committed),0),
                 COALESCE(sum(observed),0),COALESCE(sum(attempted AND NOT committed),0) FROM (
-                SELECT EXISTS(SELECT 1 FROM members m WHERE m.source=? AND
-                    (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) AS committed,
-                    EXISTS(SELECT 1 FROM members m WHERE m.source=? AND m.status='observed' AND
-                    (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) AS observed,
+                SELECT CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
+                    AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
+                    THEN COALESCE(e.present,p.present,0)
+                    ELSE EXISTS(SELECT 1 FROM members m WHERE m.source=? AND
+                        (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END AS committed,
+                    CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
+                    AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
+                    THEN max(COALESCE(e.observed,0),COALESCE(p.observed,0))
+                    ELSE EXISTS(SELECT 1 FROM members m WHERE m.source=? AND m.status='observed' AND
+                        (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END AS observed,
                     EXISTS(SELECT 1 FROM discovery_retries r WHERE r.source=d.source AND r.identifier=d.identifier) AS attempted
-                FROM discovery d WHERE d.source=?)''',(source,source,command)).fetchone()
+                FROM discovery d LEFT JOIN exact_keys e ON e.locator=d.identifier
+                LEFT JOIN prefix_keys p ON p.prefix=lower(d.identifier)
+                WHERE d.source=?)''',(source,source,source,command)).fetchone()
             if total:
                 rows.append({'source':source,'candidates':total,'processed':processed,
                     'observed_members':observed,'rejected_members':processed-observed,

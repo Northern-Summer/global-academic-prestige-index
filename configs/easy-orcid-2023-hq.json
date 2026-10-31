@@ -1,0 +1,14 @@
+{
+  "id": "easy-orcid-2023.6-hq",
+  "kind": "easy-orcid-jsonl-gzip/v1",
+  "url": "https://zenodo.org/records/13333068/files/records_hq.jsonl.gz?download=1",
+  "metadata_url": "https://zenodo.org/api/records/13333068",
+  "version": "2023.6",
+  "publication_date": "2024-08-17",
+  "license": "CC0-1.0",
+  "derived_from": "10.23640/07243.24204912.v1",
+  "size_bytes": 662112167,
+  "md5": "e18decdd695473e5c6b040f699e63d04",
+  "scope": "HQ derivative selection; not all ORCID records or world personnel",
+  "independent_corroboration": false
+}

@@ -272,8 +272,36 @@ table-based entry point; its displayed subset is explicitly limited.
 
 ## Remaining acceptance gates
 
+The official-profile adapter now supports the exact CU Experts
+`https://experts.colorado.edu/display/fisid_<digits>` route in addition to the
+existing TAMU-CC directory. It reads only the dedicated education list's explicit
+degree, schema-marked university name and year, and the dedicated ORCID list.
+Literal HTTP ORCID identifiers in official HTML are parsed as identifiers without
+following an HTTP link. Fetches still use HTTPS, robots checks, finite timeouts and
+the existing 2 MiB response bound. Shared completed-qualification rules own degree
+interpretation; the adapter never treats publication affiliations as jobs.
+
+Profile rule version 5 invalidates older derived checks until refreshed. In
+addition to checking the original cited event, an official page with exactly one
+valid ORCID can support a degree explicitly present on that page against that
+ORCID's self assertion. Matching requires a resolved ROR institution, exact
+normalized institution name, completed stage and degree year. The corroboration
+owner separately requires committed member evidence, the affiliation part hash,
+an ORCID-owned assertion and the current official person binding. An employment
+citation is only a discovery route and never becomes degree evidence itself.
+This direct official/self support survives removal of Wikidata from a sensitivity
+scenario; removing ORCID removes that support. No original event is rewritten.
+
+Unique official ORCIDs enter the existing discovery queue atomically with their
+profile hash and identity binding. Repeat reads do not duplicate candidates.
+The existing bounded half of fresh priority slots first selects official-bound
+identities, then Wikidata-linked identities; ordinary fresh work, due retries and
+source backoff retain their reserved capacity. No separate queue is created.
+Successful parsing, stable identity and independent corroboration remain separate
+results. Adapter tests alone do not establish real independent confirmations.
+
 For historical reproduction, `--freeze-input` creates a content-addressed private
-SQLite copy of normalized events/evidence/crosswalks in the external task's
+SQLite projection of normalized events/evidence/crosswalks in the external task's
 `frozen-inputs` directory. These are structured computation inputs, not original
 XML or archives. The copy is admitted against the same 2 GiB cap with write reserve;
 if it cannot fit, freezing stops rather than silently increasing storage. Existing
@@ -281,6 +309,23 @@ snapshots are hash-verified and reused. They contain controlled personal inputs
 and must never be uploaded as release assets. The manifest contains only the
 snapshot filename/hash/size and its private status. Authorized reviewers need
 controlled access to these inputs for exact numerical reconstruction.
+
+New releases use `global-ranking-private-snapshot/1`: the current-events ranking
+does not read the independently scored Easy ORCID `easy_careers`/`easy_full_delta`
+tables or provisional `dump_landing`, so those tables are excluded. The live
+candidate queue is replaced by the exact selection hashes/counts produced by
+`CareerStore.candidate_progress` inside the same read transaction. All other tables,
+optional award/identity inputs, indexes and views are copied in primary-key order,
+at most 100 rows or 2 MiB per batch. Event text uses the existing lossless GAPIz1
+storage owner. Triggers and virtual tables are rejected. Every batch must pass the
+same full storage admission; no full-database staging copy is needed. The private
+manifest records scope and excluded row counts. This is a ranking input snapshot,
+not a recoverable acquisition backup and not an Easy ORCID input snapshot.
+
+After integrity verification the projection is deterministically gzip-packed and
+verified before retiring its uncompressed successor. `--frozen-input HASH.sqlite`
+still reads existing full snapshots and new scoped snapshots; exact scores and
+candidate selection metadata must replay with the pinned code/configuration.
 
 ```powershell
 python -m gapi export-release --publication-policy configs/publication-20261029.json --frozen-input HASH.sqlite
@@ -290,6 +335,33 @@ The reader rejects hash mismatches, paths and writes. Later ingestion can change
 live database while an older selected input still reconstructs its original output.
 The frozen copy is useful for the current bounded release; repeated copies remain
 subject to the same budget and are not claimed to scale to unlimited version retention.
+
+Private historical snapshots can be packed without changing their logical filename
+or original SHA-256:
+
+```powershell
+python -m gapi compact-frozen-inputs --filenames HASH.sqlite OTHER_HASH.sqlite
+```
+
+This command takes the existing exclusive writer lock, validates the requested
+filenames, streams deterministic gzip into a staging file, verifies the complete
+decompressed SHA-256, atomically publishes `HASH.sqlite.gz`, and only then removes
+the verified raw SQLite predecessor. Repeating it verifies the packed successor
+without creating another copy. This is compression of derived private inputs,
+not storage of upstream raw archives. Never upload these files.
+
+`--frozen-input HASH.sqlite` accepts either storage representation. Packed reads
+restore a temporary SQLite file within the same external task budget, verify its
+original hash, and remove it on normal exit or a handled exception. A process kill
+may leave `frozen-read-*.sqlite`; inspect active readers before retiring a leftover.
+A failed compression staging file is preserved after a process kill and blocks
+another attempt until inspected. Unpacking can stop at the budget boundary;
+compression does not promise that an arbitrarily large snapshot can be restored.
+Pinned older code that predates this reader requires explicitly decompressing
+the gzip under the same budget and verifying the original filename SHA-256 first.
+New live freezes still use the existing full-copy admission rule; a growing live
+database can require a separately designed scoring-input projection before the
+next release. Packing old snapshots does not silently waive that release gate.
 
 The explicit `--publication-policy configs/publication-20261029.json` release
 selection permits noncommercial ORCID public-record institution derivatives under
@@ -479,3 +551,365 @@ states without changing that admission rule. The paired same-frozen-input
 benchmark is `python scripts/benchmark-member-evidence.py`. It checks the output
 hash against the current public manifest and saves aggregate timings, never raw
 responses or person-level rows. A timing observation is not a throughput guarantee.
+
+## Fixed dump transport reconnection
+
+The candidate-discovery reader can reconnect a broken HTTP body while the same
+process retains its bz2/gzip decompressor and cumulative SHA-1/SHA-256 state. It
+requests the next compressed byte that has not been delivered to that decompressor.
+The shared HTTP boundary permits this only for the fixed official Wikidata dump
+route, with robots checks, existing rate limits and finite retries. It requires a
+strong ETag or a valid Last-Modified validator, sends If-Range, and accepts only
+HTTP 206 with the exact expected Content-Range, length, URL and validator. Ignored
+ranges, changed files, missing validators and access refusals stop that attempt.
+
+There are at most eight consecutive body reconnections without delivered bytes
+and at most 256 total per invocation. Successful continuation resets only the
+stalled count: intermittent healthy progress cannot consume a tiny failure budget
+intended for a dead endpoint, while tiny responses still cannot cause unlimited
+requests. Time, memory, disk and optional transport-byte budgets still apply.
+An exact frozen-length EOF needs no
+additional request. Raw source bytes are never written to disk. Progress reports
+separate replay verification from new discovery and expose reconnection counts.
+Process restart still replays from the beginning and verifies the committed line
+prefix: this is not arbitrary compressed-offset recovery across processes. Only
+complete framing, frozen compressed length and the upstream full checksum can
+verify source enumeration. Discovered IDs remain candidates requiring individual
+career evidence, and the dump/API are the same evidence source.
+Oversized and malformed candidate records are recorded in the existing failure
+ledger with the fixed feed identity, line number, reason and record SHA-256; raw
+record contents are omitted. Replayed oversized records can fill missing legacy
+diagnostics without incrementing the committed rejected-record count. Historical
+malformed records lacking locators remain a disclosed gap. A verified source
+checksum does not mean every record was successfully interpreted.
+
+### Normalized career landing from the frozen dump
+
+Continue the existing candidate queue first:
+`python -m gapi collect-global --queued-only --max-seconds 3600 --batch-members 200`.
+Wikidata requests contain at most 50 entities, with bounded splitting for oversized
+responses. ORCID keeps its independent request budget. Collection generates the
+full queue audit once at exit; each stage reports new members, new events, elapsed
+seconds and members per second. These rates describe source records, not verified
+people or global completion. Queued-only completion does not finish source discovery.
+
+Do not run long SQL/profiling reads directly against the live acquisition database:
+DELETE journal mode readers can block the sole writer's commit. Use the existing
+bounded `acquisition-status` projection, a frozen ranking input, or a writer-free
+maintenance window. If a member transaction encounters SQLite BUSY/LOCKED despite
+the five-second wait, collection rolls back that unfinished member and returns
+`resumable-storage-contention`, retaining the candidate without source suspension
+or a fabricated source failure. It does not loop/replay the request automatically.
+After the competing reader ends, rerun the same queued-only command. Other SQLite
+errors still fail visibly and require investigation. Existing request reservations
+remain conservative if their own settlement cannot commit.
+
+The frozen-dump route below is optional, and is not the active acquisition path.
+Defaults remain 300 seconds and 256 reconnects. The eight consecutive no-byte
+reconnect cap, individual request deadlines, memory and storage limits still apply.
+Historical long-run feasibility receipts are retained under `outputs/`.
+
+Use `python -m gapi discover-wikidata-dump --stage-careers --max-seconds 300`
+to retain normalized education/employment events while streaming. The default
+candidate-only command remains compatible. No raw entity, label or compressed
+body is stored. The landing table shares the task's disk/memory limits and sole
+writer lock; it is excluded from canonical events, candidate processing counts
+and ranking. Both paths use `wikidata_events` as their interpretation owner.
+
+Enabling landing after an earlier candidate scan replays the compressed source
+from its beginning and backfills normalized careers even in the old prefix.
+The persisted discovery ceiling is not the replay's current position. Landing
+inserts are idempotent; a crash between landing commit and source checkpoint
+does not lose records because replay repeats the prefix. A changed replay prefix
+or invalid full checksum leaves the feed unverified and prohibits promotion.
+Malformed or over-limit normalized members are recorded as
+`wikidata-dump-landing` failures, not silently counted as processed careers.
+
+After full verification, stop the scanning writer and run
+`python -m gapi promote-wikidata-dump --max-members 1000 --max-seconds 60`.
+Repeat until `promotion_complete` is true. Each member's event insertion and
+landing removal are one transaction. An already acquired API member at the same
+revision retains its existing events. Dump and API remain one evidence source;
+promotion does not establish independent corroboration. A verified archive with
+landing errors still has explicitly unresolved interpretation gaps. Resource
+limits may stop landing before full enumeration; preserve that checkpoint and
+report the capacity boundary rather than dropping evidence or claiming completion.
+
+For aggregate monitoring while a writer is active, use
+`python -m gapi acquisition-status --max-seconds 60`. It copies the structured
+database into memory using 64-page SQLite backup steps, closes the live read-only
+connection, then runs the existing report calculations. This avoids holding a
+long live read transaction during candidate counts. It creates no disk snapshot
+or second writer, and stops on memory/time bounds. For very large stores where
+an in-memory snapshot does not fit, use the bounded acquisition progress log
+until the writer ends; do not run full live-table counts in parallel.
+
+Candidate completion statistics are owned by `CareerStore.candidate_progress`.
+It materializes each source's exact locators and revision-prefix keys once, then
+joins candidates to those keys. Exact matches retain binary equality and `@`
+prefixes retain SQLite LIKE's ASCII case behavior. Wildcard-bearing, non-ASCII
+and unusual historical candidate IDs keep the original predicate as a fallback.
+Multiple revisions never multiply candidate counts, and an observed revision can
+coexist with a rejected exact record. Source selection hashes and public progress
+fields remain unchanged. This avoids rescanning every member for every pending ID.
+
+`python scripts/benchmark-candidate-progress.py --baseline 8c2636d --out <receipt>`
+compares the pinned predecessor on one bounded RAM snapshot. It checks identical
+aggregate output, selection hashes and repeatability on up to 2,000 candidates
+per source, and separately times the full current calculation. The bounded
+comparison is not a full-source equivalence proof or a ranking benchmark; the
+mixed-locator regression also covers wildcard, Unicode, case and multi-revision
+records. This benchmark creates no persistent database copy or raw-source cache.
+
+
+### Lossless event storage (GAPIz1)
+
+New normalized events use a compressed SQLite BLOB only when it saves at least
+32 bytes; small events remain TEXT. The uncompressed canonical UTF-8 event is
+limited to 16 KiB. GAPIz1 records carry a version marker and original byte length;
+the decoder bounds expansion, validates the zlib checksum and rejects truncation,
+trailing bytes and unknown encodings. Source hashes and event identifiers are
+calculated before storage encoding.
+
+CareerStore, monitoring snapshots and frozen readers use
+`event_storage.configure_reader`. A column named `payload` is returned as its
+exact original text. Direct SQL JSON operations must use
+`gapi_event_text(payload)`. Alias `payload AS stored_payload` to inspect physical
+storage. External readers must use this reader contract; old software cannot
+interpret compressed BLOBs. Existing private snapshots remain untouched and readable.
+
+Stop the collector before running `python -m gapi compact-events --max-events
+100000 --max-seconds 120`. This shares the sole writer lock and resource gates,
+updates at most 100 events in each transaction and verifies exact round trips.
+Interrupted transactions roll back; another run can repeat safely. Unchanged
+small TEXT records may be rescanned under the bounded limit. Compaction scans
+at most the requested count per invocation; its counters do not certify that
+all events were compressed. New collection can then reuse freed database pages.
+There is no VACUUM or full database copy. Payload savings and SQLite free pages
+must not be described as filesystem bytes reclaimed or proof that all global
+data will fit the budget. Logical event hashes, ranking outputs and historical
+snapshot reads are the compatibility checks.
+
+### Bounded JSON transport compression
+
+Public JSON requests advertise `Accept-Encoding: gzip`; plain responses remain
+supported. Both received and expanded bodies are limited to the existing 2 MiB
+JSON bound (or a smaller caller bound). Decompression is incremental and rejects
+truncation, invalid gzip checksums, concatenated members, trailing bytes and
+unsupported content encodings. No compressed response is written to disk.
+`bytes_received` counts received wire bytes; evidence SHA-256 still covers the
+exact decoded JSON bytes, before parsing. Archive range requests retain their
+separate identity encoding and fixed upstream checksum contract. Compression
+does not change access, retry, rate-limit or maxlag handling. A maxlag probe is
+not a successful entity acquisition or evidence of improved normal throughput.
+
+### Easy ORCID candidate discovery
+
+`gapi discover-easy-orcid` reads the public Zenodo Easy ORCID 2023.6
+`records_hq.jsonl.gz` derivative as a bounded JSONL stream. It retains only valid
+ORCID identifiers and queues them for the existing ORCID API adapter; no source
+record, name, affiliation or compressed body is stored. The derivative is CC0 and
+is derived from the ORCID public dump, so it is an enumeration aid rather than an
+independent corroborating source. Each bounded page has a cursor, URL-derived
+query hash and response hash. Re-running a page is idempotent. This route does
+not change the ORCID API evidence tier or turn the derivative into a second source.
+
+Easy ORCID queue admission reserves 1 KiB per candidate plus 1 MiB before the
+existing `CareerStore.queue_page` transaction. Queue inserts and the cursor roll
+back together on write failure. Decompression produces at most 64 KiB per step;
+an oversized line is discarded incrementally and counted once, including at EOF.
+`valid_unique_candidates` counts valid identifiers found in a page; `queued`
+counts only newly inserted identifiers. Earlier receipts used `queued` for valid
+identifiers, so they must not be added together as distinct new candidates.
+Page hashes cover accepted normalized lines and do not verify the full upstream
+archive. This remains provisional candidate discovery, with an unknown full-record
+denominator; it is not a checksum-verified career-data source or global completion.
+
+### Bulk-career feasibility census
+
+`python -m gapi census-easy-orcid --max-seconds 1800` scans the frozen HQ
+derivative in `configs/easy-orcid-2023-hq.json` with no database writes or raw
+files. It reports source rows, invalid and oversized rows, education/employment
+field availability, shared-rule stage classification, and the byte size of a
+minimal normalized affiliation projection, both plain and compressed per record.
+Those byte counts omit identities, provenance, indexes and journals; they are a
+lower bound for storage planning, not a claim that a full evidence database fits.
+Progress every 10,000 rows contains aggregates only. `--max-records` is an optional
+prefix bound; any prefix or transport failure remains unverified. Only EOF, gzip
+integrity, exact compressed length and the frozen upstream MD5 together establish
+`source_complete`. A SHA-256 is calculated on the complete compressed stream too.
+No completed census alone adds careers to scoring or proves a world census;
+duplicate ORCIDs are not deduplicated by this constant-memory measurement.
+
+`--source configs/easy-orcid-2023-full.json` selects the separately pinned full
+published derivative (920,836,363 compressed bytes), rather than HQ. This provides
+the source denominator and visibility into HQ selection bias. It still describes
+the historical derivative, not current ORCID or all world personnel. It does not
+replace the identity of an existing HQ private landing or promote census rows.
+
+### Compact batch career input
+
+`python -m gapi ingest-easy-orcid --max-seconds 1800` streams the same frozen
+archive into a private, compressed SQLite landing under the existing exclusive
+writer and 2 GiB budget. The scoring projection retains rows containing both
+education/research training and employment, including unknown stages, missing
+identifiers and missing dates. Rows lacking either side are counted by the full
+census but not persisted as scoring inputs. This is a disclosed network-input
+projection, not a complete career database or a random sample.
+
+Each retained row has its source line number, exact line SHA-256, the shared
+pseudonymous person key and compressed normalized affiliations. Names, ORCID
+strings, works and source bodies are not saved. Institution display names are
+not retained; unresolved identifiers require re-reading the frozen source. A
+source spec plus policy hash prevents mixed-version resume. Stable row keys and
+content comparison make replay idempotent. Every resume re-reads the gzip from
+the beginning; it never seeks to arbitrary compressed offsets. At most 1,000
+projections are committed together after a conservative storage admission check.
+On failure, prior committed batches remain; the current failed batch is discarded.
+
+The landing is separate from canonical events, members and current scores.
+`verified_rows` refuses reads until complete gzip, length and upstream checksum
+verification passes. Retained source rows are not distinct people: downstream
+consumers must deduplicate persons and relation events. Declaration origins are
+unknown in this derivative; ROR grounding by its publisher and its ORCID lineage
+are not independent confirmation. Full-source verification is transport integrity,
+not verification of the truth of self-reported degrees or jobs. No formal ranking
+qualification is granted by this import.
+
+After verification, `python -m gapi rank-easy-orcid` generates a separate
+institution-level observation JSON under `outputs/`. The default output is
+`easy-orcid-observed.json.gz`, written incrementally with a deterministic gzip
+header; no uncompressed duplicate is staged. Explicit `--out
+outputs/easy-orcid-observed.json` retains the uncompressed export interface.
+Decompression recovers the same JSON bytes. Gzip receipt bytes and SHA-256 refer
+to the compressed file. It uses the same relation
+owner as the canonical analysis for chronological order, self-edge exclusion,
+joint-appointment exclusion and per-person/stage/institution deduplication. The
+existing exact ROR crosswalk resolves stable identifiers; names never merge
+institutions. A private person index supports deduplication across repeated source
+rows without retaining a population-sized Python set. Index creation is budgeted.
+The real 2.3-million-row index exceeded SQLite's 128 MiB heap when sorting in
+memory. Its external merge sort now uses an explicitly verified temporary
+directory under the D-drive task root, checks disk and process memory during
+execution, rolls back on budget cancellation, and removes its temporary directory
+after success or failure. The process heap and total storage limits stay in force.
+PageRank uses the shared implementation and reference stage weights; alpha 0.65
+and 0.95 comparisons accompany the reference 0.85. Awards, composite score and
+formal ranks remain missing. This output is separate from the current public
+release; publication and expanded robustness checks remain later acceptance gates.
+
+The real derivative exceeds the old 200,000-edge sample guard. This separate
+view uses packed four-stage edge accumulators and packed PageRank edge arrays,
+with resident-memory checks during aggregation and every iteration. The packed
+kernel implements the same uniform-prior, row-normalized probability model as
+the original function; deterministic random-graph comparisons check equivalence.
+The export streams edges and JSON tokens to an exclusive temporary file, checks
+the task budget during writing, then atomically replaces the output. Existing
+temporary files are preserved rather than deleted. No edges are truncated or
+sampled to fit a rendering limit.
+
+Status monitoring copies only the report owner's columns when the database is
+too large for a full RAM backup. The private bulk table and its indexes stay on
+disk. The projection fixes one read transaction with a two-second read-lock
+deadline, releases the live connection, then runs the existing report owner in
+memory. This preserves the report contract without allowing a large new landing
+to exhaust parser memory or hold the writer throughout aggregate queries.
+
+### Full derivative without duplicating HQ
+
+`python -m gapi ingest-easy-orcid-full --max-seconds 1800` requires the verified
+HQ landing and its unchanged source identity. It streams the separately pinned
+full derivative. For every scoring-capable source row, it looks up the shared
+private person key and compares the exact compressed normalized projection.
+An exact match reuses HQ storage; a new or changed projection enters the private
+`easy_full_delta` table with its full-file row number and exact source-line hash.
+No name matching or evidence upgrade is involved. HQ's frozen state stays intact.
+
+The complete ordered reuse proof is hashed; a bounded bitmap counts distinct HQ
+rows encountered so duplicate full rows cannot fake coverage. The full-file
+checksum gates its own state. Full scoring additionally requires every HQ
+projection to have been encountered exactly in the complete full source. A
+duplicate HQ row with the same person and projection is covered by the same
+full-source content; row multiplicity does not create additional talent events.
+The scorer also checks that the full report is bound to the current HQ identity.
+A verified full source that fails that subset check remains an independently
+observed delta, but cannot be presented by the union scorer as the full source.
+Partial, corrupt, identity-changed or capacity-stopped runs cannot enter full
+scoring. Only completed transactions survive; reruns compare existing delta
+payloads and ignore unchanged rows, then recompute the whole-source proof.
+
+`python -m gapi rank-easy-orcid --include-full` reads the verified HQ plus full
+delta as two indexed streams, merges them by private person key and applies the
+same per-person relation owner. It does not concatenate their scores or counts.
+The default output path is shared with HQ scoring; select `--out` explicitly to
+retain both snapshots, subject to the same storage admission. The source and
+scope fields distinguish the resulting file. The full-source view remains a
+historical, uncorroborated observation product, not a formal global ranking.
+
+### Interrupted archive connections
+
+The full derivative connection ended early during a real run. Its committed
+delta remained provisional; it did not become a scoring input. The shared
+`FeedReader` now permits at most eight range reconnections (three consecutive
+without progress) while keeping the same in-memory gzip decoder and hashes.
+`PublicHTTP.open_range` requires status 206, the exact remaining Content-Range,
+length, URL and identity representation. An ignored range or changed validator
+fails closed. All sockets, including replacement sockets, close on exit.
+
+Zenodo's pinned Easy ORCID files advertise byte ranges but currently provide no
+ETag or Last-Modified. For these two exact archives only, the URL/length/MD5 tuple
+must match the archive registry owned by `easy_orcid_census.ARCHIVES`. The entire
+gzip, length and upstream checksum remain mandatory after reassembly. Until then
+all projections remain provisional. This does not establish the identity of each
+segment separately; final whole-file verification is the promotion boundary.
+Wikidata's existing validator requirement is unchanged. A restarted process
+still replays from the beginning; compressed offsets are never durable resume
+checkpoints. The real range probe is recorded in
+`outputs/EASY_ORCID_RANGE_PROBE.txt`.
+
+### Bounded browser export
+
+`python -m gapi export-easy-orcid-web --include-full` computes the verified full
+network and exports institution aggregates into `outputs/easy-orcid-web`.
+The existing single JSON export remains available independently. The browser
+contract is separate from the old small-network schema; its limits are not
+relaxed to admit a larger monolithic file.
+
+The directory contains a column-defined institution table, 10,000-edge chunks,
+an institution-to-chunk index, and a clearly labelled overview of up to 2,000
+strongest edges. Every asset is content-addressed with SHA-256. The manifest is
+replaced only after all assets have been written. Identical reruns preserve
+existing bytes and modification times. Corrupt existing content addresses and
+pre-existing temporary files fail closed. Failed exports may leave reusable
+content-addressed assets, but cannot replace the previous manifest.
+
+The overview is for rendering; all edges remain available through the chunk
+index and all scores come from the complete network. Institution identity and
+unranked reasons are retained. No person table or per-person evidence enters
+these assets. Each edge asset is capped at 2 MiB and the institution asset at
+32 MiB, under the same task-wide storage and process-memory budget. This export
+does not itself publish the files or wire them into the production frontend.
+Acquisition duration and connection-retry counts stay in operational reports;
+they are excluded from score exports so identical frozen inputs do not acquire
+different release hashes merely because download conditions changed.
+
+### Evidence-oriented queue scheduling
+
+The finite `collect-global` loop reserves up to half of ordinary fresh ORCID
+slots for valid ORCID identifiers already linked to committed Wikidata event
+persons. Linkage uses the existing stable pseudonym owner, not names or inferred
+affiliations. Remaining fresh slots continue ordinary queue order, and the
+existing due-retry reservation and backoff stay intact. A single fresh slot
+continues ordinary order. All candidates remain queued; prioritization neither
+samples away records nor elevates evidence status. Selection uses bounded
+in-memory linkage, creates no persistent index or copied source file, and fails
+at the resource bound rather than retaining an unbounded person set.
+
+Source selection uses `least-source-service-time/1`: after a productive batch,
+the finite invocation prefers the ready source with the least cumulative queue
+selection and acquisition time. A faster source may finish several bounded
+batches before the slower source gets another turn. Ties retain ORCID-first
+order. Empty, paused and invocation-suspended sources are skipped. Existing
+60-second stage windows, batch caps, request spacing, retry reservations and
+single-writer rules are unchanged. Returned service times describe this
+invocation only; they are neither global coverage nor a throughput guarantee.

@@ -7,9 +7,10 @@ import {execFileSync} from 'node:child_process';
 import {existsSync,lstatSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {dirname,isAbsolute,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {readDerivedBundle} from './derived-bundle.mjs';
 
-export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md','FONTS.md'];
-export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
+export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md','FONTS.md','EASY_ORCID_2023_OBSERVATIONS.md'];
+export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/derived-bundle.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
 export const PROVENANCE = 'build-provenance.json';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceHash = bytes => hash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n')));
@@ -74,7 +75,8 @@ function selection(root,manifestPath) {
   if (hash(snapshotBytes) !== manifest.output_sha256) throw new Error('Selected snapshot identity mismatch');
   return {manifest:inside(root,path),snapshot:inside(root,snapshotPath),
     manifest_sha256:hash(manifestBytes),snapshot_sha256:hash(snapshotBytes),
-    publication_status:manifest.publication_status};
+    publication_status:manifest.publication_status,
+    derived_bundle:readDerivedBundle(root,manifest.derived_bundle)?.identity??null};
 }
 
 export function writeBuildProvenance({root,outDir,mode,manifestPath,base='/',expectedInputs}) {
@@ -105,6 +107,10 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     const built = JSON.parse(regular(resolve(outDir,'data/global/manifest.json')));
     if (JSON.stringify(built) !== JSON.stringify(JSON.parse(regular(resolve(root,current.manifest))))) throw new Error('Built/selected manifest mismatch');
     if (hash(regular(resolve(outDir,'data/global',built.snapshot))) !== current.snapshot_sha256) throw new Error('Built snapshot mismatch');
+    if(current.derived_bundle)for(const [path,expected] of Object.entries(current.derived_bundle.inputs)){
+      const name=path.split('/').at(-1);
+      if(hash(regular(resolve(outDir,'data/derived',name)))!==expected)throw new Error('Built historical asset mismatch');
+    }
   }
   if (publish) {
     if ('site-manifest.json' in outputs) throw new Error('Reserved deployment manifest already exists in build');
@@ -122,6 +128,9 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     for (const [path,expected] of [[proof.selection.manifest,proof.selection.manifest_sha256],[proof.selection.snapshot,proof.selection.snapshot_sha256]]) {
       if (hash(git(root,'show',`HEAD:${path}`)) !== expected) throw new Error(`Release input differs from committed source: ${path}`);
     }
+    if(proof.selection.derived_bundle)for(const [path,expected] of Object.entries(proof.selection.derived_bundle.inputs)){
+      if(hash(git(root,'show',`HEAD:${path}`))!==expected)throw new Error(`Historical input differs from committed source: ${path}`);
+    }
   }
   const result = {status:'verified',mode:proof.mode,files:Object.keys(outputs).length,
     source_commit:git(root,'rev-parse','HEAD').toString().trim(),
@@ -130,7 +139,8 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
   if (publish) {
     if (Object.keys(outputs).some(path=>path.startsWith('data/local/'))) throw new Error('Private data in public site');
     const bytes=Object.keys(outputs).reduce((sum,path)=>sum+regular(resolve(outDir,path)).length,0);
-    if (bytes+regular(resolve(outDir,PROVENANCE)).length>8*1024*1024) throw new Error('Public site exceeds reviewed byte bound');
+    const bound=8*1024*1024+(proof.selection.derived_bundle?.bytes??0);
+    if (bytes+regular(resolve(outDir,PROVENANCE)).length>bound) throw new Error('Public site exceeds reviewed byte bound');
     result.site_manifest={source_commit:result.source_commit,build_provenance_sha256:result.provenance_sha256,
       ranking_status:'observations-only-pending-independent-review',
       files:ordered({...outputs,[PROVENANCE]:result.provenance_sha256,'.nojekyll':hash(Buffer.alloc(0))})};

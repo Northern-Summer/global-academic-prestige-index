@@ -18,6 +18,15 @@ export function showNetwork(container, slice, onPick) {
   const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = false;
   const positions = new Map(), meshes = [], arrows = [];
   const colors = {Asia: '#b56842', Europe: '#497286', Africa: '#8a7046', Oceania: '#866a9e', 'North America': '#3b8a74', 'South America': '#9b637b'};
+  const labels = {Asia:'亚洲',Europe:'欧洲',Africa:'非洲',Oceania:'大洋洲','North America':'北美洲','South America':'南美洲'};
+  const legend=document.createElement('div');legend.className='network-region-legend';
+  legend.setAttribute('aria-label','当前切片的地区颜色');
+  for(const region of new Set(slice.nodes.map(n=>colors[n.region]?n.region:null))){
+    const item=document.createElement('span'),swatch=document.createElement('i');
+    swatch.style.backgroundColor=colors[region]??'#777777';swatch.setAttribute('aria-hidden','true');
+    item.append(swatch,document.createTextNode(labels[region]??'地区未知'));legend.append(item);
+  }
+  container.append(legend);
   const max = Math.max(0.000001, ...slice.nodes.map(n => n.network_score ?? 0));
   const geo = new THREE.SphereGeometry(1, 10, 8);
   for (const [i,node] of slice.nodes.entries()) {
@@ -85,6 +94,8 @@ export function showNetwork(container, slice, onPick) {
   // Completion readback describes the scene actually created, not UI intent.
   renderer.domElement.dataset.renderedNodes = String(meshes.length);
   renderer.domElement.dataset.renderedEdges = String(arrows.length);
+  renderer.domElement.dataset.renderedColors = String(new Set(meshes.map(m=>m.material.color.getHexString())).size);
+  renderer.domElement.dataset.regionNodes = String(slice.nodes.filter(n=>colors[n.region]).length);
   return () => {
     resize.disconnect(); controls.dispose(); renderer.domElement.removeEventListener('click',click);
     renderer.domElement.removeEventListener('pointermove',move); renderer.domElement.removeEventListener('pointerleave',leave);

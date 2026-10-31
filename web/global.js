@@ -13,7 +13,7 @@ const scenarioName = key => key.startsWith('alpha_') ? `阻尼 α = ${key.slice(
 
 const root = document.createElement('section');
 root.className='panel global-panel';root.id='global-observations';root.setAttribute('aria-labelledby','global-title');
-root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">01 / INSTITUTIONS</p><h2 id="global-title">机构与得分</h2></div><span class="observation-tag">公开数据 · 持续更新</span></div>
+root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">ORCID API / WIKIDATA</p><h2 id="global-title">多源观测与核验</h2></div><span class="observation-tag">公开数据 · 持续更新</span></div>
 <p id="global-status" class="global-status" role="status">正在校验真实数据与版本清单…</p>
 <div id="global-metrics" class="observation-metrics" aria-label="当前切片的实际数据范围"></div>
 <p class="scope-caption">仅统计已收录的公开记录。各项计数的口径不同，不能相除得到全球覆盖率或就业率。</p>

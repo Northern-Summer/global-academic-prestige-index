@@ -4,7 +4,7 @@ import unittest
 import test_streaming as fixtures
 from test_streaming import archive, PERSON
 from test_official_profiles import URL
-from gapi.corroboration import decisions
+from gapi.corroboration import decisions, overlap_report
 from gapi.official_profiles import RULE
 from gapi.orcid_stream import private_person
 from gapi.global_analysis import rank_global
@@ -14,6 +14,47 @@ class CorroborationTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def test_overlap_normalizes_exact_aliases_without_promoting_copied_facts(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            row=s.db.execute("SELECT id,payload FROM events WHERE source='wikidata'").fetchone()
+            event=json.loads(row[1]);event['institution']='wd:Q1'
+            with s.db:
+                s.db.execute('UPDATE events SET institution=?,payload=? WHERE id=?',
+                    ('wd:Q1',json.dumps(event),row[0]))
+                s.db.execute('INSERT INTO institution_aliases VALUES(?,?,?)',('wd:Q1','ror:05ect4e57','fixture'))
+                s.db.execute('DELETE FROM official_checks')
+            before=list(s.db.execute('SELECT * FROM events ORDER BY id'))
+            result=overlap_report(s)
+            self.assertEqual(result['normalized_exact_fact_candidates'],1)
+            self.assertEqual(result['source_pairs'][0]['shared_people'],1)
+            self.assertFalse(result['independent_origins_verified'])
+            self.assertNotIn(PERSON,json.dumps(result))
+            self.assertNotIn(private_person(PERSON),json.dumps(result))
+            self.assertEqual(decisions(s),{})
+            self.assertEqual(before,list(s.db.execute('SELECT * FROM events ORDER BY id')))
+            with s.db:
+                s.db.execute('INSERT INTO institution_alias_issues VALUES(?,?,?,?)',('wd:Q1','fixture','ambiguous','{}'))
+            self.assertEqual(overlap_report(s)['normalized_exact_fact_candidates'],0)
+        finally:s.close()
+
+    def test_overlap_rejects_date_conflicts_unfinished_degrees_and_uncommitted_members(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            row=s.db.execute("SELECT id,payload FROM events WHERE source='orcid-public-api'").fetchone()
+            original=json.loads(row[1])
+            for changed in ({'year_end':1968},{'role':'PhD not completed'},{'person':'distinct-person'}):
+                event=dict(original,**changed)
+                with s.db:s.db.execute('UPDATE events SET person=?,payload=? WHERE id=?',(event['person'],json.dumps(event),row[0]))
+                self.assertEqual(overlap_report(s)['normalized_exact_fact_candidates'],0)
+            with s.db:
+                s.db.execute('UPDATE events SET person=?,payload=? WHERE id=?',(original['person'],row[1],row[0]))
+                s.db.execute("UPDATE members SET status='rejected' WHERE source='orcid-public-api'")
+            self.assertEqual(overlap_report(s)['normalized_exact_fact_candidates'],0)
+        finally:s.close()
 
     def seed(self,s):
         for source in ('wikidata','orcid-public-api'):
@@ -48,6 +89,51 @@ class CorroborationTests(unittest.TestCase):
             self.assertTrue(all(v['origins']==['official-profile','orcid-self'] for v in first.values()))
             self.assertEqual(before,list(s.db.execute('SELECT * FROM events ORDER BY id')))
             self.assertEqual(decisions(s,allowed_sources={'wikidata'}),{})
+        finally:s.close()
+
+    def test_direct_official_self_support_does_not_require_wikidata_degree(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            event_id=s.db.execute("SELECT id FROM events WHERE source='orcid-public-api'").fetchone()[0]
+            with s.db:
+                s.db.execute('DELETE FROM official_checks')
+                s.db.execute('INSERT INTO official_checks VALUES(?,?,?,?,?,?,?,?)',
+                    (event_id,URL,'c'*64,RULE,'2026-10-31','official-underlying-source-confirmed',
+                     'independent-official-profile','d'*64))
+                s.db.execute("DELETE FROM events WHERE source='wikidata'")
+            before=list(s.db.execute('SELECT * FROM events'))
+            result=decisions(s)
+            self.assertEqual(set(result),{event_id})
+            self.assertEqual(result,decisions(s,allowed_sources={'orcid-public-api'}))
+            self.assertEqual(decisions(s,allowed_sources={'wikidata'}),{})
+            self.assertEqual(before,list(s.db.execute('SELECT * FROM events')))
+            # Actual XML ingress uses section-level evidence, without a copied
+            # per-event content hash. It must still require that section hash.
+            payload=s.db.execute('SELECT payload FROM events WHERE id=?',(event_id,)).fetchone()[0]
+            event=json.loads(payload);event.pop('content_sha256')
+            with s.db:s.db.execute('UPDATE events SET payload=? WHERE id=?',(json.dumps(event),event_id))
+            self.assertEqual(set(decisions(s)),{event_id})
+            with s.db:s.db.execute('DELETE FROM member_parts')
+            self.assertEqual(decisions(s),{})
+        finally:s.close()
+
+    def test_direct_official_support_still_rejects_client_assertion_and_wrong_identity(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            event_id,payload=s.db.execute("SELECT id,payload FROM events WHERE source='orcid-public-api'").fetchone()
+            with s.db:
+                s.db.execute('DELETE FROM official_checks')
+                s.db.execute('INSERT INTO official_checks VALUES(?,?,?,?,?,?,?,?)',
+                    (event_id,URL,'c'*64,RULE,'2026-10-31','official-underlying-source-confirmed',
+                     'independent-official-profile','d'*64))
+            original=json.loads(payload)
+            for changes in ({'assertion_origin':'client-copy'},{'role':'PhD not completed'},
+                            {'person':'wrong-person'},{'content_sha256':'bad'}):
+                with self.subTest(changes=changes):
+                    with s.db:s.db.execute('UPDATE events SET payload=? WHERE id=?',(json.dumps(dict(original,**changes)),event_id))
+                    self.assertEqual(decisions(s),{})
         finally:s.close()
 
     def test_stale_official_rule_and_missing_part_do_not_promote(self):

@@ -101,6 +101,7 @@ jobs:
             sleep 1
           done
           node tests/browser-real.cjs
+          node tests/browser-derived.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -108,6 +109,7 @@ jobs:
           path: |
             outputs/browser-review-2026-10-29.json
             outputs/review-*-2026-10-29.png
+            outputs/derived-browser*
           retention-days: 7
   deploy-observations:
     if: github.event_name == 'push' && github.ref == 'refs/heads/codex/global-streaming'

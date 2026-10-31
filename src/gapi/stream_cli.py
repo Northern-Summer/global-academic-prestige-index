@@ -5,20 +5,57 @@ import json
 import math
 from pathlib import Path
 
-from .career_store import CareerStore, member_evidence_sql
+from .career_store import CareerStore, member_evidence_sql, CANDIDATE_SOURCES
 from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
 from .orcid_stream import stream_archive
-from .source_http import PublicHTTP, StageDeadline
+from .source_http import PublicHTTP, StageDeadline, WIKIDATA_BATCH_LIMIT
 from .task import Task
 
 
 def register(sub):
+    compact_snapshots=sub.add_parser('compact-frozen-inputs',help='losslessly pack selected private derived snapshots under the writer lock')
+    compact_snapshots.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    compact_snapshots.add_argument('--filenames',nargs='+',required=True)
+    browser = sub.add_parser('export-easy-orcid-web',help='export verified aggregate scores as bounded browser assets')
+    browser.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    browser.add_argument('--out',type=Path,default=Path('outputs/easy-orcid-web'))
+    browser.add_argument('--include-full',action='store_true')
+    full = sub.add_parser('ingest-easy-orcid-full',help='stream full derivative, reusing exact HQ projections')
+    full.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    full.add_argument('--source',type=Path,default=Path('configs/easy-orcid-2023-full.json'))
+    full.add_argument('--max-records',type=int)
+    full.add_argument('--max-seconds',type=float,default=1800)
+    bulk_rank = sub.add_parser('rank-easy-orcid',help='score only the completely verified derivative projection')
+    bulk_rank.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    bulk_rank.add_argument('--out',type=Path,default=Path('outputs/easy-orcid-observed.json.gz'))
+    bulk_rank.add_argument('--include-full',action='store_true')
+    bulk = sub.add_parser('ingest-easy-orcid',help='stream compact private career projections, gated on full archive verification')
+    bulk.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    bulk.add_argument('--source',type=Path,default=Path('configs/easy-orcid-2023-hq.json'))
+    bulk.add_argument('--max-records',type=int)
+    bulk.add_argument('--max-seconds',type=float,default=1800)
+    census = sub.add_parser('census-easy-orcid',help='stream a frozen derivative census without storing individual records')
+    census.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    census.add_argument('--source',type=Path,default=Path('configs/easy-orcid-2023-hq.json'))
+    census.add_argument('--max-records',type=int)
+    census.add_argument('--max-seconds',type=float,default=1800)
+    compaction = sub.add_parser('compact-events',help='losslessly compress normalized events within the task budget')
+    compaction.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    compaction.add_argument('--max-events',type=int,default=100000)
+    compaction.add_argument('--max-seconds',type=float,default=120)
+    promotion = sub.add_parser('promote-wikidata-dump',help='promote bounded normalized members from a fully verified dump')
+    promotion.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    promotion.add_argument('--feed',type=Path,default=Path('configs/discovery-dump.json'))
+    promotion.add_argument('--max-members',type=int,default=1000)
+    promotion.add_argument('--max-seconds',type=float,default=60)
     sources = sub.add_parser("sources", help="freeze the source registry and task resource contract")
     sources.add_argument("action", choices=["freeze"])
     sources.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
-    for name in ("resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
+    for name in ("acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
+        if name == 'acquisition-status':
+            parser.add_argument('--max-seconds',type=float,default=60)
         if name == 'resolve-institutions-online':
             parser.add_argument('--max-aliases',type=int,default=100)
             parser.add_argument('--max-seconds',type=float,default=300)
@@ -27,6 +64,10 @@ def register(sub):
             parser.add_argument('--max-seconds', type=float, default=300)
         if name == 'discover-wikidata-dump':
             parser.add_argument('--max-compressed-bytes', type=int)
+            parser.add_argument('--max-reconnects',type=int,default=256,
+                help='bounded total reconnect allowance, 1–4096; consecutive stalled limit remains eight')
+            parser.add_argument('--stage-careers',action='store_true',
+                help='retain normalized careers in isolated landing; replays old prefix, never stores raw entities')
         if name == 'collect-global':
             parser.add_argument('--batch-members',type=int,default=50)
             parser.add_argument('--allow-dump-discovery',action='store_true',
@@ -39,6 +80,9 @@ def register(sub):
         if name in ('discover-openalex','discover-crossref'):
             parser.add_argument('--pages',type=int,default=1)
             parser.add_argument('--per-page',type=int,default=50 if name=='discover-crossref' else 200)
+        if name == 'discover-easy-orcid':
+            parser.add_argument('--max-records',type=int,default=1000)
+            parser.add_argument('--max-seconds',type=float,default=120)
         if name.startswith("ingest-"):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
@@ -49,8 +93,8 @@ def register(sub):
             parser.add_argument("--discovery-limit", type=int, default=200)
             parser.add_argument("--discovery-scope", choices=['academic','degree-employer'], default='academic')
         if name == 'ingest-wikidata':
-            parser.add_argument('--batch-size',type=int,default=10,
-                help='1 uses EntityData; 2–10 use bounded official claims/info batches')
+            parser.add_argument('--batch-size',type=int,default=WIKIDATA_BATCH_LIMIT,
+                help='1 uses EntityData; larger batches use bounded official claims/info requests')
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
             parser.add_argument('--publication-policy',type=Path)
@@ -63,8 +107,8 @@ def register(sub):
 
 
 def execute(args):
-    names = {"sources", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
-    if args.command not in names:
+    names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
+    if args.command not in names and args.command not in ('compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
     task = Task(args.task)
     task.activate_runtime()
@@ -82,10 +126,61 @@ def execute_task(task, args):
     if args.command == "sources":
         print(json.dumps(task.freeze(), indent=2))
         return True
+    if args.command == 'acquisition-status':
+        from .monitoring import snapshot_report
+        print(json.dumps(snapshot_report(task,max_seconds=args.max_seconds),indent=2))
+        return True
+    if args.command == 'census-easy-orcid':
+        from .easy_orcid_census import census, load_spec
+        task.require_frozen()
+        result=census(task,PublicHTTP(task),load_spec(args.source),
+                      max_records=args.max_records,max_seconds=args.max_seconds,
+                      progress=lambda r:print(json.dumps({'census_progress':r}),flush=True))
+        print(json.dumps({'census_result':result}),flush=True)
+        if result['error'] is not None:
+            raise SystemExit(2)
+        return True
     store = CareerStore(task)
+    http=None
     try:
-        http = PublicHTTP(task)
-        if args.command == 'resolve-institutions-online':
+        http = PublicHTTP(task,reuse_connections=True)
+        if args.command == 'compact-frozen-inputs':
+            from .frozen_input import compress_snapshot,snapshot_path
+            # Validate every requested identity before the first mutation.
+            for filename in args.filenames:snapshot_path(store,filename)
+            result={'snapshots':[compress_snapshot(store,filename) for filename in args.filenames]}
+        elif args.command == 'export-easy-orcid-web':
+            from .easy_orcid_landing import rank_projection
+            from .derived_export import write_bundle
+            if args.out.resolve().parent != Path('outputs').resolve():
+                raise ValueError('browser bundle must be a direct outputs child')
+            result=write_bundle(task,rank_projection(store,stream_edges=True,include_full=args.include_full),args.out)
+        elif args.command == 'ingest-easy-orcid-full':
+            from .easy_orcid_census import load_spec
+            from .easy_orcid_full import ingest_full
+            result=ingest_full(store,http,load_spec(args.source),max_records=args.max_records,
+                              max_seconds=args.max_seconds,
+                              progress=lambda r:print(json.dumps({'full_progress':r}),flush=True))
+        elif args.command == 'rank-easy-orcid':
+            from .easy_orcid_landing import write_projection
+            if args.out.resolve().parent != Path('outputs').resolve():
+                raise ValueError('derivative ranking output must be a direct outputs child')
+            result=write_projection(store,args.out,include_full=args.include_full)
+        elif args.command == 'ingest-easy-orcid':
+            from .easy_orcid_census import load_spec
+            from .easy_orcid_landing import ingest
+            result=ingest(store,http,load_spec(args.source),max_records=args.max_records,
+                          max_seconds=args.max_seconds,
+                          progress=lambda r:print(json.dumps({'bulk_progress':r}),flush=True))
+        elif args.command == 'compact-events':
+            from .event_storage import compact_events
+            result=compact_events(store,max_events=args.max_events,max_seconds=args.max_seconds)
+        elif args.command == 'promote-wikidata-dump':
+            from .dump_landing import promote_batch
+            from .dump_discovery import load_feed
+            result=promote_batch(store,load_feed(args.feed)['id'],
+                max_members=args.max_members,max_seconds=args.max_seconds)
+        elif args.command == 'resolve-institutions-online':
             from .institution_bridge import resolve_online
             result=resolve_online(store,http,max_aliases=args.max_aliases,max_seconds=args.max_seconds,
                 progress=lambda r: print(json.dumps(r),flush=True))
@@ -106,17 +201,24 @@ def execute_task(task, args):
                 from .crossref_discovery import discover_crossref as discover
             result=discover(store,http,pages=args.pages,per_page=args.per_page,
                 progress=lambda r:print(json.dumps(r),flush=True))
+        elif args.command == 'discover-easy-orcid':
+            from .easy_orcid import discover
+            result=discover(store,http,max_records=args.max_records,max_seconds=args.max_seconds)
         elif args.command == 'collect-global':
             from .collection import collect
             from .dump_discovery import load_feed
             result=collect(store,http,load_feed(args.feed) if args.allow_dump_discovery else None,max_seconds=args.max_seconds,
                 batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True),discovery=not args.queued_only)
+            result['transport']={'mode':'single-persistent-https',
+                'opened_connections':http.transport.opened_connections,
+                'reused_connections':http.transport.reused_connections}
         elif args.command == 'discover-wikidata-dump':
             from .dump_discovery import discover_dump, load_feed
             if args.max_compressed_bytes is not None and args.max_compressed_bytes <= 0:
                 raise ValueError('max-compressed-bytes must be positive')
             result = discover_dump(store,http,load_feed(args.feed),max_seconds=args.max_seconds,
-                max_bytes=args.max_compressed_bytes,progress=lambda r:print(json.dumps(r),flush=True))
+                max_bytes=args.max_compressed_bytes,progress=lambda r:print(json.dumps(r),flush=True),
+                stage_careers=args.stage_careers,max_reconnects=args.max_reconnects)
         elif args.command == "ingest-orcid":
             source = "orcid-2026-summary"
             store.start(source)
@@ -144,7 +246,7 @@ def execute_task(task, args):
                 ids=store.pending(args.command,min(args.max_members or 200,1000))
             if args.max_members:
                 ids = ids[:args.max_members]
-            options={'batch_size':getattr(args,'batch_size',10)} if args.command=='ingest-wikidata' else {}
+            options={'batch_size':getattr(args,'batch_size',WIKIDATA_BATCH_LIMIT)} if args.command=='ingest-wikidata' else {}
             result = (ingest_wikidata if args.command == "ingest-wikidata" else ingest_orcid_api)(store, http, ids,
                 max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r),flush=True),**options)
         elif args.command == "quality":
@@ -154,26 +256,32 @@ def execute_task(task, args):
                 'SELECT count(*) FROM events e WHERE NOT ' + member_evidence_sql(observed_only=False)).fetchone()[0]
             result['provisional_archive_events'] = store.db.execute('''SELECT count(*) FROM events e JOIN runs r ON r.source=e.source
                 WHERE e.source='orcid-2026-summary' AND r.status!='verified' ''').fetchone()[0]
-            raw_files = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.zip','.tar','.xml')]
+            from .frozen_input import verified_packed_snapshot
+            archives = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.zip','.tar','.xml')]
+            packed_inputs=[p for p in archives if verified_packed_snapshot(store,p)]
+            raw_files=[p for p in archives if p not in packed_inputs]
+            result['verified_private_packed_inputs']=len(packed_inputs)
             result["raw_source_files_detected"] = len(raw_files)
             result["raw_source_bytes_detected"] = sum(p.stat().st_size for p in raw_files)
-            result["pending_discovery"] = dict(store.db.execute('''SELECT d.source,count(*) FROM discovery d
-                WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=CASE WHEN d.source='ingest-wikidata' THEN 'wikidata' ELSE 'orcid-public-api' END
-                AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) GROUP BY d.source'''))
+            commands={source:command for command,source in CANDIDATE_SOURCES.items()}
+            result["pending_discovery"] = {
+                commands[row['source']]:row['pending']
+                for row in result['acquisition_progress']['sources'] if row['pending']}
         elif args.command=='export-release':
             from .global_analysis import export_release
             from .frozen_input import freeze_input, frozen_reader
             from contextlib import nullcontext
             policy=json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None
-            snapshot=freeze_input(store) if args.freeze_input else None
+            snapshot=freeze_input(store,scope='global-ranking') if args.freeze_input else None
             if args.frozen_input:
                 import re
                 if not re.fullmatch(r'[a-f0-9]{64}\.sqlite',args.frozen_input):
                     raise ValueError('frozen input requires a content-addressed filename')
-                path=task.root/'frozen-inputs'/args.frozen_input
                 snapshot={'sha256':args.frozen_input.removesuffix('.sqlite'),'filename':args.frozen_input,
-                    'bytes':path.stat().st_size,'contains_personal_input':True,'publicly_bundled':False}
+                    'contains_personal_input':True,'publicly_bundled':False}
             with frozen_reader(store,snapshot['filename']) if snapshot else nullcontext():
+                if snapshot is not None:
+                    snapshot['bytes']=store.db.execute('PRAGMA page_count').fetchone()[0]*store.db.execute('PRAGMA page_size').fetchone()[0]
                 result=export_release(store,args.out,publication_policy=policy,frozen_input=snapshot)
         else:
             from .global_analysis import corroborate, export_release, export_local
@@ -184,10 +292,14 @@ def execute_task(task, args):
                 # Consume the fresh official checks in the same invocation.
                 result.update(corroborate(store))
         print(json.dumps(result, indent=2, sort_keys=True))
+        if args.command in ('ingest-easy-orcid','ingest-easy-orcid-full') and result['error'] is not None:
+            raise SystemExit(2)
         if args.command == 'ingest-nobel' and result and result.get('status') == 'resumable-source-boundary':
             raise SystemExit(2)
         if args.command == 'ingest-orcid' and any(r['source']=='orcid-2026-summary' and r['status'] in ('access_failed','failed') for r in result['sources']):
             raise SystemExit(2)
     finally:
-        store.close()
+        try:
+            if http is not None:http.close()
+        finally:store.close()
     return True

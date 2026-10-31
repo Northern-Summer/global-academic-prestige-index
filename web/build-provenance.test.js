@@ -6,6 +6,7 @@ import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {dirname,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {SOURCE_FILES,PROVENANCE,sourceInputs,writeBuildProvenance,verifyBuild} from '../scripts/build-provenance.mjs';
+import {readDerivedBundle} from '../scripts/derived-bundle.mjs';
 
 function fixture(run) {
   const parent=process.platform === 'win32' ? 'D:/GAPI/global-academic-prestige-index' : tmpdir();
@@ -90,4 +91,17 @@ test('committed real slices larger than 2 MiB remain verifiable',()=>fixture(({p
   }
   commit();writeBuildProvenance(args);
   assert.equal(verify().status,'verified');
+}));
+
+test('complete historical bundle is identity-bound, committed and emitted without relaxing legacy limits',()=>fixture(({root,put,commit,args,verify})=>{
+  const base=new URL('../outputs/easy-orcid-web/',import.meta.url),raw=readFileSync(new URL('manifest.json',base));
+  const historical=JSON.parse(raw),selection={manifest:'outputs/easy-orcid-web/manifest.json',sha256:createHash('sha256').update(raw).digest('hex')};
+  const files=new Set(['manifest.json',historical.nodes.file,historical.overview.file,...historical.edge_chunks.map(a=>a.file)]);
+  for(const name of files){const bytes=readFileSync(new URL(name,base));put(`outputs/easy-orcid-web/${name}`,bytes);put(`dist/data/derived/${name}`,bytes);}
+  const main=JSON.parse(readFileSync(join(root,args.manifestPath)));main.derived_bundle=selection;
+  for(const path of [args.manifestPath,'dist/data/global/manifest.json'])put(path,JSON.stringify(main));
+  commit();writeBuildProvenance(args);assert.equal(verify().status,'verified');
+  assert.throws(()=>readDerivedBundle(root,{...selection,manifest:'../private.json'}),/Unsafe/);
+  put(`dist/data/derived/${historical.nodes.file}`,'tampered');
+  assert.throws(verify,/output changed/);
 }));

@@ -5,6 +5,8 @@ scheduled retries. The existing persisted queue/feed owns all continuation state
 """
 import time
 import math
+import json
+import sqlite3
 from collections import deque
 from contextlib import nullcontext
 
@@ -13,7 +15,7 @@ from .dump_discovery import discover_dump
 from .openalex_discovery import discover_openalex
 from .crossref_discovery import discover_crossref
 from .task import BudgetStop
-from .source_http import SourcePause, StageDeadline
+from .source_http import SourcePause, StageDeadline, WIKIDATA_BATCH_LIMIT
 
 
 def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True):
@@ -27,6 +29,12 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
     discovery_suspended=set()
     stages=deque(maxlen=10)
     discovery_pages=0
+    storage_contended=False
+    # Equal batch counts give slow transports most of the wall-clock budget.
+    # Charge queue selection and acquisition to their source, then prefer the
+    # least-served ready source. One bounded batch may overrun the fair share;
+    # paused, empty and failed sources never prevent another source progressing.
+    service_seconds={'ingest-orcid-api':0.0,'ingest-wikidata':0.0}
     def window(seconds):
         return http.within(seconds) if hasattr(http,'within') else nullcontext()
     while time.monotonic()<deadline:
@@ -64,37 +72,69 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 discovery_suspended.add(feed_name)
                 store.failure(feed_name,'collection-loop',str(exc))
                 if progress:progress({'stage':feed_name,'failed':str(exc)[:256]})
-        for command,adapter in (('ingest-orcid-api',ingest_orcid_api),('ingest-wikidata',ingest_wikidata)):
+        adapters=(('ingest-orcid-api',ingest_orcid_api),('ingest-wikidata',ingest_wikidata))
+        for command,adapter in sorted(adapters,key=lambda entry:service_seconds[entry[0]]):
             if command in suspended or time.monotonic()>=deadline:continue
             source='orcid-public-api' if command=='ingest-orcid-api' else 'wikidata'
             if not store.source_ready(source):
-                suspended.add(command)
                 continue
-            ids=store.pending(command,batch_members)
+            batch_started=time.monotonic()
+            ids=store.pending(command,batch_members,
+                priority_source='wikidata' if command=='ingest-orcid-api' else None)
             if not ids:continue
+            if time.monotonic()>=deadline:break
+            events_before=store.db.execute('SELECT count(*) FROM events').fetchone()[0]
             before=store.db.execute('SELECT count(*) FROM members').fetchone()[0]
             retried_before=store.db.execute('SELECT COALESCE(sum(attempts),0) FROM discovery_retries').fetchone()[0]
+            stage_exhausted=False
             try:
                 seconds=min(60,deadline-time.monotonic())
                 with window(seconds):
-                    options={'batch_size':10} if command=='ingest-wikidata' else {}
-                    adapter(store,http,ids,max_seconds=seconds,progress=None,**options)
+                    options={'batch_size':WIKIDATA_BATCH_LIMIT} if command=='ingest-wikidata' else {}
+                    adapter(store,http,ids,max_seconds=seconds,progress=None,report=False,**options)
             except BudgetStop:
                 raise
+            except StageDeadline:
+                stage_exhausted=True
+            except sqlite3.OperationalError as exc:
+                # Member/request contexts roll back their unfinished writes.
+                # Busy/locked storage is neither bad source data nor a reason
+                # to retry the same network request in a tight loop.
+                if getattr(exc,'sqlite_errorcode',0)&255 not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):
+                    raise
+                storage_contended=True
             except (OSError,ValueError,RuntimeError) as exc:
                 store.failure(command,'collection-loop',str(exc))
                 suspended.add(command)
             after=store.db.execute('SELECT count(*) FROM members').fetchone()[0]
             completed=after-before
             retried=store.db.execute('SELECT COALESCE(sum(attempts),0) FROM discovery_retries').fetchone()[0]-retried_before
-            state=store.db.execute('SELECT status FROM runs WHERE source=?',(source,)).fetchone()
-            if (state and state[0]=='access_failed') or (not completed and not retried):
+            state=store.db.execute('SELECT status,detail FROM runs WHERE source=?',(source,)).fetchone()
+            try:detail=json.loads(state[1]) if state and state[1] else {}
+            except (ValueError,TypeError):detail={}
+            stage_exhausted|=isinstance(detail,dict) and detail.get('stage_time_exhausted') is True
+            # A persisted maxlag/429 pause expires independently. Keep collecting
+            # other sources and re-admit this one after its deadline; do not turn
+            # a one-minute service pause into an invocation-long suspension.
+            if not storage_contended and not stage_exhausted and store.source_ready(source) and ((state and state[0]=='access_failed') or (not completed and not retried)):
                 suspended.add(command)
             progressed|=completed>0 or retried>0
-            item={'stage':command,'new_members':completed,'events':store.db.execute('SELECT count(*) FROM events').fetchone()[0],
-                'storage_bytes':store.task.used(),'deferred_this_batch':retried,'suspended_this_run':command in suspended}
+            elapsed=time.monotonic()-batch_started
+            service_seconds[command]+=elapsed
+            events_after=store.db.execute('SELECT count(*) FROM events').fetchone()[0]
+            item={'stage':command,'new_members':completed,'events':events_after,
+                'new_events':events_after-events_before,'elapsed_seconds':round(elapsed,3),
+                'members_per_second':round(completed/elapsed,4) if elapsed>0 else None,
+                'storage_bytes':store.task.used(),'deferred_this_batch':retried,
+                'storage_contended':storage_contended,
+                'stage_time_exhausted':stage_exhausted,'suspended_this_run':command in suspended}
             stages.append(item)
             if progress:progress(item)
+            if storage_contended:break
+            # Reconsider service allocation after productive work, rather than
+            # forcing exactly one slow and one fast batch into every round.
+            if completed>0 or retried>0:break
+        if storage_contended:break
         if progressed:continue
         if feed is not None and not dump_attempted and time.monotonic()<deadline:
             dump_attempted=True
@@ -113,7 +153,10 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 if progress:progress({'stage':'dump-discovery','failed':str(exc)[:256]})
             continue
         break
-    return {'status':'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
+    return {'status':'resumable-storage-contention' if storage_contended else
+            'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
         'suspended_sources':sorted(suspended),'suspended_discovery':sorted(discovery_suspended),
         'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':store.report(),
+        'scheduling_policy':'least-source-service-time/1',
+        'source_service_seconds':{key:round(value,3) for key,value in service_seconds.items()},
         'global_complete':False,'archive_discovery_enabled':feed is not None,'discovery_enabled':discovery}

@@ -115,18 +115,54 @@ def resolve_institutions(store, *, extra_identifiers=()):
 
 
 def corroborate(store):
-    from .corroboration import decisions, VERSION, POLICY_SHA256
+    from .corroboration import decisions, overlap_report, VERSION, POLICY_SHA256
     resolution = resolve_institutions(store)
     candidates = store.db.execute('''SELECT count(*) FROM (
         SELECT person,institution,kind,stage,year_start,year_end FROM events
         WHERE institution IS NOT NULL AND stage IS NOT NULL
         GROUP BY person,institution,kind,stage,year_start,year_end HAVING count(DISTINCT source)>1)''').fetchone()[0]
+    overlap=overlap_report(store)
     verified = decisions(store)
-    return {"identity": resolution, "cross_source_candidates": candidates,
+    return {"identity": resolution, "raw_identifier_exact_candidates": candidates,
+            "cross_source_candidates": overlap['normalized_exact_fact_candidates'],
+            "cross_source_overlap":overlap,
             "independent_official_confirmations": len(verified),
             "rule_version": VERSION, "policy_sha256": POLICY_SHA256,
             "decision_index_sha256": digest(verified), "canonical_events_modified": 0,
             "policy": "exact official profile and same-ORCID self assertion; copied official reference counts once"}
+
+
+def observed_relations(items):
+    trainings = [e for e in items if e["kind"] in ("education", "training") and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
+    jobs = [e for e in items if e["kind"] == "employment" and e.get("stage") == "academic" and e.get("year_start")]
+    grouped = {}
+    for train in trainings:
+        for job in jobs:
+            key = (job["institution"], train["institution"], train["stage"])
+            if key[0] == key[1] or job["year_start"] < train["year_end"]:
+                continue
+            # Detect overlapping jobs at different institutions. Missing end means ongoing.
+            if any(other["institution"] != job["institution"] and
+                   other["year_start"] <= (job.get("year_end") or 2100) and
+                   job["year_start"] <= (other.get("year_end") or 2100) for other in jobs):
+                continue
+            # Count the relation once, retaining every valid evidence source.
+            # Strong evidence cannot disappear when an unrelated ID sorts first.
+            priority = (not (train.get('evidence_origins') and job.get('evidence_origins')),
+                not (train['status'] == job['status'] == 'corroborated'),
+                -(int(train['status']=='corroborated')+int(job['status']=='corroborated')),
+                job['year_start'], train['year_end'], train['source'], job['source'],
+                train['locator'], job['locator'])
+            if key not in grouped:
+                if len(grouped) >= 200000:
+                    raise BudgetStop('person relation fanout exceeds bounded analysis')
+                grouped[key] = [priority, train, job, set(), set()]
+            entry = grouped[key]
+            entry[3].add(train['source']); entry[4].add(job['source'])
+            if priority < entry[0]: entry[:3] = [priority, train, job]
+    for key in sorted(grouped):
+        _, train, job, training_sources, job_sources = grouped[key]
+        yield key, dict(train, supporting_sources=sorted(training_sources)), dict(job, supporting_sources=sorted(job_sources))
 
 
 def relation_rows(store, *, allowed_sources=None):
@@ -143,40 +179,9 @@ def relation_rows(store, *, allowed_sources=None):
         WHERE """ + member_evidence_sql() + """
         ORDER BY e.person,e.id""", (VERSION, POLICY_SHA256) if enriched else ())
     person, events = None, []
-    def relations(items):
-        trainings = [e for e in items if e["kind"] in ("education", "training") and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
-        jobs = [e for e in items if e["kind"] == "employment" and e.get("stage") == "academic" and e.get("year_start")]
-        grouped = {}
-        for train in trainings:
-            for job in jobs:
-                key = (job["institution"], train["institution"], train["stage"])
-                if key[0] == key[1] or job["year_start"] < train["year_end"]:
-                    continue
-                # Detect overlapping jobs at different institutions. Missing end means ongoing.
-                if any(other["institution"] != job["institution"] and
-                       other["year_start"] <= (job.get("year_end") or 2100) and
-                       job["year_start"] <= (other.get("year_end") or 2100) for other in jobs):
-                    continue
-                # Count the relation once, retaining every valid evidence source.
-                # Strong evidence cannot disappear when an unrelated ID sorts first.
-                priority = (not (train.get('evidence_origins') and job.get('evidence_origins')),
-                    not (train['status'] == job['status'] == 'corroborated'),
-                    -(int(train['status']=='corroborated')+int(job['status']=='corroborated')),
-                    job['year_start'], train['year_end'], train['source'], job['source'],
-                    train['locator'], job['locator'])
-                if key not in grouped:
-                    if len(grouped) >= 200000:
-                        raise BudgetStop('person relation fanout exceeds bounded analysis')
-                    grouped[key] = [priority, train, job, set(), set()]
-                entry = grouped[key]
-                entry[3].add(train['source']); entry[4].add(job['source'])
-                if priority < entry[0]: entry[:3] = [priority, train, job]
-        for key in sorted(grouped):
-            _, train, job, training_sources, job_sources = grouped[key]
-            yield key, dict(train, supporting_sources=sorted(training_sources)), dict(job, supporting_sources=sorted(job_sources))
     for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
         if person is not None and pid != person:
-            yield from relations(events)
+            yield from observed_relations(events)
             events = []
         person = pid
         if len(events) >= 4096:
@@ -200,7 +205,7 @@ def relation_rows(store, *, allowed_sources=None):
             row['evidence_origins'] = verified[event_id]['origins']
         events.append(row)
     if events:
-        yield from relations(events)
+        yield from observed_relations(events)
 
 
 def rank_global(store, *, public=False, publication_policy=None):

@@ -110,3 +110,26 @@ class DiscoveryTests(unittest.TestCase):
             execute_task(task,args)
             discover.assert_not_called()
             self.assertEqual(ingest.call_args.args[2], ['Q2'])
+
+    def test_quality_pending_counts_reuse_progress_and_preserve_legacy_predicate(self):
+        from argparse import Namespace
+        from contextlib import redirect_stdout
+        import io,json
+        from gapi.stream_cli import execute_task
+        s=self.store(archive([]));task=s.task;s.start('wikidata')
+        with s.db:
+            s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                ('ingest-wikidata',qid,'q','r') for qid in ('Q1','Q2','UPPER','legacy_%')])
+            s.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',[
+                ('wikidata','Q1@123','a'*64,'rejected',None),
+                ('wikidata','upper@4','a'*64,'observed',None),
+                ('wikidata','legacy-other@2','a'*64,'observed',None)])
+        expected=dict(s.db.execute("""SELECT d.source,count(*) FROM discovery d
+            WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.source='wikidata'
+            AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) GROUP BY d.source"""))
+        s.close();output=io.StringIO()
+        with redirect_stdout(output):execute_task(task,Namespace(command='quality'))
+        result=json.loads(output.getvalue())
+        self.assertEqual(result['pending_discovery'],expected)
+        self.assertEqual(expected,{'ingest-wikidata':1})
+        self.assertEqual(result['sqlite_integrity'],'ok')

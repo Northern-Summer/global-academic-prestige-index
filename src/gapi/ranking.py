@@ -120,6 +120,42 @@ def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float
     return dict(zip(nodes, rank)), {"iterations": iterations, "error": error, "converged": error < tolerance}
 
 
+def pagerank_sparse(nodes, edge_rows, alpha=.85, tolerance=1e-12, max_iterations=200, *, check=None):
+    """Same row-normalized model with packed edge arrays, for large real graphs.
+
+    Does not duplicate a Python edge dictionary. The optional resource observer
+    checks during admission and every iteration. Stable input edge order fixes
+    floating-point accumulation order; callers aggregate duplicate edges first.
+    """
+    from array import array
+    if len(set(nodes)) != len(nodes):raise ValueError('PageRank nodes must be unique')
+    if not math.isfinite(alpha) or not 0<=alpha<1 or not math.isfinite(tolerance) or tolerance<=0 or type(max_iterations) is not int or max_iterations<1:
+        raise ValueError('invalid PageRank parameters')
+    if not nodes:return {},{'iterations':0,'error':0.0,'converged':True}
+    index={n:i for i,n in enumerate(nodes)}
+    sources,targets,weights=array('I'),array('I'),array('d')
+    outgoing=array('d',[0.0])*len(nodes)
+    for count,(source,target,weight) in enumerate(edge_rows,1):
+        if not math.isfinite(weight) or weight<0:raise ValueError('edge weights must be finite and non-negative')
+        if source not in index or target not in index or weight==0:continue
+        a,b=index[source],index[target]
+        sources.append(a);targets.append(b);weights.append(weight);outgoing[a]+=weight
+        if check and count%1000==0:check()
+    if any(not math.isfinite(v) for v in outgoing):raise ValueError('outgoing weight sum exceeds finite arithmetic')
+    for i,a in enumerate(sources):weights[i]/=outgoing[a]
+    n=len(nodes);rank=[1/n]*n;error=math.inf
+    dangling=[i for i,total in enumerate(outgoing) if total==0]
+    for iterations in range(1,max_iterations+1):
+        if check:check()
+        base=(1-alpha)/n+alpha*sum(rank[i] for i in dangling)/n
+        nxt=[base]*n
+        for a,b,w in zip(sources,targets,weights):nxt[b]+=alpha*rank[a]*w
+        error=sum(abs(a-b) for a,b in zip(nxt,rank));rank=nxt
+        if error<tolerance:break
+    if not math.isclose(math.fsum(rank),1,rel_tol=0,abs_tol=1e-10):raise ValueError('PageRank probability mass is not conserved')
+    return dict(zip(nodes,rank)),{'iterations':iterations,'error':error,'converged':error<tolerance}
+
+
 def _percentiles(scores: dict[str, float], eligible: set[str]) -> dict[str, float]:
     ordered = sorted(value for node, value in scores.items() if node in eligible)
     if not ordered:

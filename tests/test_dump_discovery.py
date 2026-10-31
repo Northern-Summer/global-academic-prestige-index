@@ -5,7 +5,7 @@ import io
 import json
 import unittest
 
-from gapi.dump_discovery import bounded_lines, discover_dump, load_feed, MAX_LINE
+from gapi.dump_discovery import bounded_lines, discover_dump, load_feed, MAX_LINE, FeedReader
 from gapi.task import BudgetStop
 import test_streaming as fixtures
 from test_streaming import archive
@@ -43,6 +43,120 @@ class DumpTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_same_process_reconnect_preserves_decompression_hash_and_dedupe(self):
+        from contextlib import nullcontext
+        for compression in ('bz2','gzip'):
+            for transport_error in (False,True):
+                with self.subTest(compression=compression,error=transport_error):
+                    body=dump_bytes(600,compression);cut=len(body)//2
+                    class Interrupted(io.BytesIO):
+                        headers={'Content-Length':str(len(body)),'ETag':'"fixed"'}
+                        def read(self,n):
+                            if transport_error and self.tell()==cut:raise OSError('connection lost')
+                            return super().read(n)
+                    first=Interrupted(body[:cut]);resumed=[]
+                    class ReconnectHTTP:
+                        def open(self,url):return first
+                        def within(self,seconds):return nullcontext()
+                        def open_range(self,url,offset,total,headers):
+                            self_offset=offset
+                            self_total=total
+                            if self_offset!=cut or self_total!=len(body):raise AssertionError('wrong range')
+                            stream=io.BytesIO(body[offset:]);resumed.append(stream);return stream
+                    s=self.store(archive([]))
+                    try:
+                        with s.db:s.db.execute('DELETE FROM discovery_feeds')
+                        result=discover_dump(s,ReconnectHTTP(),spec_for(body,compression))
+                        self.assertEqual(result['status'],'verified');self.assertEqual(result['reconnects'],1)
+                        self.assertEqual(s.db.execute('SELECT sha256 FROM discovery_feeds').fetchone()[0],hashlib.sha256(body).hexdigest())
+                        self.assertEqual(s.db.execute('SELECT count(*) FROM discovery').fetchone()[0],601)
+                        self.assertTrue(first.closed);self.assertTrue(resumed[0].closed)
+                    finally:s.close()
+
+    def test_reconnect_is_finite_and_does_not_defeat_budgets(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        task=SimpleNamespace(check_memory=lambda:None)
+        resume=Mock(side_effect=lambda offset:io.BytesIO(b''))
+        reader=FeedReader(io.BytesIO(b'x'),task,resume=resume,expected_bytes=10,max_reconnects=2)
+        self.assertEqual(reader.read(1),b'x')
+        with self.assertRaises(EOFError):reader.read(1)
+        self.assertEqual(resume.call_count,2);reader.close()
+        for kwargs in ({'max_bytes':1},{'deadline':0}):
+            resume=Mock();reader=FeedReader(io.BytesIO(b'x'),task,resume=resume,expected_bytes=10,**kwargs)
+            if 'max_bytes' in kwargs:self.assertEqual(reader.read(1),b'x')
+            with self.assertRaises(BudgetStop):reader.read(1)
+            resume.assert_not_called();reader.close()
+        resume=Mock();reader=FeedReader(io.BytesIO(b'x'),task,resume=resume,expected_bytes=1)
+        self.assertEqual(reader.read(1),b'x');self.assertEqual(reader.read(1),b'')
+        resume.assert_not_called();reader.close()
+        resume=Mock();reader=FeedReader(io.BytesIO(b'xx'),task,resume=resume,expected_bytes=1,max_bytes=1)
+        self.assertEqual(reader.read(8),b'x');self.assertEqual(reader.read(1),b'')
+        resume.assert_not_called();reader.close()
+
+    def test_successful_last_read_after_deadline_cannot_verify(self):
+        from unittest.mock import patch
+        import gapi.dump_discovery as module
+        clock=[100]
+        body=dump_bytes()
+        class Late(io.BytesIO):
+            headers={'Content-Length':str(len(body))}
+            def read(self,n):
+                data=super().read(n);clock[0]=102;return data
+        response=Late(body)
+        class LateHTTP:
+            def open(self,url):return response
+        s=self.store(archive([]))
+        try:
+            with patch.object(module.time,'monotonic',side_effect=lambda:clock[0]):
+                result=discover_dump(s,LateHTTP(),spec_for(body),max_seconds=1)
+            self.assertEqual(result['status'],'provisional')
+            self.assertEqual(result['compressed_bytes'],0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery').fetchone()[0],0)
+            self.assertTrue(response.closed)
+        finally:s.close()
+
+    def test_long_stream_distinguishes_successful_reconnects_from_stalled_retries(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        task=SimpleNamespace(check_memory=lambda:None)
+        resume=Mock(side_effect=lambda offset:io.BytesIO(b''))
+        reader=FeedReader(io.BytesIO(b'x'),task,resume=resume,expected_bytes=100,
+                          max_reconnects=20,max_stalled_reconnects=2)
+        self.assertEqual(reader.read(1),b'x')
+        with self.assertRaises(EOFError):reader.read(1)
+        self.assertEqual(resume.call_count,2);reader.close()
+        resume=Mock(side_effect=lambda offset:io.BytesIO(b'x'))
+        reader=FeedReader(io.BytesIO(b'x'),task,resume=resume,expected_bytes=100,
+                          max_reconnects=10,max_stalled_reconnects=2)
+        try:
+            for _ in range(11):self.assertEqual(reader.read(1),b'x')
+            with self.assertRaises(EOFError):reader.read(1)
+            self.assertEqual(resume.call_count,10)
+        finally:reader.close()
+
+    def test_initial_open_is_inside_one_stage_deadline(self):
+        from unittest.mock import patch
+        import gapi.dump_discovery as module
+        from gapi.source_http import StageDeadline
+        body=dump_bytes();clock=[100]
+        class LateOpen(HTTP):
+            def open(self,url):
+                clock[0]=102
+                return super().open(url)
+        s=self.store(archive([]))
+        try:
+            with patch.object(module.time,'monotonic',side_effect=lambda:clock[0]):
+                result=discover_dump(s,LateOpen(body),spec_for(body),max_seconds=1)
+            self.assertEqual(result['status'],'provisional')
+            self.assertEqual(result['compressed_bytes'],0)
+            class Expired:
+                def open(self,url):raise StageDeadline('source stage ended while opening')
+            result=discover_dump(s,Expired(),spec_for(body),max_seconds=1)
+            self.assertEqual(result['status'],'provisional')
+            self.assertEqual(result['compressed_bytes'],0)
+        finally:s.close()
+
     def test_realistic_bulk_discovery_no_raw_or_canonical_events(self):
         for compression in ('bz2','gzip'):
             with self.subTest(compression=compression):
@@ -64,6 +178,46 @@ class DumpTests(unittest.TestCase):
         rows=list(bounded_lines(io.BytesIO(b'x'*(MAX_LINE+1)+b'\n{"id":"Q1"}\n')))
         self.assertIsNone(rows[0][0])
         self.assertEqual(rows[1][0],b'{"id":"Q1"}')
+
+    def test_rejected_records_keep_bounded_hash_and_source_line_without_raw_material(self):
+        oversized=b'{"ignored":"'+b'x'*MAX_LINE+b'"}'
+        invalid=b'{not valid json}'
+        body=bz2.compress(b'[\n'+oversized+b'\n'+invalid+b'\n]\n')
+        s=self.store(archive([]))
+        try:
+            result=discover_dump(s,HTTP(body),spec_for(body))
+            self.assertEqual(result['status'],'verified')
+            self.assertEqual(result['rejected'],2)
+            self.assertIn('2 record lines rejected',result['detail'])
+            rows=s.db.execute("SELECT locator,reason FROM failures WHERE source='wikidata-dump' ORDER BY locator").fetchall()
+            self.assertEqual(len(rows),2)
+            self.assertTrue(rows[0][0].endswith(':line:2'))
+            self.assertTrue(rows[1][0].endswith(':line:3'))
+            self.assertIn(hashlib.sha256(oversized).hexdigest(),rows[0][1])
+            self.assertIn(hashlib.sha256(invalid).hexdigest(),rows[1][1])
+            self.assertLess(max(len(row[1]) for row in rows),256)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+        finally:s.close()
+
+    def test_complete_prefix_can_resume_and_backfill_oversize_diagnostics_without_double_count(self):
+        from unittest.mock import patch
+        import gapi.dump_discovery as module
+        oversized=b'{"ignored":"'+b'x'*MAX_LINE+b'"}'
+        body=bz2.compress(b'[\n'+oversized+b'\n]\n')
+        original=module.bounded_lines
+        def interrupted_after_last_line(stream):
+            yield from original(stream)
+            raise BudgetStop('injected stop before final source validation')
+        s=self.store(archive([]))
+        try:
+            with patch.object(module,'bounded_lines',interrupted_after_last_line):
+                self.assertEqual(discover_dump(s,HTTP(body),spec_for(body))['status'],'provisional')
+            with s.db:s.db.execute("DELETE FROM failures WHERE source='wikidata-dump'")
+            result=discover_dump(s,HTTP(body),spec_for(body))
+            self.assertEqual(result['status'],'verified')
+            self.assertEqual(result['rejected'],1)
+            self.assertEqual(s.db.execute("SELECT count(*) FROM failures WHERE source='wikidata-dump'").fetchone()[0],1)
+        finally:s.close()
 
     def test_hash_mismatch_and_truncation_never_verify_or_create_events(self):
         s=self.store(archive([]))

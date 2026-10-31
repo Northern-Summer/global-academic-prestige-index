@@ -54,7 +54,7 @@ class AnalysisTests(unittest.TestCase):
             self.seed(s)
             with s.db:
                 s.db.execute('''UPDATE events SET role=CASE WHEN kind='education' THEN 'Master' ELSE 'Professor' END,
-                    payload=json_set(payload,'$.role',CASE WHEN kind='education' THEN 'Master' ELSE 'Professor' END)
+                    payload=json_set(gapi_event_text(payload),'$.role',CASE WHEN kind='education' THEN 'Master' ELSE 'Professor' END)
                     WHERE source='orcid-public-api' ''')
             policy=json.loads(Path('configs/publication-20261029.json').read_text())
             result=rank_global(s,public=True,publication_policy=policy)
@@ -299,6 +299,8 @@ os._exit(19)
         http=HTTP()
         ingest_orcid_api(s,http,[PERSON,'0000-0001-5109-3700'])
         self.assertEqual(http.calls,1)
+        self.assertEqual(s.db.execute('SELECT count(*) FROM discovery_retries').fetchone()[0],0)
+        self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
         s.close()
         s=CareerStore(Task(self.path))
         try:

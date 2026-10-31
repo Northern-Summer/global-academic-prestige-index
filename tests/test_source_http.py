@@ -1,5 +1,7 @@
 import io
 import json
+import gzip
+import hashlib
 import unittest
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -15,6 +17,121 @@ class Response(io.BytesIO):
 
 
 class HTTPTests(unittest.TestCase):
+    def test_gzip_json_preserves_decoded_source_hash_and_counts_wire_bytes(self):
+        body=json.dumps({'entities':{'Q42':{'claims':['education']*100}}}).encode()
+        wire=gzip.compress(body,mtime=0)
+        requests=[]
+        def opener(request,**kwargs):
+            requests.append(request)
+            response=Response(wire)
+            response.headers['Content-Encoding']='gzip'
+            return response
+        http=PublicHTTP(self.task(),opener=opener,sleep=lambda _:None)
+        value,checksum=http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record')
+        self.assertEqual(value,json.loads(body))
+        self.assertEqual(checksum,hashlib.sha256(body).hexdigest())
+        self.assertEqual(http.bytes_received,len(wire))
+        self.assertEqual(requests[0].get_header('Accept-encoding'),'gzip')
+
+    def test_gzip_json_rejects_expansion_truncation_corruption_and_trailing_data(self):
+        body=b'{"value":"'+b'a'*300+b'"}'
+        valid=gzip.compress(body,mtime=0)
+        corrupt=bytearray(valid);corrupt[-8]^=1
+        cases=[(valid,100,'exceeds bound'),(valid[:-1],1000,'truncated'),
+               (bytes(corrupt),1000,'invalid'),(valid+b'x',1000,'trailing'),
+               (valid+valid,1000,'trailing')]
+        for wire,limit,message in cases:
+            with self.subTest(message=message,wire_size=len(wire)):
+                response=Response(wire);response.headers['Content-Encoding']='gzip'
+                http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+                with self.assertRaisesRegex(ValueError,message):
+                    http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record',limit=limit)
+                self.assertTrue(response.closed)
+
+    def test_gzip_json_handles_fragmented_reads_and_exact_limit(self):
+        body=b'{"valid":true}'
+        class Fragmented(Response):
+            def read(self,n=-1):return super().read(min(n,1))
+        response=Fragmented(gzip.compress(body,mtime=0))
+        response.headers['Content-Encoding']='gzip'
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+        self.assertEqual(http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record',limit=100)[0],{'valid':True})
+        # Equal decoded size is accepted (wire is shorter for repetitive data).
+        body=json.dumps({'value':'x'*1000}).encode()
+        response=Response(gzip.compress(body,mtime=0));response.headers['Content-Encoding']='gzip'
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+        self.assertEqual(http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record',limit=len(body))[0],json.loads(body))
+
+    def test_json_rejects_unknown_encoding_and_invalid_bounds(self):
+        response=Response();response.headers['Content-Encoding']='br'
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+        with self.assertRaisesRegex(ValueError,'unsupported'):
+            http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record')
+        self.assertTrue(response.closed)
+        for limit in (0,-1,True,1.5,2*1024**2+1):
+            with self.assertRaisesRegex(ValueError,'bound'):
+                http.json('https://pub.orcid.org/v3.0/0000-0002-1825-0097/record',limit=limit)
+
+    def test_dump_range_strict_identity_and_position(self):
+        url='https://dumps.wikimedia.org/wikidatawiki/entities/20261026/wikidata-20261026-all.json.bz2'
+        initial={'ETag':'"fixed"'}
+        cases=[({},True),({'Content-Range':'bytes 3-9/10'},False),
+               ({'Content-Range':'bytes 4-9/11'},False),({'Content-Length':'5'},False),
+               ({'ETag':'"changed"'},False),({'Content-Encoding':'gzip'},False)]
+        for changed,valid in cases:
+            with self.subTest(changed=changed):
+                response=Response(b'123456',url=url);response.status=206
+                response.headers={'Content-Range':'bytes 4-9/10','Content-Length':'6',**initial,**changed}
+                calls=[]
+                def opener(request,**kwargs):calls.append(request);return response
+                http=PublicHTTP(self.task(),opener=opener,sleep=lambda _:None)
+                from unittest.mock import patch
+                with patch.object(http,'allowed') as allowed:
+                    if valid:
+                        with http.open_range(url,4,10,initial) as stream:self.assertEqual(stream.read(6),b'123456')
+                        self.assertEqual(calls[0].get_header('Range'),'bytes=4-')
+                        self.assertEqual(calls[0].get_header('If-range'),'"fixed"')
+                        allowed.assert_called_once_with(url)
+                    else:
+                        with self.assertRaises(ValueError):http.open_range(url,4,10,initial)
+                self.assertTrue(response.closed)
+
+    def test_dump_range_ignored_or_refused_is_not_concatenated(self):
+        from unittest.mock import patch
+        url='https://dumps.wikimedia.org/wikidatawiki/entities/20261026/wikidata-20261026-all.json.bz2'
+        response=Response(url=url)
+        http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+        with patch.object(http,'allowed'),self.assertRaisesRegex(RuntimeError,'HTTP 200'):
+            http.open_range(url,4,10,{'ETag':'"fixed"'})
+        self.assertTrue(response.closed)
+        calls=[]
+        def denied(request,**kwargs):
+            calls.append(1);raise HTTPError(url,403,'Forbidden',{},None)
+        http=PublicHTTP(self.task(),opener=denied,sleep=lambda _:None)
+        with patch.object(http,'allowed'),self.assertRaises(HTTPError):
+            http.open_range(url,4,10,{'ETag':'"fixed"'})
+        self.assertEqual(calls,[1])
+        for headers in ({},{'ETag':'W/"weak"'},{'Last-Modified':'bad'}):
+            with self.assertRaises(ValueError):http.open_range(url,4,10,headers)
+        with self.assertRaises(ValueError):http.open_range('https://www.wikidata.org/a',4,10,{'ETag':'"fixed"'})
+
+    def test_registered_career_range_requires_pinned_checksum_and_exact_position(self):
+        from gapi.easy_orcid_census import ARCHIVES
+        from unittest.mock import patch
+        url,total,md5=ARCHIVES['easy-orcid-2023.6-full'];offset=total-6
+        for changes,valid in (({},True),({'Content-Range':f'bytes {offset-1}-{total-1}/{total}'},False)):
+            response=Response(b'123456',url=url);response.status=206
+            response.headers={'Content-Range':f'bytes {offset}-{total-1}/{total}','Content-Length':'6',**changes}
+            http=PublicHTTP(self.task(),opener=lambda *a,**k:response,sleep=lambda _:None)
+            with patch.object(http,'allowed'):
+                if valid:
+                    with http.open_range(url,offset,total,{},expected_md5=md5) as r:self.assertEqual(r.read(6),b'123456')
+                else:
+                    with self.assertRaises(ValueError):http.open_range(url,offset,total,{},expected_md5=md5)
+            self.assertTrue(response.closed)
+        for wrong in (None,'0'*32):
+            with self.assertRaises(ValueError):http.open_range(url,offset,total,{},expected_md5=wrong)
+
     def task(self):
         return SimpleNamespace(config={"max_retries":2,"request_interval":1,"http_timeout":2})
 
@@ -42,6 +159,15 @@ class HTTPTests(unittest.TestCase):
         response=Response(); response.status=202
         with self.assertRaisesRegex(RuntimeError,"HTTP 202"):
             PublicHTTP(self.task(),opener=lambda *a,**k:response).json("https://pub.orcid.org/v3.0/0000-0002-1825-0097/record")
+
+    def test_new_official_adapter_still_obeys_robots(self):
+        requests=[]
+        def opener(request,**kwargs):
+            requests.append(request.full_url)
+            return Response(b'User-agent: *\nDisallow: /display/\n',url=request.full_url,content_type='text/plain')
+        with self.assertRaises(PermissionError):
+            PublicHTTP(self.task(),opener=opener).open('https://experts.colorado.edu/display/fisid_1234')
+        self.assertEqual(requests,['https://experts.colorado.edu/robots.txt'])
 
     def test_untrusted_and_credentialed_urls_are_rejected(self):
         for url in ("http://www.wikidata.org/", "https://127.0.0.1/", "https://pub.orcid.org.evil.test/", "https://user:secret@pub.orcid.org/", "https://pub.orcid.org:444/"):

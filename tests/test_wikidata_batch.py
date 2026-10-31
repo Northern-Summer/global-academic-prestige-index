@@ -40,6 +40,59 @@ class BatchTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_fifty_entities_one_bounded_request(self):
+        s=self.store(archive([]));http=BatchHTTP();ids=['Q'+str(i) for i in range(1,51)]
+        try:
+            ingest_wikidata(s,http,ids,batch_size=50)
+            self.assertEqual(len(http.calls),1)
+            self.assertTrue(entity_batch_route(urlsplit(http.calls[0])))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM members').fetchone()[0],50)
+        finally:s.close()
+
+    def test_collection_mode_skips_report_without_skipping_commits_or_split_batches(self):
+        s=self.store(archive([]));http=BatchHTTP();normal=http.json
+        def fetch(url):
+            if '/w/api.php?' in url:raise ValueError('structured response exceeds bound')
+            return normal(url)
+        try:
+            with patch.object(s,'report',side_effect=AssertionError('discarded full report')), \
+                 patch.object(http,'json',side_effect=fetch):
+                self.assertIsNone(ingest_wikidata(s,http,['Q1','Q2'],batch_size=50,report=False))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM members').fetchone()[0],2)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],2)
+        finally:s.close()
+
+    def test_orcid_collection_mode_still_commits_both_evidence_parts(self):
+        s=self.store(archive([]))
+        class HTTP:
+            def open(self,url,*args):
+                section=url.rsplit('/',1)[-1]
+                body=(XML.replace(b'<record path="/'+PERSON.encode()+b'"',
+                    b'<educations path="/'+PERSON.encode()+b'/educations"').replace(b'</record>',b'</educations>')
+                    if section=='educations' else b'<employments path="/'+PERSON.encode()+b'/employments"/>')
+                return Response(body,url,'application/xml')
+        try:
+            with patch.object(s,'report',side_effect=AssertionError('discarded full report')):
+                self.assertIsNone(ingest_orcid_api(s,HTTP(),[PERSON],report=False))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM members').fetchone()[0],1)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],1)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM member_parts').fetchone()[0],2)
+        finally:s.close()
+
+    def test_pending_projection_preserves_original_matching(self):
+        s=self.store(archive([]))
+        try:
+            ids=['Q1','Q2','q3','Q4','Q_5','Q%6','机构','Q7','Q8']
+            with s.db:
+                for q in ids:s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata',q,'a','b'))
+                for q in ['Q1@1','Q1@2','Q2','Q3@8','Qx5@2','Qxy6@2','机构@1']:
+                    s.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',('wikidata',q,'hash','observed',None))
+            original=[r[0] for r in s.db.execute("""SELECT d.identifier FROM discovery d WHERE d.source='ingest-wikidata'
+                AND NOT EXISTS(SELECT 1 FROM members m WHERE m.source='wikidata'
+                AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) ORDER BY d.identifier""")]
+            self.assertEqual(s.pending('ingest-wikidata',100),original)
+        finally:s.close()
+
     def test_ten_entities_one_request_and_idempotent_replay(self):
         s=self.store(archive([]));http=BatchHTTP();ids=['Q'+str(i) for i in range(1,11)]
         try:
@@ -127,6 +180,10 @@ class BatchTests(unittest.TestCase):
                 ingest_wikidata(s,http,['Q1','Q2'],batch_size=10)
             self.assertFalse(s.source_ready('wikidata'))
             self.assertEqual(s.db.execute('SELECT count(*) FROM members').fetchone()[0],0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery_retries').fetchone()[0],0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM failures').fetchone()[0],0)
+            detail=json.loads(s.db.execute("SELECT detail FROM runs WHERE source='wikidata'").fetchone()[0])
+            self.assertEqual(detail['failures'][0]['scope'],'source')
         finally:s.close()
 
     def test_stage_budget_does_not_create_member_failure_or_retry_penalty(self):
@@ -162,7 +219,7 @@ class BatchTests(unittest.TestCase):
             self.assertFalse(entity_batch_route(urlsplit(url)),url)
         s=self.store(archive([]))
         try:
-            for size in (0,11,True):
+            for size in (0,51,True):
                 with self.assertRaises(ValueError):ingest_wikidata(s,None,['Q1'],batch_size=size)
         finally:s.close()
 

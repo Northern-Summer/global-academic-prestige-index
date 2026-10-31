@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from .career_rules import classify, year, valid_orcid
 from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
-from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS
+from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS, WIKIDATA_BATCH_LIMIT
 
 DEGREES = {"Q752297": "doctorate", "Q849697": "doctorate", "Q177232": "master", "Q163727": "bachelor"}
 
@@ -132,14 +132,14 @@ def commit_wikidata_entity(store, qid, entity, checksum, *, batch_url=None, batc
                 ('ingest-orcid-api',next(iter(ids)),query_hash,checksum))
 
 
-def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch_size=1):
-    if type(batch_size) is not int or not 1<=batch_size<=10:
-        raise ValueError('Wikidata entity batch size must be between 1 and 10')
+def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch_size=1, report=True):
+    if type(batch_size) is not int or not 1<=batch_size<=WIKIDATA_BATCH_LIMIT:
+        raise ValueError(f'Wikidata entity batch size must be between 1 and {WIKIDATA_BATCH_LIMIT}')
     qids=list(dict.fromkeys(qids))
     if any(not isinstance(qid,str) or not re.fullmatch(r'Q[1-9]\d*',qid) for qid in qids):
         raise ValueError('invalid Wikidata ID')
     source = "wikidata"
-    if not store.source_ready(source):return store.report()
+    if not store.source_ready(source):return store.report() if report else None
     store.start(source)
     failures = []
     started = time.monotonic()
@@ -172,13 +172,22 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch
             break
         except BudgetStop:
             raise
+        except SourcePause as exc:
+            # Source-wide backpressure says nothing about any requested person.
+            # Keep candidates eligible after the shared pause; do not manufacture
+            # fifty individual failures or consume their record-retry attempts.
+            store.pause_source(source,exc.retry_at,str(exc))
+            failures.append({'scope':'source','reason':str(exc)[:256]})
+            blocked=True
+            break
         except (KeyError,ValueError,OSError,RuntimeError) as exc:
             # A large batch is retried through the existing bounded per-entity
             # interface; a protected/access-refused response never takes this path.
             if batch_url and isinstance(exc,ValueError) and str(exc)=='structured response exceeds bound':
                 seconds=None if max_seconds is None else max_seconds-(time.monotonic()-started)
                 if seconds is None or seconds>0:
-                    ingest_wikidata(store,http,group,max_seconds=seconds,progress=progress,batch_size=1)
+                    ingest_wikidata(store,http,group,max_seconds=seconds,progress=progress,
+                        batch_size=max(1,len(group)//2),report=False)
                     state=store.db.execute('SELECT status FROM runs WHERE source=?',(source,)).fetchone()
                     if state and state[0]=='access_failed':
                         blocked=True
@@ -209,7 +218,7 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch
                 failures.append({'entity':qid,'reason':f'{type(exc).__name__}: {exc}'[:256]})
     store.status(source, "access_failed" if blocked else "partial", byte_count=previous_bytes+getattr(http,'bytes_received',0)-start_bytes,
                  detail=json.dumps({"requested": len(qids), "failures": failures[:20], 'stage_time_exhausted':stage_ended}))
-    return store.report()
+    return store.report() if report else None
 
 
 def orcid_api_events(record, checksum, orcid):
@@ -272,9 +281,9 @@ def queue_orcid_redirect(store, redirect, requested_url):
     return True
 
 
-def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
+def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, report=True):
     source = "orcid-public-api"
-    if not store.source_ready(source):return store.report()
+    if not store.source_ready(source):return store.report() if report else None
     store.start(source)
     failures = []
     byte_count = store.db.execute("SELECT bytes FROM runs WHERE source=?",(source,)).fetchone()[0]
@@ -337,7 +346,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
             break
         except BudgetStop as exc:
             store.status(source, "budget_stopped", byte_count=byte_count, detail=str(exc))
-            return store.report()
+            return store.report() if report else None
         except SourceRedirect as exc:
             queued = queue_orcid_redirect(store, exc, url)
             reason = ('permanent official redirect; target queued separately; original identity unresolved'
@@ -345,6 +354,13 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
             store.failure(source, private_person(orcid), reason)
             store.defer('ingest-orcid-api', orcid, reason)
             failures.append({'id_hash': private_person(orcid), 'reason': reason})
+        except SourcePause as exc:
+            # The member transaction has rolled back; a service pause is not a
+            # bad biography and must not penalize this candidate's retry quota.
+            store.pause_source(source,exc.retry_at,str(exc))
+            failures.append({'scope':'source','reason':str(exc)[:128]})
+            blocked=True
+            break
         except (ValueError, KeyError, OSError, RuntimeError, ExpatError) as exc:
             store.failure(source,private_person(orcid),f"{type(exc).__name__}: {exc}")
             store.defer('ingest-orcid-api',orcid,str(exc))
@@ -354,7 +370,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None):
                 blocked=True
                 break
     store.status(source, "access_failed" if blocked else "partial", byte_count=byte_count, detail=json.dumps({"requested": len(ids), "failures": failures[:20], 'stage_time_exhausted':stage_ended}))
-    return store.report()
+    return store.report() if report else None
 
 
 def discover_wikidata(http, *, after="", limit=100, degree_employer=False, academic=False):
