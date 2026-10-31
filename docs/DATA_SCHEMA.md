@@ -27,6 +27,21 @@ as `entity_sha256`. Existing single-EntityData members retain their original exa
 response hashes. These conventions are transport-labeled and must not be conflated.
 Original XML/JSON bodies and individual trajectories are not public export tables.
 
+### Cross-source diagnostics
+
+`corroborate.cross_source_candidates` counts exact normalized fact candidates:
+the same stable person key, resolved ROR institution, explicit stage, required
+date, and exactly matching start/end fields. It streams committed observed
+members through the same fact interpretation used by adjudication. The previous
+raw-identifier count remains as `raw_identifier_exact_candidates` for comparison;
+comparing `wd:` with `ror:` identifiers directly can undercount matching facts.
+`cross_source_overlap.source_pairs` reports aggregate shared-person and matched
+fact counts without publishing person identifiers. Repeated copies within a
+source count once. Neither a shared person nor matching facts establishes
+independent origins. The official corroboration policy and event statuses remain
+unchanged. Both dates must match in this exact-match diagnostic; it is narrower
+than adjudication's explicitly permitted optional-date compatibility rule.
+
 ## Legacy JSON importer
 
 Input is UTF-8 JSON with `institutions`, `education_events`, `employment_events`, `awards`, and `evidence` arrays. The Python dataclasses in `src/gapi/model.py` are the authoritative v0.1 field definitions.

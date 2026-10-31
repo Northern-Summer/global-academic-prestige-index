@@ -4,6 +4,15 @@ The public site is a real-observation research preview. CI, local developer test
 and implementation-team reviews do not establish independent third-party approval
 or a formal global ranking.
 
+Local acquisition history may contain private person-matching diagnostics. A
+public source update must not make those intermediate commits reachable merely
+to publish their final code. Prepare a forward-only publication commit on the
+current public branch, preserve the local source history separately, and verify
+non-output tree equivalence. Public output changes are limited to the selected
+institution aggregate manifest, its hash-addressed assets and reviewed aggregate
+validation receipts. Publication ancestry must exclude private diagnostic commits.
+This boundary does not authorize rewriting an existing public ref or history.
+
 ## CI and code review
 
 The fast test job runs Python, Node and a code-only Vite build. A separate job
@@ -113,3 +122,11 @@ counts after each switch. Synchronous status text alone cannot satisfy scene
 acceptance. The checks also exercise a rapid all-to-focus switch and require a
 single final canvas with the latest counts. These receipts describe internal
 automated validation, not independent third-party review.
+
+The selected full historical observation bundle is separately bounded to 24 MiB
+of content-addressed assets plus a 128 KiB manifest. Builds verify every selected
+asset's length, SHA-256, node contract and edge endpoints. Publication requires
+the selected input bytes to be committed. The existing 8 MiB site allowance is
+not widened for other data: only the actual verified historical bundle size is
+added. Production browser acceptance also exercises the historical table,
+on-demand links, region colors, failed chunks, CSV and WebGL fallback.
