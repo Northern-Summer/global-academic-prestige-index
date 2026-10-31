@@ -124,13 +124,32 @@ def response_dictionary(record):
     return raw if 0<len(raw)<=MAX_DICTIONARY_BYTES else None
 
 
-def pack_event(db, text, record):
+def source_dictionary(store, text, record):
+    """A bounded codec seed, never an evidence or scientific decision.
+
+    Seeds are private normalized event text, not raw source material. Physical
+    encodings may vary by ingest order; snapshot_payload owns canonical replay.
+    """
+    seeds=getattr(store,'_event_codec_seeds',None)
+    if seeds is None:seeds={};store._event_codec_seeds=seeds
+    source=record['source']
+    if source not in seeds:
+        if len(seeds)>=16:return None
+        seeds[source]=text.encode('utf-8')[:MAX_DICTIONARY_BYTES]
+    return seeds[source]
+
+
+def pack_event(db, text, record, *, source_seed=None):
     """Share exact batch URL bytes; do not remove any event fact or provenance."""
-    baseline=pack(text);dictionary=response_dictionary(record)
+    baseline=pack(text);dictionary=None
+    for seed in (response_dictionary(record),source_seed):
+        if seed is None:continue
+        candidate=pack(text,dictionary=seed)
+        baseline_size=len(baseline.encode('utf-8')) if isinstance(baseline,str) else len(baseline)
+        if isinstance(candidate,bytes) and len(candidate)+64<baseline_size:
+            baseline=candidate;dictionary=seed
     if dictionary is None:return baseline
-    candidate=pack(text,dictionary=dictionary)
-    baseline_size=len(baseline.encode('utf-8')) if isinstance(baseline,str) else len(baseline)
-    if not isinstance(candidate,bytes) or len(candidate)+64>=baseline_size:return baseline
+    candidate=baseline
     if not db.in_transaction:raise ValueError('dictionary and event require one transaction')
     key=hashlib.sha256(dictionary).digest()
     db.execute('INSERT OR IGNORE INTO event_dictionaries VALUES(?,?)',(key,zlib.compress(dictionary,6)))
@@ -181,7 +200,7 @@ def compact_events(store, *, max_events=5000, max_seconds=120):
             'note': 'payload savings and reusable pages are not filesystem bytes reclaimed'}
 
 
-def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60, share_responses=False):
+def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60, share_responses=False, share_sources=False):
     """Rebalance bounded contiguous rows, retaining rowids and decoded facts.
 
     The caller owns CareerStore's writer lock. Every <=128-row batch is one
@@ -196,6 +215,7 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
     if not math.isfinite(max_seconds) or max_seconds<=0:
         raise ValueError('invalid event page deadline')
     if type(share_responses) is not bool:raise ValueError('invalid response sharing policy')
+    if type(share_sources) is not bool:raise ValueError('invalid source sharing policy')
     if store.db.in_transaction:raise ValueError('cannot repack unfinished transaction')
     if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='events'").fetchone():
         raise ValueError('event page repack forbids triggers')
@@ -221,15 +241,18 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
             expected=[];converted=0;batch_saved=0
             for row in rows:
                 value=row[payload_index];replacement=value
-                if share_responses and not (isinstance(value,bytes) and value.startswith(DICT_MAGIC)):
+                if share_sources or (share_responses and not (isinstance(value,bytes) and value.startswith(DICT_MAGIC))):
                     text=decode_event(store.db,value)
-                    candidate=pack_event(store.db,text,json.loads(text))
-                    if isinstance(candidate,bytes) and candidate.startswith(DICT_MAGIC):
+                    record=json.loads(text)
+                    candidate=pack_event(store.db,text,record,source_seed=source_dictionary(store,text,record) if share_sources else None)
+                    old_size=len(value.encode('utf-8')) if isinstance(value,str) else len(value)
+                    if (isinstance(candidate,bytes) and candidate.startswith(DICT_MAGIC)
+                            and (not share_sources or len(candidate)+64<old_size)):
                         replacement=candidate;converted+=1
                         batch_saved+=(len(value.encode('utf-8')) if isinstance(value,str) else len(value))-len(candidate)
                         if decode_event(store.db,candidate)!=text:raise ValueError('shared response changed event bytes')
                 expected.append((*row[:payload_index],replacement,*row[payload_index+1:]))
-            if not share_responses or converted:
+            if not (share_responses or share_sources) or converted:
                 store.db.executemany('DELETE FROM events WHERE rowid=?',[(row[0],) for row in rows])
                 store.db.executemany(insert,expected)
             store.task.check_memory()

@@ -40,13 +40,15 @@ class StreamingTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def store(self, data, *, checksum=None, **changes):
+    def store(self, data, *, checksum=None, source_compression=False, **changes):
         self.config["sources"]["orcid-2026-summary"].update(checksum=checksum or "sha256:" + hashlib.sha256(data).hexdigest(), size_bytes=len(data))
         self.config.update(changes)
         self.path.write_text(json.dumps(self.config))
         task = Task(self.path)
         task.freeze()
-        return CareerStore(task)
+        # Existing fixtures explicitly exercise the legacy writer. Source-codec
+        # tests enable the new physical writer on the same source contract.
+        return CareerStore(task,source_compression=source_compression)
 
     def test_bounded_parser_and_stage(self):
         rows = []

@@ -10,7 +10,10 @@ import math
 import struct
 import time
 import zlib
-from functools import lru_cache
+from collections import OrderedDict, namedtuple
+from functools import wraps
+import sys
+from threading import RLock
 
 LEGACY_MAGIC = b'GAPIp1\0'
 MAGIC = b'GAPIp2\0'
@@ -20,6 +23,42 @@ MAX_ROWS = 128
 MAX_ROW = 1024**2
 MAX_BLOCK = 2*1024**2
 REFERENCE_SIZE = len(MAGIC)+32+2
+CACHE_BYTES = 8*1024**2
+CACHE_ENTRIES = 128
+
+
+def _bounded_block_cache(decode):
+    """Retain useful random-read locality without caching unbounded blocks.
+
+    Account the encoded key and decoded values, including Python containers.
+    Keys include actual database bytes, preserving mutation detection.
+    """
+    entries=OrderedDict();used=hits=misses=0;lock=RLock()
+    Info=namedtuple('CacheInfo','hits misses maxsize currsize bytes maxbytes')
+    @wraps(decode)
+    def cached(key,packed,legacy=False):
+        nonlocal used,hits,misses
+        identity=(key,packed,legacy)
+        with lock:
+            if identity in entries:
+                hits+=1;entries.move_to_end(identity)
+                return entries[identity][0]
+            misses+=1
+            values=decode(key,packed,legacy)
+            size=(sys.getsizeof(identity)+sum(sys.getsizeof(v) for v in identity)
+                  +sys.getsizeof(values)+sum(sys.getsizeof(v) for v in values)+256)
+            if size<=CACHE_BYTES:
+                while entries and (used+size>CACHE_BYTES or len(entries)>=CACHE_ENTRIES):
+                    _,(_,old_size)=entries.popitem(last=False);used-=old_size
+                entries[identity]=(values,size);used+=size
+            return values
+    def clear():
+        nonlocal used,hits,misses
+        with lock:entries.clear();used=hits=misses=0
+    def info():
+        with lock:return Info(hits,misses,CACHE_ENTRIES,len(entries),used,CACHE_BYTES)
+    cached.cache_clear=clear;cached.cache_info=info
+    return cached
 
 
 def inflate(value, limit):
@@ -60,7 +99,7 @@ def make_block(values):
     return key,packed,[MAGIC+key+i.to_bytes(2,'big') for i in range(len(values))]
 
 
-@lru_cache(maxsize=2)
+@_bounded_block_cache
 def decode_plain_block(key,packed,legacy=False):
     # Cache includes the actual bytes just read from SQLite, not only the key.
     # Changing/deleting a block can never reuse a previously validated value.

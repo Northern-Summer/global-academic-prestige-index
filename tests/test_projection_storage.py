@@ -118,6 +118,33 @@ class ProjectionStorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'reversible'):
             storage.make_block([zlib.compress(b'long repeating value'*50,1)])
 
+    def test_decoded_cache_is_byte_bounded_and_reuses_random_read_blocks(self):
+        storage.decode_plain_block.cache_clear()
+        blocks=[]
+        for n in range(80):
+            raw=storage.framed([str(n).encode()*100])
+            key=hashlib.sha256(raw).digest();packed=zlib.compress(raw,6)
+            blocks.append((key,packed))
+            storage.decode_plain_block(key,packed)
+        with patch('gapi.projection_storage.inflate',side_effect=AssertionError('cache missed')):
+            for key,packed in reversed(blocks):storage.decode_plain_block(key,packed)
+        self.assertEqual(storage.decode_plain_block.cache_info().hits,80)
+        # Few large valid blocks must evict by bytes, before the entry cap.
+        storage.decode_plain_block.cache_clear()
+        for n in range(10):
+            raw=storage.framed([bytes([n])*700000,bytes([n+1])*700000])
+            storage.decode_plain_block(hashlib.sha256(raw).digest(),zlib.compress(raw,6))
+            info=storage.decode_plain_block.cache_info()
+            self.assertLessEqual(info.bytes,storage.CACHE_BYTES)
+        self.assertLess(info.currsize,10)
+        # Failed validation never enters the cache.
+        before=storage.decode_plain_block.cache_info().currsize
+        with self.assertRaisesRegex(ValueError,'identity'):
+            storage.decode_plain_block(b'x'*32,zlib.compress(raw,6))
+        self.assertEqual(storage.decode_plain_block.cache_info().currsize,before)
+        storage.decode_plain_block.cache_clear()
+        self.assertEqual(storage.decode_plain_block.cache_info().bytes,0)
+
     def test_capacity_stop_rolls_back_blocks_and_replacements_together(self):
         s,_,_,_=self.fixture();before=list(verified_rows(s))
         @contextmanager

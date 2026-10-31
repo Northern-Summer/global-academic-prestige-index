@@ -99,3 +99,40 @@ class ResponseDictionaryTests(unittest.TestCase):
             self.assertEqual(logical_event_hash(s.db),before)
             self.assertEqual(s.db.execute('SELECT count(*) FROM event_dictionaries').fetchone()[0],0)
         finally:s.close()
+
+    def test_source_seed_ingest_rollback_bounds_and_canonical_snapshot(self):
+        from gapi.event_storage import source_dictionary
+        s=self.store(archive([]),source_compression=True)
+        obj=dict(person='p',institution='wd:Q1',kind='education',stage='doctorate',year_end=2000,
+                 source='wikidata',locator='one',status='observed',evidence='traceable '*200)
+        try:
+            with self.assertRaisesRegex(RuntimeError,'injected'):
+                with s.member('wikidata','one'):s.event(obj);raise RuntimeError('injected')
+            self.assertEqual(s.db.execute('SELECT count(*) FROM event_dictionaries').fetchone()[0],0)
+            with s.member('wikidata','one'):s.event(obj)
+            before=logical_event_hash(s.db)
+            self.assertEqual(s.db.execute('SELECT payload FROM events').fetchone()[0],canonical(obj).decode())
+            with s.member('wikidata','one'):s.event(obj)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],1)
+            frozen=freeze_rows(s)
+            with frozen_reader(s,frozen['filename']):self.assertEqual(logical_event_hash(s.db),before)
+            for n in range(30):source_dictionary(s,canonical(obj).decode(),{'source':str(n)})
+            self.assertEqual(len(s._event_codec_seeds),16)
+            self.assertLessEqual(sum(map(len,s._event_codec_seeds.values())),16*MAX_DICTIONARY_BYTES)
+        finally:
+            s.close()
+            self.assertEqual(s._event_codec_seeds,{})
+
+    def test_source_migration_preserves_hash_rank_resume_and_is_idempotent(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s);before=logical_event_hash(s.db);rank=canonical(rank_global(s,public=True))
+            # Exercise already dictionary-coded payloads as well as ordinary ones.
+            repack_event_pages(s,share_responses=True)
+            first=repack_event_pages(s,share_sources=True,max_events=2)
+            repack_event_pages(s,share_sources=True,after_rowid=first['after_rowid'])
+            self.assertEqual(logical_event_hash(s.db),before)
+            self.assertEqual(canonical(rank_global(s,public=True)),rank)
+            self.assertEqual(repack_event_pages(s,share_sources=True)['shared_response_events'],0)
+            with self.assertRaises(ValueError):repack_event_pages(s,share_sources=1)
+        finally:s.close()

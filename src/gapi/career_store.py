@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 
 from .task import Task, BudgetStop, canonical, digest
-from .event_storage import pack_event, configure_reader, DICTIONARY_DDL
+from .event_storage import pack_event, configure_reader, DICTIONARY_DDL, source_dictionary
 from .queue_storage import pack_row
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
@@ -124,7 +124,9 @@ CREATE TABLE IF NOT EXISTS failures(
 
 
 class CareerStore:
-    def __init__(self, task: Task):
+    def __init__(self, task: Task, *, source_compression=True):
+        if type(source_compression) is not bool:raise ValueError('invalid source compression option')
+        self.source_compression=source_compression
         self.task = task
         task.require_frozen()
         task.check(4 * 1024**2)
@@ -164,6 +166,8 @@ class CareerStore:
         self.db.commit()
 
     def close(self):
+        seeds=getattr(self,'_event_codec_seeds',None)
+        if seeds is not None:seeds.clear()
         self.db.close()
         self.lock.close()
 
@@ -355,13 +359,15 @@ class CareerStore:
             raise
 
     def event(self, record: dict):
-        if len(canonical(record)) > 16384:
+        text=canonical(record).decode()
+        if len(text.encode('utf-8')) > 16384:
             raise ValueError("normalized event exceeds 16 KiB")
+        seed=source_dictionary(self,text,record) if self.source_compression else None
         key = digest({k: record.get(k) for k in ("person", "institution", "kind", "stage", "year_start", "year_end", "source", "locator", "put_code")})
         self.db.execute("INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             key, record["person"], record.get("institution"), record["kind"], record.get("stage"),
             record.get("year_start"), record.get("year_end"), record.get("role"), record.get("country"),
-            record["source"], record["locator"], record["status"], pack_event(self.db,canonical(record).decode(),record)))
+            record["source"], record["locator"], record["status"], pack_event(self.db,text,record,source_seed=seed)))
 
     def finish_member(self, source, locator, sha256, status="observed", reason=None):
         old = self.seen(source, locator)

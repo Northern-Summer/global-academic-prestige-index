@@ -24,6 +24,7 @@ def register(sub):
     repack.add_argument('--after-rowid',type=int,default=0)
     repack.add_argument('--max-events',type=int,default=20000)
     repack.add_argument('--max-seconds',type=float,default=60)
+    repack.add_argument('--share-sources',action='store_true',help='losslessly reuse bounded source seed dictionaries')
     compact_snapshots=sub.add_parser('compact-frozen-inputs',help='losslessly pack selected private derived snapshots under the writer lock')
     compact_snapshots.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     compact_snapshots.add_argument('--filenames',nargs='+',required=True)
@@ -195,7 +196,7 @@ def execute_task(task, args):
         elif args.command == 'repack-event-pages':
             from .event_storage import repack_event_pages
             result=repack_event_pages(store,after_rowid=args.after_rowid,
-                                      max_events=args.max_events,max_seconds=args.max_seconds)
+                                      max_events=args.max_events,max_seconds=args.max_seconds,share_sources=args.share_sources)
         elif args.command == 'compact-events':
             from .event_storage import compact_events
             result=compact_events(store,max_events=args.max_events,max_seconds=args.max_seconds)
