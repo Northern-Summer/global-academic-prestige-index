@@ -350,18 +350,35 @@ the verified raw SQLite predecessor. Repeating it verifies the packed successor
 without creating another copy. This is compression of derived private inputs,
 not storage of upstream raw archives. Never upload these files.
 
-`--frozen-input HASH.sqlite` accepts either storage representation. Packed reads
+An existing verified gzip can be streamed directly into a smaller XZ successor:
+
+```powershell
+python -m gapi compact-frozen-inputs --codec xz --filenames HASH.sqlite OTHER_HASH.sqlite
+```
+
+This optional maintenance keeps the same writer exclusion and original logical
+input identity. It never creates an uncompressed SQLite staging file. The gzip
+is fully hashed while streaming; the XZ successor is fully decoded and hashed
+before atomic publication, and the predecessor is reverified before retirement.
+If XZ is not smaller, gzip remains. Preset 3 bounds compression memory; XZ reads
+limit the decoder dictionary to 32 MiB and each output chunk to 1 MiB. Truncation,
+trailing bytes, a wrong hash, existing foreign staging and budget refusal fail
+closed. A crash after successor publication retains both verified representations
+until the same command settles retirement. Repeated completed runs only verify
+the successor. These files remain private, structured derived inputs.
+
+`--frozen-input HASH.sqlite` accepts raw SQLite, gzip and XZ representations. Packed reads
 restore a temporary SQLite file within the same external task budget, verify its
 original hash, and remove it on normal exit or a handled exception. A process kill
 may leave `frozen-read-*.sqlite`; inspect active readers before retiring a leftover.
 A failed compression staging file is preserved after a process kill and blocks
 another attempt until inspected. Unpacking can stop at the budget boundary;
 compression does not promise that an arbitrarily large snapshot can be restored.
-Pinned older code that predates this reader requires explicitly decompressing
-the gzip under the same budget and verifying the original filename SHA-256 first.
-New live freezes still use the existing full-copy admission rule; a growing live
-database can require a separately designed scoring-input projection before the
-next release. Packing old snapshots does not silently waive that release gate.
+Pinned older code that predates a storage reader requires explicitly decompressing
+the gzip or XZ under the same budget and verifying the original filename SHA-256
+first. Full acquisition snapshots retain their full-copy admission rule. Public
+current-event freezes use the scoped ranking projection described above. Packing
+old snapshots does not waive either release gate or provide unlimited retention.
 
 The explicit `--publication-policy configs/publication-20261029.json` release
 selection permits noncommercial ORCID public-record institution derivatives under
