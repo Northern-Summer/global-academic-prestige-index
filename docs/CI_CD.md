@@ -130,3 +130,5 @@ the selected input bytes to be committed. The existing 8 MiB site allowance is
 not widened for other data: only the actual verified historical bundle size is
 added. Production browser acceptance also exercises the historical table,
 on-demand links, region colors, failed chunks, CSV and WebGL fallback.
+
+The 0.2.8 observation slice is approximately 15 MiB. The existing 32 MiB per-slice input cap remains. Public site admission now accounts for that exact selected, committed, hash-verified slice separately from the 8 MiB application allowance and exact historical bundle. A regression accepts a 10 MiB selected slice and rejects 9 MiB of unrelated application bytes; hash/source/base/private-data checks are unchanged. The total build still has its existing 64 MiB cap.

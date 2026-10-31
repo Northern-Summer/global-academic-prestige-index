@@ -782,7 +782,13 @@ institution-level observation JSON under `outputs/`. The default output is
 header; no uncompressed duplicate is staged. Explicit `--out
 outputs/easy-orcid-observed.json` retains the uncompressed export interface.
 Decompression recovers the same JSON bytes. Gzip receipt bytes and SHA-256 refer
-to the compressed file. It uses the same relation
+to the compressed file. Both export formats compare bounded file hashes before
+replacement: byte-identical reruns preserve the existing file and modification
+time. A changed result is still published atomically after complete staging;
+an interrupted or budget-rejected export keeps the predecessor. Non-file and
+symbolic-link targets are rejected.
+
+The export uses the same relation
 owner as the canonical analysis for chronological order, self-edge exclusion,
 joint-appointment exclusion and per-person/stage/institution deduplication. The
 existing exact ROR crosswalk resolves stable identifiers; names never merge
