@@ -991,6 +991,24 @@ trailers and truncated chunked bodies fail closed and close the connection.
 This establishes the buffering mechanism, not the cause of every slow upstream
 batch or a measured production throughput improvement.
 
+### Compressed repository aggregates
+
+`export-release --compress-snapshot` stores the institution aggregate as a
+deterministic gzip file. The manifest keeps the decoded JSON filename and SHA-256
+for browser readers, and adds `repository_snapshot` with encoding, exact packed
+filename, packed hash and both byte sizes. It never compresses or publishes
+individual trajectories. The build and standalone graph replay check the packed
+identity, bound decompression to 32 MiB, then verify the decoded identity. Vite
+emits the same JSON URL and bytes as an uncompressed input. Build provenance also
+checks the committed packed Git object, so storage compression cannot weaken the
+publication identity gate. Existing uncompressed manifests remain supported.
+
+The exporter does not delete a preceding JSON or gzip file. Any migration must
+first verify decoded equality, update the manifest atomically and confirm that
+no current source reader needs the obsolete representation. Preserve a recoverable
+archive or its committed original before removing the redundant copy. This saves
+repository working space; the static build still needs bounded decoded copies.
+
 ### Reusing event pages without an extra database
 
 `python -m gapi repack-event-pages --max-events 20000 --max-seconds 60`
