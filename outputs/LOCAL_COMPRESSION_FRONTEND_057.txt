@@ -1,0 +1,54 @@
+
+> gapi-web@0.2.9 test
+> node --test web/*.test.js
+
+✔ release provenance is idempotent and accepts later data-only commits (3984.0981ms)
+✔ compressed repository snapshot keeps decoded output identity and committed storage proof (1725.0329ms)
+✔ source/output/selected manifest tampering fail before publication (1260.9886ms)
+✔ uncommitted build source cannot be labeled as published HEAD (1290.0366ms)
+✔ build inputs cannot change while building and text line endings remain portable (1401.9583ms)
+✔ code-only and wrong-base builds cannot be published (481.2438ms)
+✔ bundled font input identity covers binary bytes without UTF-8 replacement (1618.1871ms)
+✔ committed real slices larger than 2 MiB remain verifiable (1659.9889ms)
+✔ large verified observation slice has a separate bound from application assets (3204.507ms)
+✔ complete historical bundle is identity-bound, committed and emitted without relaxing legacy limits (6258.4255ms)
+✔ public demo exports are labeled and contain no person identifiers (7.1592ms)
+✔ synthetic scenarios are multistage, asymmetric, and visibly separated from real observations (3.0026ms)
+✔ stage and minimum-weight filters define one shared edge slice for network and details (0.7822ms)
+✔ flow threshold range follows selected stage and high threshold excludes flows (0.2269ms)
+✔ scenario node color maps eligibility only and never encodes a score (1.2501ms)
+✔ static HTML exposes a real-score ranking and contains no synthetic-score controls (0.7378ms)
+✔ frontend loads only the local real-data score snapshot and has no synthetic fallback (0.8088ms)
+✔ snapshot validation names missing fields and binds errors to a revision (0.7865ms)
+✔ snapshot hash mismatch fails closed with the pinned revision in its diagnostic (5.0056ms)
+✔ automatic deployment only accepts exact trusted push identity (0.9357ms)
+✔ legacy Pages is explicitly built once and ambiguous writes are reconciled (0.4547ms)
+✔ artifact byte capture rejects in-flight replacement and does not mutate site files (8.4084ms)
+✔ public asset reads survive bounded transient 503 and network errors (24.5608ms)
+✔ public read retry bound preserves permanent and oversized failures (2.0679ms)
+✔ public manifest settlement accepts a 65.55-second Pages build without repeating writes (0.7925ms)
+✔ public settlement stays bounded and rejects stale, malformed and late manifests (0.6356ms)
+✔ actual complete source decodes with conserved mass and bounded chunks (180.7766ms)
+✔ partial, formal, oversized and traversing assets fail closed (0.2623ms)
+✔ bad endpoints and negative weights do not reach rendering (0.1489ms)
+✔ oversized response is cancelled while reading (2.2942ms)
+✔ bundled Chinese subsets cover UI characters and retain licensed hash identities (21.4948ms)
+✔ candidate progress preserves scope, failed work and exact count reconciliation (2.478ms)
+✔ real global schema preserves missing scores and rejects synthetic or malformed edges (0.2089ms)
+✔ directory accepts the bounded expanded catalog without relaxing graph caps (34.6901ms)
+✔ global table search, country, sort and scenario ordering are deterministic (0.6851ms)
+✔ network retains employer to training direction and enforces rendering caps (9.997ms)
+✔ institution CSV neutralizes formulas and preserves missing values (0.423ms)
+✔ focused network caps rendering without dropping table relations or changing scores (0.6713ms)
+✔ official award inventory validates counts without imputing university scores (0.6922ms)
+✔ polluted rendered numbers and stage weights fail closed before DOM rendering (0.2763ms)
+✔ share and contribution charts require conserved scores and valid damping (0.401ms)
+✔ official attribution keeps rational shares exact and identity candidates unpromoted (0.5261ms)
+ℹ tests 42
+ℹ suites 0
+ℹ pass 42
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23043.0568

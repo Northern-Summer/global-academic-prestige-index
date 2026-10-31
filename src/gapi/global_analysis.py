@@ -524,16 +524,18 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
     return manifest
 
 
-def export_local(store):
+def export_local(store, *, compress_snapshot=False):
     """Local aggregate view can include noncommercial API data, never public by default."""
     result = rank_global(store)
     content = canonical(result)
     store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()
     path = store.task.root / "global-local.json"
-    _write_aggregate(store.task, path, content)
+    storage = _write_public_snapshot(store.task, path.parent, path.name, content, compress=compress_snapshot)
     manifest = {"schema_version":"gapi-local-view/v1", "snapshot":"global-local.json", "output_sha256":checksum,
         "publication_status":"local-only-source-license-review", "config_sha256":digest(store.task.config)}
+    if storage is not None:
+        manifest['repository_snapshot'] = storage
     _write_aggregate(store.task, path.with_suffix(".json.manifest.json"), canonical(manifest))
     return {"manifest":manifest,"nodes":len(result["nodes"]),"relations":len(result["edges"]),"convergence":result["convergence"]}
 

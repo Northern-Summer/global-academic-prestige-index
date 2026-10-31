@@ -308,7 +308,8 @@ def execute_task(task, args):
                     compress_snapshot=getattr(args,'compress_snapshot',False))
         else:
             from .global_analysis import corroborate, export_release, export_local
-            result = {"corroborate": corroborate, "rank-global": export_local}[args.command](store)
+            result = {"corroborate": corroborate,
+                "rank-global": lambda s: export_local(s, compress_snapshot=True)}[args.command](store)
             if args.command=='corroborate' and args.official:
                 from .official_profiles import check_official_profiles
                 result['official_profiles']=check_official_profiles(store,http,limit=args.max_pages)

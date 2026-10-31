@@ -106,6 +106,28 @@ class AnalysisTests(unittest.TestCase):
             self.assertTrue(result['sensitivity']['delete_source_wikidata']['converged'])
         finally:s.close()
 
+    def test_compressed_local_export_preserves_decoded_identity_and_is_idempotent(self):
+        import gzip
+        import hashlib
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            plain=export_local(s)
+            expected=(s.task.root/'global-local.json').read_bytes()
+            packed=export_local(s,compress_snapshot=True)
+            metadata=packed['manifest']['repository_snapshot']
+            path=s.task.root/metadata['filename']
+            content=path.read_bytes(); stamp=path.stat().st_mtime_ns
+            self.assertEqual(gzip.decompress(content),expected)
+            self.assertEqual(hashlib.sha256(content).hexdigest(),metadata['sha256'])
+            self.assertEqual(len(content),metadata['bytes'])
+            self.assertEqual(len(expected),metadata['decoded_bytes'])
+            self.assertEqual(plain['manifest']['output_sha256'],packed['manifest']['output_sha256'])
+            self.assertEqual(packed,export_local(s,compress_snapshot=True))
+            self.assertEqual(stamp,path.stat().st_mtime_ns)
+            self.assertEqual((s.task.root/'global-local.json').read_bytes(),expected)
+        finally:s.close()
+
     def test_aggregate_publication_preserves_predecessor_on_failure_and_foreign_staging(self):
         from unittest.mock import patch
         from gapi.global_analysis import _write_aggregate

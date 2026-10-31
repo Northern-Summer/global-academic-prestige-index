@@ -41,6 +41,22 @@ export default defineConfig({
         const filePath = historical?resolve(derivedRoot,`${historical[1]}.json`):scoreRoutes.get(requestPath);
         if (!filePath) return next();
         if (request.method !== 'GET' && request.method !== 'HEAD') return next();
+        if (requestPath === '/data/global/global-local.json') {
+          try {
+            const manifestPath = `${globalScores}.manifest.json`;
+            if (!existsSync(manifestPath)) {
+              response.statusCode = 404;
+              return response.end('Local real score snapshot is unavailable.');
+            }
+            const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+            if (manifest.snapshot !== 'global-local.json') throw new Error('Unexpected local snapshot');
+            const {bytes} = readReleaseSnapshot(manifestPath, manifest);
+            response.setHeader('Content-Type', 'application/json; charset=utf-8');
+            response.setHeader('Cache-Control', 'no-store');
+            response.setHeader('Content-Length', bytes.length);
+            return response.end(request.method === 'HEAD' ? undefined : bytes);
+          } catch (error) { return next(error); }
+        }
         if (!existsSync(filePath)) {
           response.statusCode = 404;
           response.end('Local real score snapshot is unavailable.');
