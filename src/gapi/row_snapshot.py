@@ -75,7 +75,9 @@ def lines(path, task):
     if path.name.endswith('.rows.delta.xz'):
         from .row_delta import decoded_lines
         yield from decoded_lines(path,task)
-    else:yield from _packed_lines(path,task)
+    else:
+        from .row_packing import decoded_lines
+        yield from decoded_lines(path,task)
 
 
 def _packed_lines(path, task, *, max_line=MAX_LINE):

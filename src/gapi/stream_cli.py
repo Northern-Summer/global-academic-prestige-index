@@ -13,6 +13,11 @@ from .task import Task
 
 
 def register(sub):
+    full_rows=sub.add_parser('repack-full-input',help='losslessly repack a retained full-row input under the writer lock')
+    full_rows.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    full_rows.add_argument('--filename',required=True)
+    full_rows.add_argument('--dry-run',action='store_true')
+    full_rows.add_argument('--max-decode-seconds',type=float)
     projections=sub.add_parser('repack-projection-pages',help='losslessly pack private derivative payloads under the writer lock')
     projections.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     projections.add_argument('--table',choices=('easy_careers','easy_full_delta'),default='easy_careers')
@@ -126,7 +131,7 @@ def register(sub):
 
 def execute(args):
     names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
-    if args.command not in names and args.command not in ('repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
+    if args.command not in names and args.command not in ('repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
     task = Task(args.task)
     task.activate_runtime()
@@ -162,7 +167,10 @@ def execute_task(task, args):
     http=None
     try:
         http = PublicHTTP(task,reuse_connections=True)
-        if args.command == 'compact-frozen-inputs':
+        if args.command == 'repack-full-input':
+            from .row_packing import repack_full
+            result=repack_full(store,args.filename,dry_run=args.dry_run,max_decode_seconds=args.max_decode_seconds)
+        elif args.command == 'compact-frozen-inputs':
             from .frozen_input import compress_snapshot,repack_snapshot,snapshot_path
             # Validate every requested identity before the first mutation.
             for filename in args.filenames:snapshot_path(store,filename)
