@@ -1,0 +1,82 @@
+{
+  "schema_version": "gapi-orcid-transport-comparison/v1",
+  "retrieved_at": "2026-10-31T08:51:20.926507+00:00",
+  "selection": "first committed candidates; bounded diagnostic, not representative",
+  "comparison": "encoding",
+  "raw_saved": false,
+  "career_events_written": false,
+  "samples": [
+    {
+      "identity": {
+        "seconds": 2.297,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "gzip": {
+        "seconds": 1.328,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "gzip": {
+        "seconds": 2.0,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "identity": {
+        "seconds": 3.438,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "identity": {
+        "seconds": 1.328,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "gzip": {
+        "seconds": 3.093,
+        "bytes": 3210,
+        "events": 0,
+        "wire_bytes": 3210,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "gzip": {
+        "seconds": 1.313,
+        "bytes": 20181,
+        "events": 8,
+        "wire_bytes": 2679,
+        "requests": 2
+      },
+      "identity": {
+        "seconds": 2.344,
+        "bytes": 20181,
+        "events": 8,
+        "wire_bytes": 20181,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    }
+  ],
+  "status": "completed",
+  "used_bytes": 1643807022,
+  "headroom_after_reserve": 235241170,
+  "working_set_bytes": 34279424
+}

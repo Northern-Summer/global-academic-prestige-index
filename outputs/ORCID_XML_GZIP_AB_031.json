@@ -1,0 +1,20 @@
+{
+  "schema_version": "gapi-orcid-transport-comparison/v1",
+  "retrieved_at": "2026-10-31T08:50:44.131069+00:00",
+  "selection": "first pending candidates; bounded diagnostic, not representative",
+  "comparison": "encoding",
+  "raw_saved": false,
+  "career_events_written": false,
+  "samples": [
+    {
+      "identity": {
+        "error_type": "SourceRedirect"
+      },
+      "equal_extracted_fields": false
+    }
+  ],
+  "status": "incomplete",
+  "used_bytes": 1643753412,
+  "headroom_after_reserve": 235294780,
+  "working_set_bytes": 42733568
+}

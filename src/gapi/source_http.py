@@ -103,6 +103,68 @@ class SourceResponse:
     def __exit__(self,*args):self.close()
 
 
+class XMLResponse:
+    """Decode one HTTP gzip member with bounded input/output, never an XML tree.
+
+    Hashing and SAX consumers receive the exact decoded representation as before.
+    CRC/trailer validation completes before EOF; truncation, trailing members and
+    expansion beyond the member limit fail the caller's existing transaction.
+    """
+    def __init__(self, response, limit, observe_wire):
+        self.response, self.headers = response, response.headers
+        self.limit, self.observe_wire = limit, observe_wire
+        encoding = self.headers.get('Content-Encoding', 'identity').strip().lower()
+        if encoding not in ('identity', 'gzip'):
+            response.close()
+            raise ValueError('unsupported XML content encoding')
+        self.decoder = zlib.decompressobj(31) if encoding == 'gzip' else None
+        self.pending = b''
+        self.wire_size = self.decoded_size = 0
+        self.finished = False
+
+    def read(self, size):
+        if type(size) is not int or size < 0:
+            raise ValueError('unbounded XML read forbidden')
+        size = min(size, 65536)
+        if size == 0 or self.finished:
+            return b''
+        while True:
+            self.response.check_deadline()
+            chunk = self.pending
+            self.pending = b''
+            if not chunk:
+                chunk = self.response.read(65536)
+                self.wire_size += len(chunk)
+                self.observe_wire(len(chunk))
+                if self.wire_size > self.limit:
+                    raise ValueError('XML wire response exceeds member bound')
+                if not chunk:
+                    if self.decoder is not None and not self.decoder.eof:
+                        raise ValueError('truncated XML gzip response')
+                    self.finished = True
+                    return b''
+            if self.decoder is not None:
+                try:
+                    output = self.decoder.decompress(chunk, min(size, self.limit + 1 - self.decoded_size))
+                except zlib.error as exc:
+                    raise ValueError('invalid XML gzip response') from exc
+                if self.decoder.unused_data:
+                    raise ValueError('trailing XML gzip data')
+                self.pending = self.decoder.unconsumed_tail
+            else:
+                output, self.pending = chunk[:size], chunk[size:]
+            self.decoded_size += len(output)
+            if self.decoded_size > self.limit:
+                raise ValueError('decoded XML response exceeds member bound')
+            if output:
+                return output
+
+    def geturl(self):return self.response.geturl()
+    def close(self):self.response.close()
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
+
+
 def safe_url(url: str):
     p = urlsplit(url)
     if p.scheme != "https" or p.username or p.password or p.port not in (None, 443):
@@ -259,7 +321,16 @@ class PublicHTTP:
         )
         if not documented_api:
             self.allowed(url)
-        return SourceResponse(self._open(url, accept, headers=headers),self.remaining)
+        xml = documented_api and p.hostname == 'pub.orcid.org' and accept == 'application/vnd.orcid+xml'
+        if xml:
+            # Only negotiate HTTP encoding on the existing XML API route.
+            # Archive/range bytes and JSON's independently bounded owner stay intact.
+            headers = {'Accept-Encoding': 'gzip', **(headers or {})}
+        response = SourceResponse(self._open(url, accept, headers=headers),self.remaining)
+        if xml:
+            def observe_wire(size):self.bytes_received += size
+            return XMLResponse(response, self.task.config['max_member_bytes'], observe_wire)
+        return response
 
     def open_range(self, url, offset, total, initial_headers, *, expected_md5=None):
         """Resume a fixed official dump inside the SAME decompression process.
