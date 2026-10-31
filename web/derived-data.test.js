@@ -1,17 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {readDerivedAsset} from '../scripts/derived-bundle.mjs';
 import {validateDerivedManifest,decodeNodes,decodeEdges,validateAsset,fetchJSON} from './derived-data.js';
 const path=new URL('../outputs/easy-orcid-web/manifest.json',import.meta.url);
 const manifest=JSON.parse(readFileSync(path));
 test('actual complete source decodes with conserved mass and bounded chunks',()=>{
   const m=validateDerivedManifest(manifest),base=new URL('../outputs/easy-orcid-web/',import.meta.url);
-  const nodes=decodeNodes(JSON.parse(readFileSync(new URL(m.nodes.file,base))),m);
+  const raw=readDerivedAsset(fileURLToPath(new URL(m.nodes.file,base)),m.nodes.bytes).bytes;
+  const nodes=decodeNodes(JSON.parse(raw),m);
   assert.equal(nodes.length,62103);
   assert.equal(nodes.find(n=>n.name==='University of Cambridge').region,'Europe');
   assert.ok(new Set(nodes.map(n=>n.region).filter(Boolean)).size>=6);
   assert.ok(nodes.filter(n=>n.identity==='unresolved_external_identifier').every(n=>n.region===null));
-  const corrupt=JSON.parse(readFileSync(new URL(m.nodes.file,base)));corrupt[0][9]='invented';
+  const corrupt=JSON.parse(raw);corrupt[0][9]='invented';
   assert.throws(()=>decodeNodes(corrupt,m),/Invalid historical institution/);
   const edges=decodeEdges(JSON.parse(readFileSync(new URL(m.edge_chunks[0].file,base))),nodes);
   assert.equal(edges.length,10000);assert.ok(edges.every(e=>e.weight>0));
