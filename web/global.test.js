@@ -31,6 +31,15 @@ test('real global schema preserves missing scores and rejects synthetic or malfo
   assert.throws(()=>validateGlobal({...dataset(),dataset_kind:'synthetic/demo'}));
   assert.throws(()=>validateGlobal({...dataset(),edges:[{source:'outside',target:'a',weight:1}]}));
 });
+
+test('directory accepts the bounded expanded catalog without relaxing graph caps',()=>{
+  const data=dataset();
+  while(data.nodes.length<32768)data.nodes.push(node(`directory-${data.nodes.length}`,null));
+  assert.equal(validateGlobal(data).nodes.length,32768);
+  assert.equal(networkSlice(data).nodes.length<=500,true);
+  data.nodes.push(node('overflow',null));
+  assert.throws(()=>validateGlobal(data),/browser budget/);
+});
 test('global table search, country, sort and scenario ordering are deterministic',()=>{
   assert.deepEqual(selectRows(dataset(),{country:'DE'}).map(n=>n.institution_id),['b']);
   assert.deepEqual(selectRows(dataset(),{query:'miss'}).map(n=>n.institution_id),['missing']);

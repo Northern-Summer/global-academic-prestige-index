@@ -20,13 +20,13 @@ def file_hash(path):
 
 
 def snapshot_path(store, filename):
-    if not isinstance(filename,str) or not re.fullmatch(r'[a-f0-9]{64}\.sqlite',filename):
+    if not isinstance(filename,str) or not re.fullmatch(r'[a-f0-9]{64}\.(sqlite|rows)',filename):
         raise ValueError('frozen input must be a content-addressed filename')
     folder=store.task.root/'frozen-inputs'
     if folder.is_symlink() or getattr(folder,'is_junction',lambda:False)():
         raise ValueError('linked snapshot directory forbidden')
     path=folder/filename
-    for candidate in (path,path.with_suffix('.sqlite.gz'),path.with_suffix('.sqlite.xz')):
+    for candidate in (path,path.with_suffix('.sqlite.gz'),path.with_suffix('.sqlite.xz'),path.with_suffix('.rows.xz')):
         if candidate.is_symlink():raise ValueError('linked snapshot forbidden')
     return path
 
@@ -71,10 +71,13 @@ def _unpack(task, packed, destination=None):
 
 def verified_packed_snapshot(store, path):
     """Quality classification requires location AND full original content hash."""
-    if path.parent!=store.task.root/'frozen-inputs' or not re.fullmatch(r'[a-f0-9]{64}\.sqlite\.(gz|xz)',path.name):
+    if path.parent!=store.task.root/'frozen-inputs' or not re.fullmatch(r'[a-f0-9]{64}\.(sqlite\.(gz|xz)|rows\.xz)',path.name):
         return False
     try:
         snapshot_path(store,path.name.rsplit('.',1)[0])
+        if path.name.endswith('.rows.xz'):
+            from .row_snapshot import inspect
+            return inspect(path,store.task)[0]==path.name[:64]
         return _unpack(store.task,path)==path.name[:64]
     except (OSError,EOFError,ValueError,lzma.LZMAError):
         return False
@@ -218,6 +221,22 @@ def freeze_input(store, *, scope='full'):
 def frozen_reader(store,filename):
     path=snapshot_path(store,filename)
     store.task.check()
+    if filename.endswith('.rows'):
+        from .row_snapshot import restore_rows
+        temporary=None;reader=None;live=store.db
+        try:
+            with tempfile.NamedTemporaryFile(prefix='frozen-read-',suffix='.sqlite',dir=path.parent,delete=False) as target:
+                temporary=type(path)(target.name)
+            reader=restore_rows(path.with_suffix('.rows.xz'),temporary,store.task)
+            reader.execute('PRAGMA query_only=ON');store.db=reader
+            yield
+        finally:
+            store.db=live
+            if reader is not None:reader.close()
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+                temporary.with_name(temporary.name+'-journal').unlink(missing_ok=True)
+        return
     temporary=None
     if not path.exists():
         try:

@@ -1,6 +1,6 @@
 export function validateGlobal(data) {
   if (data?.schema_version !== 'gapi-global-observed/v1' || data.dataset_kind !== 'real/global-public-observations') throw new Error('Invalid real global observation schema');
-  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || data.nodes.length > 25000 || data.edges.length > 200000) throw new Error('Global slice exceeds browser budget');
+  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || data.nodes.length > 32768 || data.edges.length > 200000) throw new Error('Global slice exceeds browser budget');
   const ids = new Set();
   const scores = new Map();
   for (const node of data.nodes) {

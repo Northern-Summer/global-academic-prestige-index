@@ -99,6 +99,7 @@ def register(sub):
         if name == "export-release":
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
             parser.add_argument('--publication-policy',type=Path)
+            parser.add_argument('--freeze-format',choices=('sqlite','rows'),default='sqlite')
             group=parser.add_mutually_exclusive_group()
             group.add_argument('--freeze-input',action='store_true')
             group.add_argument('--frozen-input',help='private normalized snapshot filename, never a public file')
@@ -274,15 +275,21 @@ def execute_task(task, args):
             from .frozen_input import freeze_input, frozen_reader
             from contextlib import nullcontext
             policy=json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None
-            snapshot=freeze_input(store,scope='global-ranking') if args.freeze_input else None
+            fresh_rows=args.freeze_input and getattr(args,'freeze_format','sqlite')=='rows'
+            if fresh_rows:
+                from .row_snapshot import freeze_rows
+                snapshot=freeze_rows(store)
+            else:snapshot=freeze_input(store,scope='global-ranking') if args.freeze_input else None
             if args.frozen_input:
                 import re
-                if not re.fullmatch(r'[a-f0-9]{64}\.sqlite',args.frozen_input):
+                if not re.fullmatch(r'[a-f0-9]{64}\.(sqlite|rows)',args.frozen_input):
                     raise ValueError('frozen input requires a content-addressed filename')
-                snapshot={'sha256':args.frozen_input.removesuffix('.sqlite'),'filename':args.frozen_input,
+                snapshot={'sha256':args.frozen_input.rsplit('.',1)[0],'filename':args.frozen_input,
                     'contains_personal_input':True,'publicly_bundled':False}
-            with frozen_reader(store,snapshot['filename']) if snapshot else nullcontext():
-                if snapshot is not None:
+            # A fresh row archive was frozen under this sole writer lock. Score
+            # the same unchanged live tables without allocating a second database.
+            with frozen_reader(store,snapshot['filename']) if snapshot and not fresh_rows else nullcontext():
+                if snapshot is not None and not fresh_rows and not snapshot['filename'].endswith('.rows'):
                     snapshot['bytes']=store.db.execute('PRAGMA page_count').fetchone()[0]*store.db.execute('PRAGMA page_size').fetchone()[0]
                 result=export_release(store,args.out,publication_policy=policy,frozen_input=snapshot)
         else:
