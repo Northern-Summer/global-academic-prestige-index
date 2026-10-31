@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from gapi.frozen_input import frozen_reader,verified_packed_snapshot
 from gapi.global_analysis import rank_global
-from gapi.row_delta import commands,addition_record,restore_addition,FORMAT_V2
+from gapi.row_delta import commands,addition_record,restore_addition,FORMAT_V2,repack_delta
 from gapi.row_snapshot import freeze_rows,inspect,ranking_lines
 from gapi.task import BudgetStop,canonical
 import test_global_analysis as analysis
@@ -18,6 +18,73 @@ class RowDeltaTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def legacy_delta(self,s):
+        base=freeze_rows(s)
+        shared=random.Random(81).randbytes(2048).hex()
+        with s.member('wikidata','legacy'):
+            for n in range(30):
+                s.event(dict(person=f'person-{n}',institution='wd:Q1',kind='education',
+                    stage='doctorate',year_end=2000,source='wikidata',locator='legacy',
+                    status='observed',evidence=shared))
+        frozen=freeze_rows(s,base_filename=base['filename'])
+        path=s.task.root/'frozen-inputs'/(frozen['filename']+'.delta.xz')
+        records=lzma.decompress(path.read_bytes()).splitlines(keepends=True)
+        records[0]=records[0].replace(FORMAT_V2.encode(),b'gapi-private-ranking-row-delta/1')
+        records=[b'A'+restore_addition(r) if r.startswith(b'E') else r for r in records]
+        path.write_bytes(lzma.compress(b''.join(records),preset=3))
+        return frozen,path
+
+    def test_repack_legacy_delta_preserves_identity_scores_and_is_idempotent(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            frozen,path=self.legacy_delta(s)
+            before=inspect(path,s.task);score=canonical(rank_global(s));old=path.read_bytes()
+            result=repack_delta(s,frozen['filename'])
+            self.assertTrue(result['logical_identity_unchanged'])
+            self.assertGreater(result['saved_bytes'],0)
+            self.assertEqual(inspect(path,s.task),before)
+            self.assertNotEqual(path.read_bytes(),old)
+            packed=path.read_bytes()
+            again=repack_delta(s,frozen['filename'])
+            self.assertTrue(again['already_repacked'])
+            self.assertEqual(path.read_bytes(),packed)
+            with frozen_reader(s,frozen['filename']):self.assertEqual(canonical(rank_global(s)),score)
+            self.assertEqual(list(path.parent.glob('*.partial')),[])
+        finally:s.close()
+
+    def test_repack_failure_retains_predecessor_and_cleans_only_own_partial(self):
+        from gapi.row_delta import inspect_delta
+        s=self.store(fixtures.archive([]))
+        try:
+            frozen,path=self.legacy_delta(s);old=path.read_bytes()
+            def wrong(candidate,task):
+                result=inspect_delta(candidate,task)
+                return ('0'*64,result[1]) if candidate.name.endswith('.partial') else result
+            with patch('gapi.row_delta.inspect_delta',side_effect=wrong):
+                with self.assertRaisesRegex(ValueError,'reconstruction mismatch'):
+                    repack_delta(s,frozen['filename'])
+            self.assertEqual(path.read_bytes(),old)
+            self.assertEqual(list(path.parent.glob('*.partial')),[])
+            partial=path.with_suffix('.xz.repack.partial');partial.write_bytes(b'unique predecessor')
+            with self.assertRaises(FileExistsError):repack_delta(s,frozen['filename'])
+            self.assertEqual(partial.read_bytes(),b'unique predecessor')
+            partial.unlink()
+            checks=[0]
+            original_check=s.task.check
+            def stop_during_write(*args,**kwargs):
+                checks[0]+=1
+                if checks[0]>1:raise BudgetStop('capacity')
+                return original_check(*args,**kwargs)
+            with patch.object(s.task,'check',side_effect=stop_during_write):
+                with self.assertRaises(BudgetStop):repack_delta(s,frozen['filename'])
+            self.assertEqual(path.read_bytes(),old)
+            self.assertEqual(list(path.parent.glob('*.partial')),[])
+            path.write_bytes(old[:-3])
+            with self.assertRaises((ValueError,EOFError,lzma.LZMAError)):
+                repack_delta(s,frozen['filename'])
+            self.assertEqual(path.read_bytes(),old[:-3])
+        finally:s.close()
 
     def test_expanded_event_addition_reconstructs_exact_blob_and_bounds(self):
         import base64

@@ -197,27 +197,33 @@ class CareerStore:
             raise ValueError('invalid pending source/batch limit')
         if priority_source is not None and (command!='ingest-orcid-api' or priority_source!='wikidata'):
             raise ValueError('cross-source priority requires explicit Wikidata-to-ORCID identity')
-        query='''WITH member_keys AS MATERIALIZED (
+        member_keys='''WITH member_keys AS MATERIALIZED (
             SELECT locator,CASE WHEN instr(locator,'@')>0 AND
                 (instr(locator,char(0))=0 OR instr(locator,'@')<instr(locator,char(0)))
                 THEN lower(substr(locator,1,instr(locator,'@')-1)) END AS prefix
-            FROM members WHERE source=?)
-            SELECT d.identifier FROM discovery d
-            LEFT JOIN discovery_retries r ON r.source=d.source AND r.identifier=d.identifier
-            WHERE d.source=? AND COALESCE(r.next_attempt_at,0)<=?
+            FROM members WHERE source=?) '''
+        eligible=''' WHERE d.source=? AND COALESCE(r.next_attempt_at,0)<=?
             AND CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
                 AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
                 THEN d.identifier NOT IN (SELECT locator FROM member_keys)
                     AND lower(d.identifier) NOT IN (SELECT prefix FROM member_keys WHERE prefix IS NOT NULL)
                 ELSE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
                     AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END'''
+        relationship='r.source=d.source AND r.identifier=d.identifier'
+        query=(member_keys+'SELECT d.identifier FROM discovery d '
+               'LEFT JOIN discovery_retries r ON '+relationship+eligible)
+        # CROSS JOIN fixes the small retry table as the outer loop. An ordinary
+        # join let SQLite scan every discovery candidate even for one due retry.
+        # Eligibility is shared with fresh and linked selection, not redefined.
+        retry_query=(member_keys+'SELECT d.identifier FROM discovery_retries r '
+                     'CROSS JOIN discovery d ON '+relationship+eligible)
         # IN builds each membership set once. LEFT JOINs on materialized keys
         # can make SQLite choose repeated scans of either exact or prefix keys.
         # Both sets exclude NULL, preserving the original NOT EXISTS predicate.
         parameters=(sources[command],command,time.time() if now is None else now,sources[command])
         # Reserve a quarter of a normal batch for due retries so a continuing
         # stream of fresh candidates cannot starve recovered records forever.
-        due=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NOT NULL
+        due=[r[0] for r in self.db.execute(retry_query+''' AND r.identifier IS NOT NULL
             ORDER BY r.next_attempt_at,d.identifier LIMIT ?''',(*parameters,limit))]
         reserved=min(len(due),max(1,limit//4))
         fresh=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL

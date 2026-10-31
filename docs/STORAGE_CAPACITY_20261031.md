@@ -467,3 +467,158 @@ global tests passed. The real 24,632,711-byte decoded snapshot validated in
 500 rendered nodes / 547 edges. This is local Node evidence, not hosted browser
 performance or visual acceptance. Hosted CI/build/browser and online readback
 remain required before claiming deployment.
+
+The collector session 88336 subsequently ended normally with a resumable source
+boundary at 183,163 events; its terminal handle and absence of another matching
+collector were checked before taking the existing sole-writer maintenance lock.
+The remaining shared-response pass (088) scanned 47,867 rows through rowid
+183,163 and converted 30,479 events, saving 6,138,583 payload bytes and producing
+7,917,568 additional internal reusable bytes. The physical file remained
+1,303,240,704 bytes; free pages increased from 11,217 to 13,150. Full logical
+event hashes before/after matched, quick_check returned ok, and the maintenance
+process measured 35,000,320 bytes. No historical input was removed. The sole
+collector was then resumed using continue-089.py (native session 1250).
+
+Public correction commit d283bad4d45fe439d48df33d02d77a2cc026ac3b retains
+public-only ancestry. GitHub run 41209396416 completed all four jobs successfully:
+test, real-observation-build, production-browser, deploy-observations. Online
+source/data readback and release creation are recorded separately in the
+087 publication receipts, not inferred from transport success.
+
+## Acquisition continuation and alternate-source check (090)
+
+Fresh SQLite readback confirmed both easy_career_state and easy_full_state are
+verified with source_complete=true. The full derivative selected 2,473,948
+two-sided source rows, reused all 2,306,992 exact HQ projections and retained
+only 166,956 delta rows. These are source-row counts, not independently
+corroborated people or current-world coverage. The existing 2023.6 historical
+view remains separate from present API snapshots.
+
+The resumed collector (native session 1250) was observed live and advancing.
+Readback 090 measured 183,633 events, 9,065 ORCID members, 48,733 Wikidata
+members, 689,218 ORCID candidates and 191,845 Wikidata candidates. API member
+counts cannot be divided by candidate counts to claim global coverage: those
+populations, temporal revisions and identifiers have distinct contracts.
+SQLite still had 53,325,824 reusable bytes. Actual Wikidata run state reported
+the service's requested source pause; ORCID continued independently. No new
+collector or download stream was created during this continuation.
+
+Bounded live Firecrawl searches checked ORCID career/education/employment bulk
+alternatives. The publisher's older Easy ORCID page was read directly:
+https://zenodo.org/records/11371268 (version 2023.2, published 2024-05-28).
+It describes education/employment projections and publisher ROR grounding;
+its older release is not a new independent source, nor a replacement for the
+already verified 2023.6 file. Search snippets mentioning bibliographic indexes,
+general employment resumes and regional ORCID datasets were not promoted into
+the global source registry without a compatible contract and verification.
+No new raw archive, cloud account or paid service was activated.
+The current event/candidate counts and verified source states are retained in
+private outputs/ACQUISITION_SCOPE_090.json. This is progress toward the source
+scope, not a claim of 100 percent current global collection.
+
+## Retry-queue admission efficiency (091)
+
+A fresh EXPLAIN QUERY PLAN showed the due-retry selector scanning the large
+discovery table first and probing discovery_retries per candidate. On the live
+ORCID queue, an initial observation took 0.891 seconds for one due result.
+The selector now starts with discovery_retries CROSS JOIN discovery, sharing
+the exact existing member-key CTE, eligibility predicate, retry time boundary,
+ordering and LIMIT. Fresh and optional linked priority selection retain their
+existing contracts. No index, materialized person table or persistent cache was
+added, and no evidence or qualification rule changed.
+
+The same-real-query ABBA comparison at a fixed query time produced identical
+selection digests: old mean 0.9391344 seconds versus new mean 0.00430355 seconds
+(218.22x faster for this local query). At the fixed comparison time no retries
+were due; the preceding observation and the new fixture cover nonempty results.
+This is not an end-to-end network acquisition speedup. The fixture also covers
+same-time ordering, future retries, orphan retry rows, already acquired exact and
+revision-prefixed members, wildcard-bearing legacy identifiers, repeatability,
+and verifies that the actual query plan starts from the retry table. All 24
+collection tests passed. Full regression and live process adoption remain
+separate gates, recorded below when executed. Raw query text and identifiers
+remain in memory; outputs/RETRY_OUTER_REAL_091.json contains only durations,
+counts, selection hashes and scope labels.
+
+Full Python regression passed 372 tests in 58.631 seconds. To adopt the corrected
+selector, the exact collector PID/parent/command were rechecked, then the old
+child was intentionally terminated. Its wrapper handle returned terminal exit
+1 (controlled restart, not a successful full scan). CareerStore reacquired the
+sole-writer lock, recovered SQLite normally and returned quick_check=ok with
+183,871 committed events. Previously committed members/checkpoints were retained;
+any interrupted member remains resumable. The loaded pending owner contained
+the CROSS JOIN implementation, SHA-256
+b191b305c26924935d2376235da8465c298ce20c6e3c3997cdd462eaeadac053.
+The sole collector resumed as continue-092.py, native session 73243. Its entry
+receipt measured 1,846,123,240 budgeted bytes and 53,039,104 internal reusable
+bytes. See private outputs/RETRY_OUTER_ADOPTION_092.json. No new raw data cache,
+database replica or persistent priority index was created.
+
+## Retained delta representation upgrade (093–094)
+
+Four retained historical deltas still used format /1, with packed sizes
+26,094,336 / 22,598,968 / 17,973,232 / 7,258,116 bytes. The existing /2 event
+addition representation can also reduce their nested-compression overhead.
+repack_delta upgrades one retained delta under the existing writer exclusion,
+first fully verifying its old reconstruction. It writes an exclusively created
+partial, verifies complete successor reconstruction against the same logical
+hash/byte count and baseline, verifies the predecessor's packed hash has not
+changed, and atomically replaces only when the successor is smaller. Otherwise
+the predecessor remains. No source record or historical version is removed;
+old manifest packed-size/format fields remain historical storage observations.
+Repeated /2 calls verify and reuse the existing bytes. An existing unknown
+partial is never deleted. New partials are cleaned on write/admission/validation
+failure. Baseline chains remain prohibited.
+
+All 374 Python tests passed in 60.352 seconds, including original score restore,
+logical identity, repeated-run byte preservation, nonempty event compression,
+corrupt/truncated predecessors, successor mismatch, preexisting partial
+preservation and capacity failure during writing. The first real conversion
+uses only the largest retained /1 archive. Collector 73243 was intentionally
+stopped after its identity check; the returned terminal exit was 1 and committed
+members remain resumable. Real replacement results are recorded separately;
+test success alone does not establish real reclaimed capacity.
+
+The real replacement succeeded in 97.890 seconds: 26,094,336 bytes became
+8,385,680 bytes, reclaiming 17,708,656 physical file bytes (67.86 percent).
+Both archives reconstruct the identical 280,862,320-byte logical input,
+SHA-256 55929c91d9bdb17213c72f2a99f3f50f3459c36860e9c894990b2533e0503e8f.
+Its retained baseline and historical logical filename are unchanged. The old
+packed SHA was ac77c85d0aaae8172eaf95371de736eed408b37645e8d061d6b7d01144b1ae90;
+the new packed SHA is 7f5fde4220400eb0069b8cea13b57df35b95a1b026b235d82ebc0f1577d2b671.
+Total accounted storage decreased from 1,846,172,917 to 1,828,466,791 bytes.
+Final maintenance memory measured 34,246,656 bytes, database quick_check=ok,
+187,236 committed events remained, and zero source records were deleted.
+This physical reduction is distinct from prior SQLite internal page reuse.
+Private receipt: outputs/RETAINED_DELTA_REPACK_094.json. A subsequent bounded
+normalization/freeze/export is in progress for the next observation release;
+no new release or deployment is implied by this storage result.
+
+## Frozen observation candidate 095 and resource contention
+
+The next freeze/export succeeded: logical input 351,091,116 bytes, saved as a
+23,393,156-byte format-2 delta, SHA-256
+23cf11956042693b13c8d7c65709e4f42a350310605058e7ec75b2917ba869e9.
+Complete reconstruction and a second live logical-stream hash comparison matched.
+The public snapshot contains 187,236 events, 54,837 people, 35,397 directory
+institutions, 1,881 scored institutions and 2,140 aggregate edges. Its gzip is
+993,046 bytes; decoded size 25,263,333 bytes. Public decoded SHA-256:
+8bbff95c5859346b3e802aca93df157a6329826415f167831766395208231ecf.
+Independent stdlib replay passed (131 iterations, mass 1.0, maximum score error
+1.734723475976807e-18, L1 residual 9.017302963348905e-13). All 43 frontend tests
+passed; Node validation/sort measured 107.56/19.71 ms, 500 rendered nodes and
+565 edges. These are local evidence, not hosted or visual acceptance.
+
+The collector was initially resumed before the full frontend regression. This
+ordering caused avoidable resource contention: temporary test fixtures raised
+accounted usage to 1,883,436,124 bytes, where the collector correctly refused to
+consume the fixed 256 MiB reserve. Native session 40606 ended with exit 1 after
+21 committed additional events, which are outside the frozen release. The exact
+failure was retained in ACQUISITION_RESUMED_096.txt. All frontend tests completed
+and removed their temporary fixtures; usage then fell to 1,852,950,170 bytes,
+leaving 26,098,022 admission bytes. After confirming the old handle terminal,
+the collector resumed as continue-097.py, native session 12698. Future local
+full frontend regressions must finish before resuming collection in this tight
+budget; short public replay checks do not require the large fixtures. No budget
+was increased, no safety check was disabled, and no recovery input was deleted
+to hide this admission failure.

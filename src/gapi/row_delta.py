@@ -252,3 +252,64 @@ def inspect_delta(path,task):
         sha.update(line);total+=len(line);count+=1
     if count<2:raise ValueError('incomplete reconstructed row archive')
     return sha.hexdigest(),total
+
+
+def repack_delta(store, filename):
+    """Losslessly upgrade a retained /1 archive without changing its input ID.
+
+    Caller owns CareerStore's writer exclusion, including frozen readers. The
+    predecessor remains until complete source/target reconstruction succeeds.
+    Public historical metadata describes its original storage measurement;
+    logical filename/hash and the retained full baseline remain authoritative.
+    """
+    from .frozen_input import snapshot_path, file_hash
+    from .row_snapshot import _packed_lines, MAX_LINE
+    path=snapshot_path(store,filename).with_suffix('.rows.delta.xz')
+    if not filename.endswith('.rows') or not path.is_file():
+        raise ValueError('retained row delta required')
+    if store.db.in_transaction:raise ValueError('cannot repack unfinished transaction')
+    task=store.task;initial_used=task.check(1024**2);task.check_memory()
+    expected=inspect_delta(path,task)
+    if expected[0]!=filename[:64]:raise ValueError('retained delta identity mismatch')
+    before=path.stat().st_size;original_hash=file_hash(path)
+    records=iter(_packed_lines(path,task,max_line=MAX_LINE+1))
+    temporary=path.with_suffix('.xz.repack.partial');created=False
+    try:
+        header=json.loads(next(records))
+        if header['format']==FORMAT_V2:
+            return {'filename':filename,'sha256':expected[0],'bytes':expected[1],
+                    'already_repacked':True,'saved_bytes':0,'packed_bytes':before}
+        if header['format']!=FORMAT:raise ValueError('unsupported retained delta')
+        header['format']=FORMAT_V2
+        with temporary.open('xb') as output:
+            created=True;written=0
+            encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+            def write(value):
+                nonlocal written
+                task.check(len(value)+65536,minimum_used=initial_used+written)
+                task.check_memory();output.write(value);written+=len(value)
+            def emit(value):
+                encoded=encoder.compress(value)
+                if encoded:write(encoded)
+            emit(canonical(header)+b'\n')
+            for record in records:
+                emit(addition_record(record[1:]) if record.startswith(b'A') else record)
+            write(encoder.flush());output.flush();os.fsync(output.fileno())
+        records.close()
+        if inspect_delta(temporary,task)!=expected:
+            raise ValueError('repacked delta reconstruction mismatch')
+        if file_hash(path)!=original_hash:raise ValueError('retained delta changed during repack')
+        after=temporary.stat().st_size
+        if after>=before:
+            return {'filename':filename,'sha256':expected[0],'bytes':expected[1],
+                    'already_repacked':False,'retained_predecessor':True,
+                    'saved_bytes':0,'packed_bytes':before}
+        os.replace(temporary,path)
+        return {'filename':filename,'sha256':expected[0],'bytes':expected[1],
+                'already_repacked':False,'saved_bytes':before-after,
+                'previous_packed_bytes':before,'packed_bytes':after,
+                'previous_storage_sha256':original_hash,'storage_sha256':file_hash(path),
+                'logical_identity_unchanged':True,'format':FORMAT_V2}
+    finally:
+        records.close()
+        if created:temporary.unlink(missing_ok=True)

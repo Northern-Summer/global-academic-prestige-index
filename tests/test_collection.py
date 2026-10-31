@@ -216,6 +216,38 @@ class CollectionTests(unittest.TestCase):
                     s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata')
         finally:s.close()
 
+    def test_retry_selection_starts_from_retries_and_preserves_legacy_eligibility(self):
+        s=self.store(archive([]))
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-wikidata',f'Q{n}','a','b') for n in range(1,2001)])
+                s.db.execute("INSERT INTO discovery VALUES('ingest-wikidata','odd_id','a','b')")
+                s.db.executemany('INSERT INTO discovery_retries VALUES(?,?,?,?,?)',[
+                    ('ingest-wikidata',value,1,stamp,'fixture') for value,stamp in
+                    [('Q1999',100),('Q2000',100),('Q1998',300),('Q1997',100),
+                     ('Q1996',100),('Q99999',100),('odd_id',100)]])
+                s.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',[
+                    ('wikidata','Q1997@12','a'*64,'observed',None),
+                    ('wikidata','Q1996','a'*64,'observed',None),
+                    ('wikidata','odd_id@5','a'*64,'observed',None)])
+            statements=[]
+            s.db.set_trace_callback(statements.append)
+            selected=s.pending('ingest-wikidata',8,now=160)
+            s.db.set_trace_callback(None)
+            self.assertEqual(selected,['Q1999','Q2000','Q1','Q10','Q100','Q1000','Q1001','Q1002'])
+            retry=next(sql for sql in statements if 'CROSS JOIN discovery d' in sql)
+            legacy=retry.replace('FROM discovery_retries r CROSS JOIN discovery d ON',
+                                 'FROM discovery d LEFT JOIN discovery_retries r ON')
+            self.assertEqual(list(s.db.execute(retry)),list(s.db.execute(legacy)))
+            plan=[row[3] for row in s.db.execute('EXPLAIN QUERY PLAN '+retry)]
+            outer=next(line for line in plan if line.startswith(('SEARCH r ','SCAN r ','SEARCH d ','SCAN d ')))
+            self.assertTrue(outer.startswith(('SEARCH r ','SCAN r ')),plan)
+            self.assertEqual(selected,s.pending('ingest-wikidata',8,now=160))
+        finally:
+            s.db.set_trace_callback(None)
+            s.close()
+
     def test_candidate_progress_keeps_failures_and_missing_world_denominator(self):
         s=self.store(archive([]))
         try:
