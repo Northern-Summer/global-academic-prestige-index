@@ -17,6 +17,20 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   const documentation=await page.request.get(new URL('docs/EASY_ORCID_2023_OBSERVATIONS.md',url).href);
   assert.equal(documentation.status(),200);assert.match(await documentation.text(),/798,879/);
   await page.evaluate(()=>document.fonts.ready);
+  result.cjk_glyphs=await page.evaluate(async()=>{
+   const chars=[...new Set(document.body.innerText.match(/[\u3400-\u9fff]/g)||[])];
+   const missing={};
+   for(const family of ['GAPI Song','DM Sans','DM Mono']){
+    await document.fonts.load(`32px "${family}"`,chars.join(''));
+    const canvas=document.createElement('canvas');canvas.width=48;canvas.height=48;
+    const context=canvas.getContext('2d');context.font=`32px "${family}"`;
+    const paint=text=>{context.clearRect(0,0,48,48);context.fillText(text,2,36);return canvas.toDataURL()};
+    const tofu=paint('\uffff');missing[family]=chars.filter(char=>paint(char)===tofu);
+   }
+   return {checked_characters:chars.length,missing};
+  });
+  assert.ok(result.cjk_glyphs.checked_characters>50,'glyph check must exercise actual Chinese content');
+  for(const [family,missing] of Object.entries(result.cjk_glyphs.missing))assert.deepEqual(missing,[],`${family} has missing Chinese glyphs`);
   result.typography=await page.locator('#historical-title').evaluate(el=>({family:getComputedStyle(el).fontFamily,weight:getComputedStyle(el).fontWeight}));
   assert.match(result.typography.family,/GAPI Song/);assert.equal(result.typography.weight,'400');
   assert.equal(await page.locator('#page-title em').evaluate(el=>getComputedStyle(el).fontStyle),'italic');

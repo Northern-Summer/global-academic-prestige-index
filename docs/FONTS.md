@@ -2,6 +2,17 @@
 
 Fonts are served with the site. No Google Fonts request is made by the browser. Chinese heading glyphs use a delivery subset; other Chinese text uses the system UI font. Font software retains its SIL Open Font License; Apache-2.0 does not apply to these font assets. Asset hashes and upstream locations are in web/fonts/sources.json.
 
+2026-10-31 correction: the hosted Linux browser exposed missing Chinese glyphs
+despite loaded-font assertions. Two explicit Unicode delivery subsets now cover
+the 425 Chinese/punctuation characters in current UI sources and the public
+historical institution corpus. These are also fallback faces for DM Sans and DM
+Mono, so body text and controls do not depend on an installed system CJK font.
+The Latin faces and 400-weight Chinese headings retain their established style.
+`web/fonts/cjk-coverage.json` binds subset hashes, codepoints and provider URLs.
+`scripts/refresh-cjk-fonts.py --download` refreshes the existing licensed provider
+route without installing font tooling or retaining upstream CSS responses.
+Unknown future names and other world scripts still require appropriate fallback.
+
 ## playfairdisplay
 
 Source: https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/OFL.txt

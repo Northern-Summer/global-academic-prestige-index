@@ -1,8 +1,8 @@
+@import './fonts/cjk.css';
 @font-face{font-family:'Playfair Display';font-style:normal;font-weight:400 600;font-display:swap;src:url('./fonts/playfair.woff2') format('woff2')}
 @font-face{font-family:'Playfair Display';font-style:italic;font-weight:400 600;font-display:swap;src:url('./fonts/playfair-italic.woff2') format('woff2')}
 @font-face{font-family:'DM Sans';font-style:normal;font-weight:400 700;font-display:swap;src:url('./fonts/sans.woff2') format('woff2')}
 @font-face{font-family:'DM Mono';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/mono.woff2') format('woff2')}
-@font-face{font-family:'GAPI Song';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/song.woff2') format('woff2')}
 
 :root{font-family:'DM Sans',Arial,sans-serif;color:#1e2e2a;background:#f4f2eb;font-synthesis:none;text-rendering:optimizeLegibility;--ink:#1e2e2a;--muted:#717a72;--line:#d8d8cf;--paper:#fbfaf6;--teal:#286d60;--rust:#bd6f50;--mono:'DM Mono',monospace;--serif:'Playfair Display',Georgia,serif;--shell:1280px}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;min-width:320px}button,input,select{font:inherit}button,select,input{color:inherit}a{color:inherit}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,.table-wrap:focus-visible{outline:3px solid #d27755;outline-offset:3px}::selection{background:#bad7cb;color:#173a33}.shell{width:min(var(--shell),calc(100% - 80px));margin-inline:auto}
