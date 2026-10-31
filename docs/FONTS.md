@@ -4,8 +4,8 @@ Fonts are served with the site. No Google Fonts request is made by the browser. 
 
 2026-10-31 correction: the hosted Linux browser exposed missing Chinese glyphs
 despite loaded-font assertions. Two explicit Unicode delivery subsets now cover
-the 425 Chinese/punctuation characters in current UI sources and the public
-historical institution corpus. These are also fallback faces for DM Sans and DM
+the 649 Chinese/punctuation characters in current UI sources, the selected public
+data and Intl country/region names. These are also fallback faces for DM Sans and DM
 Mono, so body text and controls do not depend on an installed system CJK font.
 The Latin faces and 400-weight Chinese headings retain their established style.
 `web/fonts/cjk-coverage.json` binds subset hashes, codepoints and provider URLs.
