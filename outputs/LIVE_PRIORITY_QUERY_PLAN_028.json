@@ -1,0 +1,50 @@
+[
+  [
+    4,
+    0,
+    62,
+    "SEARCH e USING INDEX events_member (source=?)"
+  ],
+  [
+    12,
+    0,
+    0,
+    "CORRELATED SCALAR SUBQUERY 1"
+  ],
+  [
+    17,
+    12,
+    39,
+    "SEARCH m USING INDEX sqlite_autoindex_members_1 (source=? AND locator=?)"
+  ],
+  [
+    36,
+    0,
+    0,
+    "CORRELATED SCALAR SUBQUERY 2"
+  ],
+  [
+    41,
+    36,
+    39,
+    "SEARCH m USING INDEX sqlite_autoindex_members_1 (source=? AND locator=?)"
+  ],
+  [
+    63,
+    0,
+    0,
+    "CORRELATED SCALAR SUBQUERY 3"
+  ],
+  [
+    68,
+    63,
+    62,
+    "SEARCH m USING INDEX sqlite_autoindex_members_1 (source=?)"
+  ],
+  [
+    96,
+    0,
+    0,
+    "USE TEMP B-TREE FOR DISTINCT"
+  ]
+]

@@ -127,6 +127,7 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 'members_per_second':round(completed/elapsed,4) if elapsed>0 else None,
                 'storage_bytes':store.task.used(),'deferred_this_batch':retried,
                 'storage_contended':storage_contended,
+                'priority_deferred':getattr(store,'last_priority_deferred',False),
                 'stage_time_exhausted':stage_exhausted,'suspended_this_run':command in suspended}
             stages.append(item)
             if progress:progress(item)

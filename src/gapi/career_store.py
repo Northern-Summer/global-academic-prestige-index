@@ -197,34 +197,54 @@ class CareerStore:
         reserved=min(len(due),max(1,limit//4))
         fresh=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
             ORDER BY d.identifier LIMIT ?''',(*parameters,limit-reserved))]
+        self.last_priority_deferred = False
         if priority_source and len(fresh)>1:
-            from .orcid_stream import private_person
-            from .career_rules import valid_orcid
-            linked=set()
-            for (person,) in self.db.execute('SELECT DISTINCT person FROM official_profile_subjects'):
-                linked.add(person)
-                if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
-            official=set(linked)
-            for (person,) in self.db.execute('''SELECT DISTINCT e.person FROM events e
-                WHERE e.source=? AND '''+member_evidence_sql(),(priority_source,)):
-                linked.add(person)
-                if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
-            self.task.check_memory()
-            def linked_priority(identifier):
-                if not valid_orcid(identifier):return 0
-                person=private_person(identifier)
-                return 2 if person in official else int(person in linked)
-            self.db.create_function('gapi_linked_person',1,linked_priority,deterministic=True)
+            # Optional priority must not consume the acquisition deadline. Source
+            # facts and queue membership remain untouched when it is deferred.
+            until = time.monotonic() + 2
+            timed_out = False
+            def limit_priority():
+                nonlocal timed_out
+                timed_out = time.monotonic() >= until
+                return int(timed_out)
+            self.db.set_progress_handler(limit_priority, 1000)
             try:
-                priority=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
-                    AND gapi_linked_person(d.identifier)>0 ORDER BY gapi_linked_person(d.identifier) DESC,d.identifier LIMIT ?''',
-                    (*parameters,len(fresh)//2))]
-            finally:self.db.create_function('gapi_linked_person',1,None)
-            # Keep ordinary fresh work and reserved due retries moving. Only a
-            # bounded half of fresh slots prefers an existing stable-person link.
+                priority = self._linked_priority(query, parameters, priority_source, len(fresh)//2)
+            except sqlite3.OperationalError as exc:
+                if not timed_out or getattr(exc, 'sqlite_errorcode', None) != sqlite3.SQLITE_INTERRUPT:
+                    raise
+                priority = []
+                self.last_priority_deferred = True
+            finally:
+                self.db.set_progress_handler(None, 0)
             preferred=set(priority)
             fresh=(priority+[identifier for identifier in fresh if identifier not in preferred])[:len(fresh)]
         return due[:reserved]+fresh+due[reserved:limit-len(fresh)]
+
+    def _linked_priority(self, query, parameters, priority_source, slots):
+        from .orcid_stream import private_person
+        from .career_rules import valid_orcid
+        linked=set()
+        for (person,) in self.db.execute('SELECT DISTINCT person FROM official_profile_subjects'):
+            linked.add(person)
+            if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
+        official=set(linked)
+        for (person,) in self.db.execute('''SELECT DISTINCT e.person FROM events e
+            WHERE e.source=? AND '''+member_evidence_sql(),(priority_source,)):
+            linked.add(person)
+            if len(linked)>200000:raise BudgetStop('linked-person priority exceeds bounded selection')
+        self.task.check_memory()
+        def linked_priority(identifier):
+            if not valid_orcid(identifier):return 0
+            person=private_person(identifier)
+            return 2 if person in official else int(person in linked)
+        self.db.create_function('gapi_linked_person',1,linked_priority,deterministic=True)
+        try:
+            priority=[r[0] for r in self.db.execute(query+''' AND r.identifier IS NULL
+                AND gapi_linked_person(d.identifier)>0 ORDER BY gapi_linked_person(d.identifier) DESC,d.identifier LIMIT ?''',
+                (*parameters,slots))]
+        finally:self.db.create_function('gapi_linked_person',1,None)
+        return priority
 
     def defer(self, command, identifier, reason, *, now=None):
         """Persist finite backoff without dropping evidence or blocking fresh candidates."""

@@ -162,6 +162,33 @@ class CollectionTests(unittest.TestCase):
             with self.assertRaises(ValueError):s.pending('ingest-wikidata',priority_source='wikidata')
         finally:s.close()
 
+    def test_priority_deadline_preserves_fresh_retry_queue_and_releases_handler(self):
+        from unittest.mock import patch
+        s=self.store(archive([]))
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-orcid-api',str(n),'a','b') for n in range(10)])
+            s.defer('ingest-orcid-api','9','retry',now=100)
+            expected=s.pending('ingest-orcid-api',4,now=160)
+            before=list(s.db.execute('SELECT * FROM discovery_retries'))
+            def expensive(*args):
+                return list(s.db.execute('''WITH RECURSIVE n(x) AS
+                    (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<100000)
+                    SELECT sum(x) FROM n'''))
+            with patch.object(s,'_linked_priority',side_effect=expensive), \
+                 patch('gapi.career_store.time.monotonic',side_effect=[0]+[3]*100):
+                self.assertEqual(s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata'),expected)
+            self.assertTrue(s.last_priority_deferred)
+            self.assertEqual(before,list(s.db.execute('SELECT * FROM discovery_retries')))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery').fetchone()[0],10)
+            self.assertEqual(s.pending('ingest-orcid-api',4,now=160),expected)
+            self.assertFalse(s.last_priority_deferred)
+            with patch.object(s,'_linked_priority',side_effect=__import__('sqlite3').OperationalError('other error')):
+                with self.assertRaisesRegex(__import__('sqlite3').OperationalError,'other error'):
+                    s.pending('ingest-orcid-api',4,now=160,priority_source='wikidata')
+        finally:s.close()
+
     def test_candidate_progress_keeps_failures_and_missing_world_denominator(self):
         s=self.store(archive([]))
         try:
