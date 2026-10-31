@@ -107,13 +107,24 @@ def commands(old, new):
             for _ in range(skip):left.popleft();yield 'S',None
             for _ in range(add):yield 'A',right.popleft()
         else:
+            # Tables are emitted in name order. A long insertion must not
+            # consume the next table's unchanged rows while seeking an anchor.
+            # This only selects exact copy/skip/add operations; final stream
+            # hashes still validate every reconstructed byte.
+            a=json.loads(left[0]);b=json.loads(right[0])
+            at=a.get('t') if isinstance(a,dict) else None
+            bt=b.get('t') if isinstance(b,dict) else None
+            if isinstance(at,str) and isinstance(bt,str) and at!=bt:
+                if at<bt:left.popleft();yield 'S',None
+                else:yield 'A',right.popleft()
+                continue
             left.popleft();yield 'S',None
             yield 'A',right.popleft()
 
 
 def freeze_delta(store, filename):
     from .row_snapshot import FORMAT as ROW_FORMAT, inspect, ranking_lines, lines
-    task=store.task;task.check(1024**2);task.check_memory()
+    task=store.task;initial_used=task.check(1024**2);task.check_memory()
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
     base_path=baseline(task,filename);folder=base_path.parent
     temporary=folder/'normalized-row-delta.xz.partial'
@@ -129,10 +140,15 @@ def freeze_delta(store, filename):
         with temporary.open('xb') as output:
             created=True
             encoder=lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+            written=0
+            def write(packed):
+                nonlocal written
+                task.check(len(packed)+65536,minimum_used=initial_used+written)
+                task.check_memory();output.write(packed);written+=len(packed)
             def emit(value):
                 packed=encoder.compress(value)
                 if packed:
-                    task.check(len(packed)+65536);task.check_memory();output.write(packed)
+                    write(packed)
             emit(canonical({'format':FORMAT,'base':filename})+b'\n')
             old=lines(base_path,task);new=ranking_lines(store)
             operation=None;run=0
@@ -149,7 +165,7 @@ def freeze_delta(store, filename):
             if old_hash.hexdigest()!=base_path.name[:64]:raise ValueError('row baseline identity mismatch')
             checksum=new_hash.hexdigest()
             emit(b'F '+canonical({'sha256':checksum,'bytes':total})+b'\n')
-            packed=encoder.flush();task.check(len(packed)+65536);output.write(packed)
+            packed=encoder.flush();write(packed)
             output.flush();os.fsync(output.fileno())
         # Name-independent full reconstruction validates both inputs before promotion.
         if inspect_delta(temporary,task)!=(checksum,total):raise ValueError('row delta verification failed')

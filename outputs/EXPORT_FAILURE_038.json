@@ -1,0 +1,11 @@
+{
+  "failure": "export blocked after new delta file close; no public manifest replacement",
+  "discarded_file": "13d78f56ca76216f2265437b64b3b1672b54523aba58e4849c068a85d932a065.rows.delta.xz",
+  "packed_bytes": 140613280,
+  "packed_sha256": "c870ecb503159c7578a7c5cc368a5143232e8f3c9b70f1ec1ef75b27c99feacf",
+  "logical_sha256": "13d78f56ca76216f2265437b64b3b1672b54523aba58e4849c068a85d932a065",
+  "rebuild_source": "retained live careers.sqlite plus immutable full rows baseline",
+  "old_public_manifest_preserved": true,
+  "historical_inputs_removed": false,
+  "regeneration_required": true
+}

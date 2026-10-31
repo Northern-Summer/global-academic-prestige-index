@@ -47,6 +47,27 @@ class AnalysisTests(unittest.TestCase):
                 self.assertIsNone(node['formal_rank'])
         finally:s.close()
 
+    def test_streamed_directory_labels_match_previous_sorted_query(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:
+                s.db.execute("UPDATE events SET payload=json_set(gapi_event_text(payload),'$.institution_name',id)")
+            actual=rank_global(s,public=True)
+            sql='SELECT institution,payload,country,source FROM events WHERE institution IS NOT NULL ORDER BY id'
+            plan=[row[-1] for row in s.db.execute('EXPLAIN QUERY PLAN '+sql)]
+            self.assertFalse(any('TEMP B-TREE' in step for step in plan))
+            original=s.db
+            class PreviousQuery:
+                def execute(self,query,*args):
+                    if query==sql:query=sql.replace('ORDER BY id','ORDER BY institution,id')
+                    return original.execute(query,*args)
+                def __getattr__(self,key):return getattr(original,key)
+            s.db=PreviousQuery()
+            try:self.assertEqual(rank_global(s,public=True),actual)
+            finally:s.db=original
+        finally:s.close()
+
     def test_versioned_noncommercial_publication_policy_allows_only_aggregate_fields(self):
         from pathlib import Path
         s=self.store(archive([]))

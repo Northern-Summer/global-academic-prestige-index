@@ -98,3 +98,34 @@ archive, with one immutable retained full baseline, exact line operations and
 complete baseline/target hash checks. This avoids another full copy when most
 rows are unchanged. Test and real-scale results must be recorded separately;
 implementation alone does not establish a capacity gain.
+
+## Release refresh regression and repair
+
+The next real refresh exposed a long-insertion alignment failure: a new delta
+grew to 140,613,280 packed bytes, and export was refused after file close.
+The old public manifest remained intact. The newly generated, unreferenced delta
+was removed after recording its packed hash; the live input, full baseline and
+every historical recovery input remain. See `outputs/EXPORT_FAILURE_038.json`.
+
+Windows directory enumeration had not reflected the full open-file growth.
+Full and delta row writers now supply initial usage plus bytes actually written
+as a lower bound to the existing task budget gate, including compressor flush.
+No budget or reserve was increased. Delta alignment also preserves table-name
+boundaries across insertions longer than its bounded lookahead, so unchanged
+following tables can be copied. Reconstruction and both complete hashes remain
+the acceptance boundary; the optimization never infers or drops input facts.
+
+Regression coverage includes stale enumeration and insertion of 199 rows before
+an unchanged following table. All 347 Python tests passed after the repair.
+Real-scale retry and publication outcomes must be recorded separately; these
+test results alone do not establish the new archive size or successful release.
+
+The real retry reconstructed the same logical input hash and produced an
+17,973,232-byte delta, versus the failed 140,613,280-byte representation.
+Scoring then reached a previously hidden SQLite memory ceiling: its fallback
+label query sorted complete event payloads by institution and event ID. Reading
+the existing event-ID index instead preserves the first eligible ID per
+institution, while avoiding that population-sized payload sort. A differential
+test compares complete outputs with the previous query and verifies the new
+query plan has no temporary sort. All 348 Python tests passed. The verified
+delta is retained; the failed scoring attempt did not replace the public manifest.

@@ -143,3 +143,28 @@ class RowDeltaTests(unittest.TestCase):
                 self.assertFalse(verified_packed_snapshot(s,path))
                 with self.assertRaises(ValueError):inspect(path,s.task)
         finally:s.close()
+
+    def test_long_table_insert_retains_next_unchanged_table(self):
+        def row(table,i):return canonical({'t':table,'v':[['v',i]]})+b'\n'
+        common=[row('z',i) for i in range(100)]
+        old=[row('a',0)]+common
+        new=[row('a',i) for i in range(200)]+common
+        emitted=list(commands(iter(old),iter(new)));position=0;result=[]
+        for op,value in emitted:
+            if op=='C':result.append(old[position]);position+=1
+            elif op=='S':position+=1
+            else:result.append(value)
+        self.assertEqual(result,new)
+        self.assertEqual(position,len(old))
+        self.assertEqual(sum(op=='C' for op,_ in emitted),101)
+
+    def test_open_file_growth_floor_survives_stale_directory_size(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            initial=s.task.used()
+            available=s.task.config['budget_bytes']-s.task.config['reserve_bytes']
+            with patch.object(s.task,'used',return_value=initial):
+                with self.assertRaises(BudgetStop):
+                    s.task.check(1,minimum_used=available)
+                self.assertEqual(s.task.check(0,minimum_used=initial+100),initial+100)
+        finally:s.close()

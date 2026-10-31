@@ -103,8 +103,11 @@ class Task:
             total += tree_size(directory, strict=False)
         return total
 
-    def check(self, anticipated: int = 0) -> int:
-        used = self.used()
+    def check(self, anticipated: int = 0, *, minimum_used: int = 0) -> int:
+        # Windows directory enumeration may retain a writer's pre-open size.
+        # Streaming writers supply their initial usage plus bytes written as
+        # a floor; fresh enumeration still accounts for all other artifacts.
+        used = max(self.used(), minimum_used)
         needed = self.config["reserve_bytes"] + anticipated
         if used + needed > self.config["budget_bytes"] or shutil.disk_usage(self.root).free < needed:
             raise BudgetStop(f"storage admission stopped: used={used}, anticipated={anticipated}, reserve={needed-anticipated}")

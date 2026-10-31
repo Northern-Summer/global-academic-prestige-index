@@ -243,7 +243,10 @@ def rank_global(store, *, public=False, publication_policy=None):
     network, convergence = pagerank(nodes, dict(sorted(edges.items())), .85, 1e-12, 200)
     directory = {r[0]: (r[1], r[2], json.loads(r[3])) for r in store.db.execute("SELECT id,name,country,payload FROM entities")}
     # A reported label is presentation only, never a name-based identity merge.
-    for institution, payload, country, source in store.db.execute("SELECT institution,payload,country,source FROM events WHERE institution IS NOT NULL ORDER BY institution,id"):
+    # The first eligible ID per institution owns its fallback label. Global ID
+    # order gives the same per-institution minimum without sorting all payloads
+    # in SQLite's bounded memory workspace.
+    for institution, payload, country, source in store.db.execute("SELECT institution,payload,country,source FROM events WHERE institution IS NOT NULL ORDER BY id"):
         if allowed is not None and source not in allowed:
             continue
         reported = json.loads(payload).get("institution_name")

@@ -106,7 +106,7 @@ def freeze_rows(store, *, base_filename=None):
         from .row_delta import freeze_delta
         return freeze_delta(store,base_filename)
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
-    task = store.task;task.check(1024**2);task.check_memory()
+    task = store.task;initial_used=task.check(1024**2);task.check_memory()
     folder = task.root/'frozen-inputs'
     if folder.is_symlink() or getattr(folder, 'is_junction', lambda:False)():
         raise ValueError('linked snapshot directory forbidden')
@@ -117,18 +117,22 @@ def freeze_rows(store, *, base_filename=None):
         with temporary.open('xb') as output:
             created = True
             encoder = lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
+            written=0
+            def write(packed):
+                nonlocal written
+                task.check(len(packed)+65536,minimum_used=initial_used+written)
+                task.check_memory();output.write(packed);written+=len(packed)
             def emit(line):
                 nonlocal decoded
                 sha.update(line);decoded += len(line)
                 packed = encoder.compress(line)
                 if packed:
-                    task.check(len(packed)+65536);task.check_memory()
-                    output.write(packed)
+                    write(packed)
             source=ranking_lines(store)
             try:
                 for value in source:emit(value)
             finally:source.close()
-            tail = encoder.flush();task.check(len(tail)+65536);output.write(tail)
+            tail = encoder.flush();write(tail)
             output.flush();os.fsync(output.fileno())
         checksum = sha.hexdigest()
         if inspect(temporary,task)!=(checksum,decoded):raise ValueError('row archive verification failed')
