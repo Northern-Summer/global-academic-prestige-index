@@ -1,0 +1,73 @@
+{
+  "schema_version": "gapi-orcid-transport-comparison/v1",
+  "retrieved_at": "2026-10-31T06:53:06.338267+00:00",
+  "selection": "first pending candidates; bounded diagnostic, not representative",
+  "raw_saved": false,
+  "career_events_written": false,
+  "samples": [
+    {
+      "sections": {
+        "seconds": 3.156,
+        "bytes": 5469,
+        "events": 1,
+        "requests": 2
+      },
+      "record": {
+        "seconds": 1.86,
+        "bytes": 51169,
+        "events": 1,
+        "requests": 1
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "record": {
+        "seconds": 1.375,
+        "bytes": 41650,
+        "events": 1,
+        "requests": 1
+      },
+      "sections": {
+        "seconds": 1.422,
+        "bytes": 4650,
+        "events": 1,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "sections": {
+        "seconds": 2.172,
+        "bytes": 5213,
+        "events": 1,
+        "requests": 2
+      },
+      "record": {
+        "seconds": 1.421,
+        "bytes": 11038,
+        "events": 1,
+        "requests": 1
+      },
+      "equal_extracted_fields": true
+    },
+    {
+      "record": {
+        "seconds": 3.172,
+        "bytes": 49024,
+        "events": 1,
+        "requests": 1
+      },
+      "sections": {
+        "seconds": 2.297,
+        "bytes": 4904,
+        "events": 1,
+        "requests": 2
+      },
+      "equal_extracted_fields": true
+    }
+  ],
+  "status": "completed",
+  "used_bytes": 1634327856,
+  "headroom_after_reserve": 244720336,
+  "working_set_bytes": 43556864
+}

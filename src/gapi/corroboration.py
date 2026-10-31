@@ -32,9 +32,9 @@ def _fact(event, institution):
     row = dict(event, institution=institution)
     if event['source'] == 'orcid-public-api':
         row['kind'], row['stage'] = classify(row['kind'], row.get('role'), completed_only=True)
-        interpreted = interpretation(event)
-        if interpreted is not None:
-            row['kind'], row['stage'], row['status'], _ = interpreted
+    interpreted = interpretation(event)
+    if interpreted is not None:
+        row['kind'], row['stage'], row['status'], _ = interpreted
     if row['status'] not in ('observed', 'corroborated') or not row.get('stage'):
         return None
     if not institution or not institution.startswith('ror:'):

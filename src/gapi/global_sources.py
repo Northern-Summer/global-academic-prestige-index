@@ -14,6 +14,9 @@ from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
 from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS, WIKIDATA_BATCH_LIMIT
 
+# Historical acquisition/v1 mapping, frozen by sources.lock.json. Q177232 was
+# incorrectly included. career_normalization's versioned derived policy owns the
+# correction and reviewed vocabulary; changing raw acquisition would break replay.
 DEGREES = {"Q752297": "doctorate", "Q849697": "doctorate", "Q177232": "master", "Q163727": "bachelor"}
 
 

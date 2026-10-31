@@ -34,6 +34,56 @@ class NormalizationTests(unittest.TestCase):
         missing=self.event('B.S.'); missing['year_end']=None
         self.assertIsNone(interpretation(missing))
 
+    def wd_event(self, *degrees, stage=None, status='unresolved', end=2000):
+        event = self.event(None)
+        event.update(source='wikidata', stage=stage, status=status, year_end=end,
+            qualifiers={'P512': [{'datavalue': {'value': {'id': qid}}} for qid in degrees]})
+        return event
+
+    def test_reviewed_wikidata_degrees_and_historical_wrong_identifier(self):
+        for qid, stage in [('Q183816','master'),('Q950900','master'),('Q2091008','master'),
+                           ('Q1765120','bachelor'),('Q787674','bachelor'),('Q798132','bachelor')]:
+            with self.subTest(qid=qid):
+                self.assertEqual(interpretation(self.wd_event(qid)),('education',stage,'observed',-2))
+        self.assertEqual(interpretation(self.wd_event('Q177232',stage='master',status='observed')),
+                         ('education',None,'unresolved',-2))
+        for degrees in [('Q913404',),('Q752297','Q913404'),('Q752297','Q183816'),()]:
+            with self.subTest(degrees=degrees):
+                self.assertEqual(interpretation(self.wd_event(*degrees,stage='doctorate',status='observed')),
+                                 ('education',None,'unresolved',-2))
+        self.assertEqual(interpretation(self.wd_event('Q950900',end=None)),('education','master','unresolved',-2))
+        self.assertIsNone(interpretation(self.wd_event('Q950900',status='rejected')))
+        self.assertEqual(interpretation(self.wd_event('Q183816','Q950900'))[1],'master')
+
+    def test_wikidata_degree_correction_controls_edges_and_denominator_idempotently(self):
+        s=self.store(archive([]))
+        try:
+            s.start('wikidata')
+            false_degree=self.wd_event('Q177232',stage='master',status='observed')
+            valid_degree=self.wd_event('Q950900')
+            valid_degree['person']='valid-private'
+            for training in (false_degree, valid_degree):
+                job=dict(training,kind='employment',stage='academic',status='observed',
+                         institution='ror:01mrfdz82',year_start=2005,year_end=None,qualifiers={})
+                with s.member('wikidata','x'):
+                    s.event(training);s.event(job);s.finish_member('wikidata','x','a'*64)
+            before=list(s.db.execute('SELECT * FROM events ORDER BY id'))
+            self.assertEqual(rank_global(s)['edges'][0]['stages'],{'master':0.35})
+            self.assertEqual(normalize_careers(s)['interpreted_events'],2)
+            result=rank_global(s)
+            self.assertEqual(len(result['edges']),1)
+            self.assertEqual(result['edges'][0]['stages'],{'master':0.35})
+            from gapi.global_analysis import relation_rows
+            self.assertEqual([pair[1]['person'] for pair in relation_rows(s)],['valid-private'])
+            node=next(n for n in result['nodes'] if n['institution_id']==valid_degree['institution'])
+            self.assertEqual(node['observed_training_denominator'],1)
+            public=rank_global(s,public=True)
+            self.assertEqual(public['algorithm']['normalization_policy']['interpreted_events'],2)
+            self.assertEqual(before,list(s.db.execute('SELECT * FROM events ORDER BY id')))
+            normalize_careers(s)
+            self.assertEqual(canonical(rank_global(s)),canonical(result))
+        finally:s.close()
+
     def test_new_interpretation_keeps_raw_events_immutable_and_denominator_consistent(self):
         s=self.store(archive([]))
         try:

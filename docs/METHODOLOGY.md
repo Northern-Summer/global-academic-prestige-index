@@ -11,11 +11,17 @@ separate. Historical bytes require their recorded code revision and frozen input
 new methodology does not silently preserve a defect to manufacture matching hashes.
 
 `normalize-careers` writes separately versioned deterministic interpretations,
-preserving original events. `career-interpretation/3` recognizes a narrow
+preserving original events. `career-interpretation/4` recognizes a narrow
 full-label vocabulary and marks explicitly unfinished/nondegree studies
 unresolved. It does not promote observations to independent corroboration. Its
 hash/count enter the output; intensity uses the same interpreted training
 population. A vocabulary cannot resolve all languages or prove a person's claim.
+Version 4 also interprets explicit Wikidata P512 degree qualifiers through a
+[reviewed, pinned identifier vocabulary](WIKIDATA_DEGREES.md). It corrects the
+legacy Q177232 mapping, adds common bachelor/master identifiers, and leaves
+unknown, conflicting or professional medical qualifications unresolved. Old raw
+events and released outputs remain unchanged; reruns use the declared code and
+interpretation version, not whichever vocabulary is newest.
 
 Reference scores appear as shares of the frozen network, not employment rates.
 Direct contributions are `alpha * r_y * W_yx / sum_x W_yx`; the remainder is uniform

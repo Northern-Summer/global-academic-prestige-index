@@ -12,7 +12,18 @@ import re
 from .career_rules import classify, normalized, EXCLUSIONS, excluded_qualification
 from .task import digest
 
-VERSION = 'career-interpretation/3'
+VERSION = 'career-interpretation/4'
+# Explicit reviewed identifiers only; no transitive traversal of a live ontology.
+# Pinned item definitions and exclusions: docs/WIKIDATA_DEGREES.md.
+# global_sources.DEGREES is the immutable acquisition/v1 interpretation, including
+# its historical error. This versioned derived policy corrects it without changing
+# old events, source locks, evidence hashes or previously frozen releases.
+WIKIDATA_DEGREES = {
+    'Q752297': 'doctorate', 'Q849697': 'doctorate',
+    'Q183816': 'master', 'Q950900': 'master', 'Q2091008': 'master',
+    'Q163727': 'bachelor', 'Q1765120': 'bachelor',
+    'Q787674': 'bachelor', 'Q798132': 'bachelor',
+}
 RULES = (
     ('education', 'bachelor', r'\b(b\.?\s*s\.?|s\.?\s*b\.?)'),
     ('education', 'master', r'\b(m\.?\s*s\.?|s\.?\s*m\.?|masters)'),
@@ -22,7 +33,9 @@ RULES = (
     ('employment', 'academic', r'\b(research associate|(?:senior |staff |visiting |project )?scientist|ricercator[ei]|professeur|profesor(?:a)?|investigador(?:a)?|pesquisador(?:a)?|maître de conférences|maitre de conferences)\b'),
 )
 POLICY_SHA256 = digest({'version': VERSION, 'fills_missing_and_excludes_unfinished': True,
-                        'exclusions': EXCLUSIONS, 'rules': RULES})
+                        'exclusions': EXCLUSIONS, 'rules': RULES,
+                        'wikidata_degrees': WIKIDATA_DEGREES,
+                        'wikidata_conflicts': 'all-explicit-P512-values-must-be-known-and-same-stage'})
 DDL = '''CREATE TABLE IF NOT EXISTS event_interpretations(
     event_id TEXT NOT NULL, rule_version TEXT NOT NULL, policy_sha256 TEXT NOT NULL,
     kind TEXT NOT NULL, stage TEXT, status TEXT NOT NULL, rule_index INTEGER NOT NULL,
@@ -42,6 +55,25 @@ def completed_education_stage(role):
 
 def interpretation(event):
     kind = event['kind']
+    if event['source'] == 'wikidata' and kind == 'education' and 'qualifiers' in event:
+        # P69 alone cannot establish a qualification. Never reuse the legacy
+        # inferred stage when its original qualifiers contradict this policy.
+        qualifiers = event['qualifiers']
+        values = qualifiers.get('P512', []) if isinstance(qualifiers, dict) else []
+        ids = []
+        if isinstance(values, list):
+            for snak in values:
+                value = snak.get('datavalue', {}).get('value') if isinstance(snak, dict) and isinstance(snak.get('datavalue', {}), dict) else None
+                ids.append(value.get('id') if isinstance(value, dict) and isinstance(value.get('id'), str) else None)
+        stages = {WIKIDATA_DEGREES.get(qid) for qid in ids}
+        stage = next(iter(stages)) if ids and None not in stages and len(stages) == 1 else None
+        status = 'observed' if stage and event.get('institution') and event.get('year_end') else 'unresolved'
+        # Rejected records are never revived by a classification vocabulary.
+        if event.get('status') not in ('observed', 'unresolved'):
+            return None
+        if (stage, status) != (event.get('stage'), event.get('status')):
+            return kind, stage, status, -2
+        return None
     if event['source'] != 'orcid-public-api': return None
     text = normalized(event.get('role'))
     if excluded_qualification(text):

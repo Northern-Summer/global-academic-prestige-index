@@ -395,11 +395,18 @@ def rank_global(store, *, public=False, publication_policy=None):
     if projection is not None:
         result['official_award_attribution'] = projection
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
-    if has_interpretations(store) and (allowed is None or 'orcid-public-api' in allowed):
-        interpreted = store.db.execute('SELECT count(*) FROM event_interpretations WHERE rule_version=? AND policy_sha256=?', (VERSION, POLICY_SHA256)).fetchone()[0]
-        result['algorithm']['normalization_policy'] = {'version': VERSION, 'policy_sha256': POLICY_SHA256,
-            'interpreted_events': interpreted, 'canonical_events_modified': 0,
-            'confidence': 'observed-only; lexical rules do not corroborate facts'}
+    if has_interpretations(store):
+        count_sql = '''SELECT count(*) FROM event_interpretations i JOIN events e ON e.id=i.event_id
+            WHERE i.rule_version=? AND i.policy_sha256=?'''
+        count_params = (VERSION, POLICY_SHA256)
+        if allowed is not None:
+            count_sql += ' AND e.source IN (' + ','.join('?' for _ in allowed) + ')'
+            count_params += tuple(sorted(allowed))
+        interpreted = store.db.execute(count_sql,count_params).fetchone()[0]
+        if interpreted or allowed is None or 'orcid-public-api' in allowed:
+            result['algorithm']['normalization_policy'] = {'version': VERSION, 'policy_sha256': POLICY_SHA256,
+                'interpreted_events': interpreted, 'canonical_events_modified': 0,
+                'confidence': 'observed-only; deterministic interpretations do not corroborate facts'}
     return result
 
 
