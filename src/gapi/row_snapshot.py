@@ -20,7 +20,62 @@ FORMAT = 'gapi-private-ranking-rows/1'
 MAX_LINE = 1024**2
 
 
+def ranking_lines(store):
+    """One deterministic row representation, shared by full and delta archives."""
+    if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
+    def line(record):
+        value=canonical(record)+b'\n'
+        if len(value)>MAX_LINE:raise ValueError('row archive line exceeds bound')
+        return value
+    store.db.execute('BEGIN')
+    try:
+        schema=list(store.db.execute("""SELECT type,name,tbl_name,sql FROM sqlite_master
+            WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"""))
+        if any(kind=='trigger' or sql and 'CREATE VIRTUAL' in sql.upper() for kind,_,_,sql in schema):
+            raise ValueError('triggers and virtual tables forbidden in ranking inputs')
+        if any(name==METADATA_TABLE for _,name,_,_ in schema):
+            raise ValueError('cannot freeze an already scoped input')
+        retained=[(kind,name,table,sql) for kind,name,table,sql in schema
+                  if table not in EXCLUDED_TABLES and sql]
+        excluded={name:store.db.execute('SELECT count(*) FROM '+quoted(name)).fetchone()[0]
+                  for kind,name,_,_ in schema if kind=='table' and name in EXCLUDED_TABLES}
+        metadata={'policy':POLICY,'scope':'global-ranking','excluded_tables':excluded,
+            'acquisition_progress':store.candidate_progress(),'config_sha256':digest(store.task.config),
+            'not_a_full_acquisition_backup':True}
+        yield line({'format':FORMAT,'schema':retained,'metadata':metadata})
+        counts={}
+        for kind,name,_,_ in retained:
+            if kind!='table':continue
+            columns=list(store.db.execute('PRAGMA table_info('+quoted(name)+')'))
+            primary=sorted((row[5],row[1]) for row in columns if row[5])
+            order=','.join(quoted(column) for _,column in primary) if primary else 'rowid'
+            reader=store.db.cursor();reader.row_factory=None;count=0
+            try:
+                for row in reader.execute('SELECT * FROM '+quoted(name)+' ORDER BY '+order):
+                    yield line({'t':name,'v':[['b',base64.b64encode(v).decode('ascii')]
+                        if isinstance(v,bytes) else ['v',v] for v in row]})
+                    count+=1
+            finally:reader.close()
+            counts[name]=count
+        yield line({'end':counts})
+    finally:store.db.rollback()
+
+
+def archive_path(store, filename):
+    from .frozen_input import snapshot_path
+    path=snapshot_path(store,filename)
+    full=path.with_suffix('.rows.xz')
+    return full if full.exists() else path.with_suffix('.rows.delta.xz')
+
+
 def lines(path, task):
+    if path.name.endswith('.rows.delta.xz'):
+        from .row_delta import decoded_lines
+        yield from decoded_lines(path,task)
+    else:yield from _packed_lines(path,task)
+
+
+def _packed_lines(path, task, *, max_line=MAX_LINE):
     from .frozen_input import _snapshot_chunks
     pending = b''
     total = 0
@@ -32,9 +87,9 @@ def lines(path, task):
         pending += chunk
         while b'\n' in pending:
             line, pending = pending.split(b'\n', 1)
-            if len(line) > MAX_LINE:raise ValueError('row archive line exceeds bound')
+            if len(line) > max_line:raise ValueError('row archive line exceeds bound')
             yield line + b'\n'
-        if len(pending) > MAX_LINE:raise ValueError('row archive line exceeds bound')
+        if len(pending) > max_line:raise ValueError('row archive line exceeds bound')
     if pending:raise ValueError('unterminated normalized row archive')
 
 
@@ -46,7 +101,10 @@ def inspect(path, task):
     return sha.hexdigest(), total
 
 
-def freeze_rows(store):
+def freeze_rows(store, *, base_filename=None):
+    if base_filename is not None:
+        from .row_delta import freeze_delta
+        return freeze_delta(store,base_filename)
     if store.db.in_transaction:raise ValueError('cannot freeze unfinished transaction')
     task = store.task;task.check(1024**2);task.check_memory()
     folder = task.root/'frozen-inputs'
@@ -59,48 +117,17 @@ def freeze_rows(store):
         with temporary.open('xb') as output:
             created = True
             encoder = lzma.LZMACompressor(format=lzma.FORMAT_XZ,preset=3)
-            def emit(record):
+            def emit(line):
                 nonlocal decoded
-                line = canonical(record)+b'\n'
-                if len(line)>MAX_LINE:raise ValueError('row archive line exceeds bound')
                 sha.update(line);decoded += len(line)
                 packed = encoder.compress(line)
                 if packed:
                     task.check(len(packed)+65536);task.check_memory()
                     output.write(packed)
-            store.db.execute('BEGIN')
+            source=ranking_lines(store)
             try:
-                schema = list(store.db.execute("""SELECT type,name,tbl_name,sql FROM sqlite_master
-                    WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"""))
-                if any(kind=='trigger' or sql and 'CREATE VIRTUAL' in sql.upper() for kind,_,_,sql in schema):
-                    raise ValueError('triggers and virtual tables forbidden in ranking inputs')
-                if any(name==METADATA_TABLE for _,name,_,_ in schema):
-                    raise ValueError('cannot freeze an already scoped input')
-                retained = [(kind,name,table,sql) for kind,name,table,sql in schema
-                            if table not in EXCLUDED_TABLES and sql]
-                excluded = {name:store.db.execute('SELECT count(*) FROM '+quoted(name)).fetchone()[0]
-                            for kind,name,_,_ in schema if kind=='table' and name in EXCLUDED_TABLES}
-                metadata = {'policy':POLICY,'scope':'global-ranking','excluded_tables':excluded,
-                    'acquisition_progress':store.candidate_progress(),'config_sha256':digest(task.config),
-                    'not_a_full_acquisition_backup':True}
-                emit({'format':FORMAT,'schema':retained,'metadata':metadata})
-                counts = {}
-                for kind,name,_,_ in retained:
-                    if kind!='table':continue
-                    columns = list(store.db.execute('PRAGMA table_info('+quoted(name)+')'))
-                    primary = sorted((row[5],row[1]) for row in columns if row[5])
-                    order = ','.join(quoted(column) for _,column in primary) if primary else 'rowid'
-                    reader = store.db.cursor();reader.row_factory = None
-                    count = 0
-                    try:
-                        for row in reader.execute('SELECT * FROM '+quoted(name)+' ORDER BY '+order):
-                            emit({'t':name,'v':[['b',base64.b64encode(v).decode('ascii')]
-                                if isinstance(v,bytes) else ['v',v] for v in row]})
-                            count += 1
-                    finally:reader.close()
-                    counts[name] = count
-                emit({'end':counts})
-            finally:store.db.rollback()
+                for value in source:emit(value)
+            finally:source.close()
             tail = encoder.flush();task.check(len(tail)+65536);output.write(tail)
             output.flush();os.fsync(output.fileno())
         checksum = sha.hexdigest()
@@ -121,8 +148,8 @@ def freeze_rows(store):
 
 def restore_rows(path, target, task):
     """Restore a verified private archive; no executescript or row SQL allowed."""
-    expected = path.name.removesuffix('.rows.xz')
-    if not re.fullmatch('[a-f0-9]{64}',expected) or inspect(path,task)[0]!=expected:
+    expected = path.name[:64]
+    if not re.fullmatch(r'[a-f0-9]{64}\.rows(?:\.delta)?\.xz',path.name) or inspect(path,task)[0]!=expected:
         raise ValueError('row archive identity mismatch')
     # Caller owns exclusive empty target creation and failure cleanup.
     if target.is_symlink() or not target.is_file() or target.stat().st_size:

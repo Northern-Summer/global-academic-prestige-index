@@ -315,6 +315,24 @@ available beside the live database; the archive is not a claim that full-scale
 local restoration has passed. Raw source responses and excluded acquisition tables
 are not included. This format is a private ranking input, not an acquisition backup.
 
+For later releases, add `--freeze-base HASH.rows` to retain an exact row-stream
+difference against an existing full baseline. `HASH` must identify a retained
+full `HASH.rows.xz`; delta chains are refused. The baseline is never deleted.
+The archive stores copy, skip and exact added-line commands, synchronized with
+at most 32 lines / approximately 5 MiB of lookahead on each side. The difference
+does not infer, merge or alter scientific events. Full baseline and reconstructed
+target SHA-256 identities must both pass before promotion. Missing, changed or
+truncated inputs, malformed commands, trailing data and budget failures reject
+the candidate; owned staging alone is removed. No SQLite staging copy is needed.
+
+The logical filename remains `TARGET_HASH.rows`, physically represented by
+`TARGET_HASH.rows.delta.xz`. Existing restore and quality commands verify the
+reconstructed logical stream. Restoring SQLite still requires separate resource
+admission. A changed scientific record is preserved literally, and skipped rows
+remain recoverable in the immutable baseline. Repeated identical inputs preserve
+the archive identity and mtime. No additional compression benefit is guaranteed;
+admission remains subject to the same task budget even when a difference grows.
+
 For historical reproduction, `--freeze-input` creates a content-addressed private
 SQLite projection of normalized events/evidence/crosswalks in the external task's
 `frozen-inputs` directory. These are structured computation inputs, not original

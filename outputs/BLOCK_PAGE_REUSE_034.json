@@ -1,0 +1,23 @@
+{
+  "scope": "RAM-only real-row compact-block page reuse pilot; no live migration",
+  "rows": 20000,
+  "before": {
+    "total": 1471,
+    "free": 0,
+    "page_size": 4096
+  },
+  "after": {
+    "total": 1471,
+    "free": 176,
+    "page_size": 4096
+  },
+  "verified_logical_rows": 20000,
+  "net_reusable_bytes": 720896,
+  "physical_file_bytes_reclaimed": 0,
+  "random_person_lookups": 1000,
+  "source_order_decode_seconds": 1.188,
+  "random_lookup_seconds": 0.078,
+  "elapsed_seconds": 1.875,
+  "raw_saved": false,
+  "migration_performed": false
+}

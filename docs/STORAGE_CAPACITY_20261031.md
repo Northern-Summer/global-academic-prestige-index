@@ -3,7 +3,9 @@
 The collection goal remains active. The current event acquisition and the fully
 scanned Easy ORCID 2023 derivative are separate datasets. Neither queue progress
 nor a completed source scan is a denominator for the world's academic personnel.
-The latest selected public score release remains frozen at 101,915 events.
+At the initial investigation, the selected public slice contained 101,915 events.
+Release 0.2.12 subsequently advanced that slice to 123,077 events using a verified
+streaming row archive; see its release notes and manifest for the frozen identity.
 
 ## Measured publication constraint
 
@@ -67,3 +69,32 @@ neither proved collection failure nor authorized a duplicate collector.
 This investigation does not change the scientific ranking policy, publication
 rights, web typography, external-review status or resource ceilings. No new
 release is needed solely to publish these local capacity diagnostics.
+
+## Follow-up measurements
+
+Content-defined binary chunks were also tested read-only on the two largest
+historical SQLite inputs. Full decoded hashes matched. Chunk/reference storage
+was estimated at 255,725,863 bytes, exceeding the existing 173,766,712 bytes by
+81,959,151 bytes even before container overhead. Reject this representation;
+no archive migration was performed (`outputs/CHUNK_DEDUP_FEASIBILITY_034.json`).
+
+A RAM-only pilot on 20,000 retained Easy ORCID rows grouped decoded payloads in
+32-row blocks, deleting and reinserting at most 1,024 contiguous rows per batch.
+All logical rows and 1,000 sampled person lookups matched. SQLite pages remained
+1,471 total but gained 176 reusable pages (720,896 bytes). This is internal page
+capacity, not reclaimed filesystem space. A complete source-order decode took
+1.188 seconds and sampled lookups took 0.078 seconds in this pilot. No production
+migration or population-wide saving claim follows from this small ordered sample
+(`outputs/BLOCK_PAGE_REUSE_034.json`).
+
+Two inactive, publicly versioned institution slices were instead losslessly
+archived as gzip after decoded SHA-256 and original public Git object checks.
+The active slice and every private recovery input were retained. The measured
+logical reduction was 19,742,001 bytes, with both exact compressed restoration
+and the original public commit available (`outputs/PUBLIC_ARCHIVE_CLEANUP_034.json`).
+
+Subsequent row differences use the same logical input stream as the full row
+archive, with one immutable retained full baseline, exact line operations and
+complete baseline/target hash checks. This avoids another full copy when most
+rows are unchanged. Test and real-scale results must be recorded separately;
+implementation alone does not establish a capacity gain.

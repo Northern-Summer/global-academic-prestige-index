@@ -100,6 +100,7 @@ def register(sub):
             parser.add_argument("--out", type=Path, default=Path("outputs/global"))
             parser.add_argument('--publication-policy',type=Path)
             parser.add_argument('--freeze-format',choices=('sqlite','rows'),default='sqlite')
+            parser.add_argument('--freeze-base',help='retained full HASH.rows baseline for bounded row differences')
             group=parser.add_mutually_exclusive_group()
             group.add_argument('--freeze-input',action='store_true')
             group.add_argument('--frozen-input',help='private normalized snapshot filename, never a public file')
@@ -276,9 +277,11 @@ def execute_task(task, args):
             from contextlib import nullcontext
             policy=json.loads(args.publication_policy.read_text(encoding='utf-8')) if args.publication_policy else None
             fresh_rows=args.freeze_input and getattr(args,'freeze_format','sqlite')=='rows'
+            base=getattr(args,'freeze_base',None)
+            if base and not fresh_rows:raise ValueError('freeze-base requires freeze-input with row format')
             if fresh_rows:
                 from .row_snapshot import freeze_rows
-                snapshot=freeze_rows(store)
+                snapshot=freeze_rows(store,base_filename=base)
             else:snapshot=freeze_input(store,scope='global-ranking') if args.freeze_input else None
             if args.frozen_input:
                 import re

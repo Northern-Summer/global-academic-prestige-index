@@ -1,0 +1,35 @@
+{
+  "scope": "read-only bounded chunk dedup feasibility; no installed archive format",
+  "samples": [
+    {
+      "snapshot": "663ae485c04c8814542f893e9b96d6f23b61f69d9615cd0e9299de05c17f8c55.sqlite.xz",
+      "raw_bytes": 148021248,
+      "existing_packed_bytes": 75187364,
+      "chunks": 195393,
+      "reused_chunks": 8237,
+      "incremental_chunk_bytes": 112005806,
+      "reference_bytes": 7034148,
+      "hash_verified": true
+    },
+    {
+      "snapshot": "7a49110628bb2040e9de1d7a8c7399702ad378c458779b32189df8f33a04552f.sqlite.xz",
+      "raw_bytes": 192020480,
+      "existing_packed_bytes": 98579348,
+      "chunks": 254582,
+      "reused_chunks": 39327,
+      "incremental_chunk_bytes": 127520957,
+      "reference_bytes": 9164952,
+      "hash_verified": true
+    }
+  ],
+  "existing_bytes": 173766712,
+  "estimated_packed_chunk_and_reference_bytes": 255725863,
+  "estimated_saving": -81959151,
+  "elapsed_seconds": 27.047,
+  "min_chunk": 512,
+  "max_chunk": 4096,
+  "codec": "zlib/6",
+  "raw_saved": false,
+  "migration_performed": false,
+  "extra_container_filesystem_overhead_not_included": true
+}
