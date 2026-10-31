@@ -514,7 +514,11 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         manifest['official_award_source_sha256'] = awards['source_sha256']
         manifest['normalized_award_index_sha256'] = awards['normalized_award_index_sha256']
         manifest['official_award_page_index_sha256'] = awards['page_index_sha256']
-    _write_aggregate(store.task, out/"SHA256SUMS", f"{checksum}  {filename}\n".encode('ascii'))
+    # Repository checksums name the bytes actually retained on disk. The
+    # decoded browser checksum remains output_sha256 in the manifest.
+    retained_sha=repository_snapshot['sha256'] if repository_snapshot else checksum
+    retained_name=repository_snapshot['filename'] if repository_snapshot else filename
+    _write_aggregate(store.task, out/"SHA256SUMS", f"{retained_sha}  {retained_name}\n".encode('ascii'))
     # The manifest is the final reader-visible pointer to an already settled file.
     _write_aggregate(store.task, out/"manifest.json", canonical(manifest))
     return manifest

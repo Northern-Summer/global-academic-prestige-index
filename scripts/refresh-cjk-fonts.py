@@ -28,7 +28,13 @@ def corpus():
         raise ValueError('institution font corpus hash mismatch')
     text += json.dumps(json.loads(raw), ensure_ascii=False)
     current=json.loads((ROOT/'outputs/global/manifest.json').read_text())
-    current_raw=(ROOT/'outputs/global'/current['snapshot']).read_bytes()
+    # Reuse the build's bounded stored/decoded identity owner for both legacy
+    # JSON and compressed repository inputs; this does not download font assets.
+    current_raw=subprocess.check_output(['node','--input-type=module','-e',
+        "import {readFileSync} from 'node:fs';"
+        "import {readReleaseSnapshot} from './scripts/build-provenance.mjs';"
+        "const p='outputs/global/manifest.json';"
+        "process.stdout.write(readReleaseSnapshot(p,JSON.parse(readFileSync(p))).bytes);"],cwd=ROOT)
     if hashlib.sha256(current_raw).hexdigest()!=current['output_sha256']:
         raise ValueError('current observation font corpus hash mismatch')
     text += json.dumps(json.loads(current_raw),ensure_ascii=False)
