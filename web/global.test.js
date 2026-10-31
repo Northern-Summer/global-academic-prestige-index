@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {csv,networkSlice,selectEdges,selectRows,validateGlobal} from './global-data.js';
+import {readFileSync} from 'node:fs';
+import {gunzipSync} from 'node:zlib';
+import {createHash} from 'node:crypto';
+import {MAX_DIRECTORY_NODES,csv,networkSlice,selectEdges,selectRows,validateGlobal} from './global-data.js';
 
 const node = (id,score,country='CN') => ({institution_id:id,name:id,country,network_score:score,award_score:null,composite_score:null,relations:1,corroborated_relations:0,source_classes:[],traceability:null,observed_rank:null,formal_rank:null,rank_range:null,unranked_reasons:['independent_review_pending']});
 const dataset = () => ({schema_version:'gapi-global-observed/v1',dataset_kind:'real/global-public-observations',algorithm:{config:{alpha:.85}},coverage:{events:3,people:1},nodes:[node('a',.7),node('b',.3,'DE'),node('missing',null)],edges:[{source:'b',target:'a',weight:2,stages:{doctorate:2}}]});
@@ -34,11 +37,26 @@ test('real global schema preserves missing scores and rejects synthetic or malfo
 
 test('directory accepts the bounded expanded catalog without relaxing graph caps',()=>{
   const data=dataset();
-  while(data.nodes.length<32768)data.nodes.push(node(`directory-${data.nodes.length}`,null));
-  assert.equal(validateGlobal(data).nodes.length,32768);
+  while(data.nodes.length<MAX_DIRECTORY_NODES)data.nodes.push(node(`directory-${data.nodes.length}`,null));
+  assert.equal(validateGlobal(data).nodes.length,MAX_DIRECTORY_NODES);
   assert.equal(networkSlice(data).nodes.length<=500,true);
   data.nodes.push(node('overflow',null));
   assert.throws(()=>validateGlobal(data),/browser budget/);
+});
+
+test('committed real release fits the directory contract and preserves every table row',()=>{
+  const directory=new URL('../outputs/global/',import.meta.url);
+  const manifest=JSON.parse(readFileSync(new URL('manifest.json',directory),'utf8'));
+  const stored=readFileSync(new URL(manifest.repository_snapshot?.filename??manifest.snapshot,directory));
+  const bytes=manifest.repository_snapshot?.encoding==='gzip'
+    ?gunzipSync(stored,{maxOutputLength:32*1024*1024}):stored;
+  assert.ok(bytes.length<=32*1024*1024);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),manifest.output_sha256);
+  const data=validateGlobal(JSON.parse(bytes));
+  assert.equal(selectRows(data).length,data.nodes.length);
+  const network=networkSlice(data);
+  assert.ok(network.nodes.length<=500);
+  assert.ok(network.edges.length<=2000);
 });
 test('global table search, country, sort and scenario ordering are deterministic',()=>{
   assert.deepEqual(selectRows(dataset(),{country:'DE'}).map(n=>n.institution_id),['b']);

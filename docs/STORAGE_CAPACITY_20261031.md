@@ -412,3 +412,58 @@ does not prove unlimited storage growth or complete global coverage.
 The 371-test Python regression passed in 56.504 seconds. Public score export,
 standalone arithmetic replay, hosted build/browser acceptance and deployment
 readback remain distinct required publication gates.
+
+
+## Release 0.2.20 candidate 085
+
+Export completed within budget: public coverage 179,885 events / 52,661 people,
+34,508 directory institutions / 1,832 scored institutions, 2,058 aggregate edges.
+The gzip aggregate is 968,537 bytes. Independent stdlib replay converged in 131
+iterations, mass 0.9999999999999999, max score error 1.734723475976807e-18 and
+L1 residual 9.24234538728086e-13. Public output hash:
+e6a7e607995700819ca908e7844ba39c18b365f7e0f29c547dd8371c557afc9f.
+Replay does not establish underlying facts or external auditor independence.
+
+The first public-upload runner stopped before mutation because replacing a run
+number had also changed its Git file-mode literal. The allowed regular-file
+mode was corrected explicitly to 100644, and the remote parent was reread before
+resuming. No force push or private local ancestry was uploaded. Verified public
+head is 676894b3ff2b11ab0a022573a6abae320aace079. Only the reviewed output allowlist
+was included, and non-output source bytes matched the tested local source.
+GitHub run 41208705569 was observed in progress; deployment and release settlement
+are still pending at this record. The active collector is continue-086.py,
+native session 88336, and is separate from this frozen candidate.
+
+## Current storage explanation and directory correction (087)
+
+Fresh short read-only queries found 183,163 current events, 2,306,992 retained
+historical career rows and 881,062 discovery candidates. These are separate
+populations; the people shown by the current release are not the database row
+denominator. The external task tree contained 1,783,805,002 bytes, including
+1,303,240,704 bytes of SQLite and 435,403,728 bytes of frozen recovery inputs.
+The existing authoritative budget counter, which also includes repository
+outputs/dist, measured 1,846,080,176 bytes. After the fixed 268,435,456-byte
+reserve, admission headroom was 32,968,016 bytes. SQLite had 45,944,832 bytes
+of internal reusable pages, not physical bytes returned to the filesystem.
+Collection continues, so counts and free pages are point-in-time observations.
+See private outputs/STORAGE_READBACK_087.json for the exact inventory.
+
+The earlier table-allocation inventory (070) measured 584,093,696 bytes for
+easy_careers and 105,095,168 bytes for its person index. Those are historical
+allocation measurements, not fresh per-table measurements. No long dbstat scan,
+VACUUM, raw download, database copy or history deletion was performed while
+the current collector was writing.
+
+The prior publication CI failed at real-observation-build: 34,508 directory
+institutions exceeded the old 32,768-node input guard. The shared directory
+owner now allows at most 65,536 institutions, independently of unchanged
+500-node/2,000-edge rendering caps and the 32 MiB decoded-input bound. This is
+a bounded immediate correction, not an unlimited directory architecture.
+An integrated regression now validates the actual committed release, its hash,
+all directory rows and the rendered graph limits. The 42-test frontend baseline
+passed after the guard change; after adding this regression, all 12 focused
+global tests passed. The real 24,632,711-byte decoded snapshot validated in
+93.0 ms, sorted in 20.7 ms and used a 143,347,712-byte Node process, with
+500 rendered nodes / 547 edges. This is local Node evidence, not hosted browser
+performance or visual acceptance. Hosted CI/build/browser and online readback
+remain required before claiming deployment.

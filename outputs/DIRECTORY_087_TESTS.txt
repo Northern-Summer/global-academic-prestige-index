@@ -1,0 +1,20 @@
+✔ candidate progress preserves scope, failed work and exact count reconciliation (2.631ms)
+✔ real global schema preserves missing scores and rejects synthetic or malformed edges (0.157ms)
+✔ directory accepts the bounded expanded catalog without relaxing graph caps (68.7025ms)
+✔ committed real release fits the directory contract and preserves every table row (168.4109ms)
+✔ global table search, country, sort and scenario ordering are deterministic (0.815ms)
+✔ network retains employer to training direction and enforces rendering caps (1.742ms)
+✔ institution CSV neutralizes formulas and preserves missing values (0.4106ms)
+✔ focused network caps rendering without dropping table relations or changing scores (0.6294ms)
+✔ official award inventory validates counts without imputing university scores (0.3669ms)
+✔ polluted rendered numbers and stage weights fail closed before DOM rendering (0.3488ms)
+✔ share and contribution charts require conserved scores and valid damping (0.2126ms)
+✔ official attribution keeps rational shares exact and identity candidates unpromoted (0.3779ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 383.2761
