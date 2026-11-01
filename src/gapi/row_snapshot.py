@@ -13,6 +13,7 @@ import re
 import sqlite3
 
 from .event_storage import configure_reader, snapshot_payload
+from .evidence_storage import unpack_url
 from .ranking_snapshot import EXCLUDED_TABLES, METADATA_TABLE, POLICY, quoted
 from .task import canonical, digest
 
@@ -50,11 +51,14 @@ def ranking_lines(store):
             primary=sorted((row[5],row[1]) for row in columns if row[5])
             order=','.join(quoted(column) for _,column in primary) if primary else 'rowid'
             payload_column=next((i for i,c in enumerate(columns) if c[1]=='payload'),None) if name=='events' else None
+            url_column=next((i for i,c in enumerate(columns) if c[1]=='url'),None) if name=='member_parts' else None
             reader=store.db.cursor();reader.row_factory=None;count=0
             try:
                 for row in reader.execute('SELECT * FROM '+quoted(name)+' ORDER BY '+order):
                     if name=='events':
                         row=list(row);row[payload_column]=snapshot_payload(store.db,row[payload_column]);row=tuple(row)
+                    if url_column is not None:
+                        row=list(row);row[url_column]=unpack_url(row[url_column]);row=tuple(row)
                     yield line({'t':name,'v':[['b',base64.b64encode(v).decode('ascii')]
                         if isinstance(v,bytes) else ['v',v] for v in row]})
                     count+=1

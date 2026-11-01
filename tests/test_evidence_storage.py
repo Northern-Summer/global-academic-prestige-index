@@ -73,6 +73,43 @@ class EvidenceStorageTests(unittest.TestCase):
         self.assertEqual(args.max_rows, 3)
         self.assertEqual(args.max_seconds, 2)
 
+    def test_shorter_urls_release_pages_without_changing_rowids(self):
+        store = self.store(archive([]))
+        try:
+            with store.db:
+                for i in range(300):
+                    store.db.execute('insert into member_parts values(?,?,?,?,?,?,?)',
+                        ('wikidata', f'item-{i:04}', 'entity-batch/v1',
+                         'https://example.org/?' + 'evidence=unchanged&' * 170,
+                         hashlib.sha256(str(i).encode()).hexdigest(), 1234, '2026-11-01'))
+            original = store.db.execute('select rowid,* from member_parts order by rowid').fetchall()
+            result = repack_urls(store)
+            self.assertEqual(result['repacked_rows'], 300)
+            self.assertGreater(result['net_reusable_bytes'], 0)
+            self.assertEqual(result['physical_file_bytes_reclaimed'], 0)
+            self.assertEqual(store.db.execute('select rowid,* from member_parts order by rowid').fetchall(), original)
+            self.assertEqual(repack_urls(store)['net_reusable_bytes'], 0)
+            self.assertEqual(store.db.execute('pragma quick_check').fetchone()[0], 'ok')
+        finally:
+            store.close()
+
+    def test_reinsert_rejects_unknown_columns_and_incoming_dependencies(self):
+        store = self.store(archive([]))
+        try:
+            self.seed(store)
+            original = store.db.execute('select rowid,* from member_parts order by rowid').fetchall()
+            store.db.execute('create table dependent(source text,locator text,part text, '
+                             'foreign key(source,locator,part) references member_parts(source,locator,part))')
+            with self.assertRaisesRegex(ValueError, 'incoming foreign keys'):
+                repack_urls(store)
+            self.assertEqual(store.db.execute('select rowid,* from member_parts order by rowid').fetchall(), original)
+            store.db.execute('drop table dependent')
+            store.db.execute('alter table member_parts add column extra text')
+            with self.assertRaisesRegex(ValueError, 'columns'):
+                repack_urls(store)
+        finally:
+            store.close()
+
     def test_interrupted_transaction_rollback_and_bounds(self):
         store = self.store(archive([]))
         try:
@@ -102,7 +139,9 @@ class EvidenceStorageTests(unittest.TestCase):
         try:
             self.seed(store)
             expected = store.db.execute('select * from member_parts order by source,locator,part').fetchall()
+            logical_before = hashlib.sha256(b''.join(ranking_lines(store))).hexdigest()
             repack_urls(store)
+            self.assertEqual(hashlib.sha256(b''.join(ranking_lines(store))).hexdigest(), logical_before)
             frozen = freeze_rows(store)
             target = store.task.root / 'restored.sqlite'
             target.touch(exist_ok=False)

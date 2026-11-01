@@ -47,9 +47,10 @@ def unpack_url(value):
 def repack_urls(store, *, after=None, max_rows=10000, max_seconds=30):
     """Bounded primary-key traversal under CareerStore's sole-writer lock.
 
-    Update rows in place to preserve rowids. Freed space within pages can be
-    reused, but is not reported as file deletion. An interrupted batch rolls
-    back; replay is idempotent and the returned key is an explicit checkpoint.
+    Reinsert bounded batches with their original rowids so shorter values can
+    release whole pages, rather than only leaving holes in existing pages.
+    An interrupted batch rolls back; replay is idempotent and the returned key
+    is an explicit checkpoint. Reusable pages are not file deletion.
     """
     if after is None:
         after = ('', '', '')
@@ -62,6 +63,17 @@ def repack_urls(store, *, after=None, max_rows=10000, max_seconds=30):
         raise ValueError('cannot repack unfinished transaction')
     if store.db.execute("select 1 from sqlite_master where type='trigger' and tbl_name='member_parts'").fetchone():
         raise ValueError('evidence migration forbids triggers')
+    columns = ('source', 'locator', 'part', 'url', 'sha256', 'bytes', 'retrieved_at')
+    if tuple(row[1] for row in store.db.execute('pragma table_info(member_parts)')) != columns:
+        raise ValueError('unsupported evidence table columns')
+    from .ranking_snapshot import quoted
+    for (table,) in store.db.execute("select name from sqlite_master where type='table'"):
+        if any(row[2] == 'member_parts' for row in store.db.execute('pragma foreign_key_list(' + quoted(table) + ')')):
+            raise ValueError('evidence migration forbids incoming foreign keys')
+    def allocated_pages():
+        return (store.db.execute('pragma page_count').fetchone()[0]
+                - store.db.execute('pragma freelist_count').fetchone()[0])
+    pages_before = allocated_pages()
     cursor = tuple(after)
     scanned = changed = saved = 0
     deadline = time.monotonic() + max_seconds
@@ -82,8 +94,11 @@ def repack_urls(store, *, after=None, max_rows=10000, max_seconds=30):
                 converted.append((row, candidate))
         if converted:
             with store.member('storage-evidence-url-repack', 'member_parts', max_growth_bytes=2*1024**2):
-                for row, candidate in converted:
-                    store.db.execute('update member_parts set url=? where rowid=?', (candidate, row[0]))
+                replacements = {row[0]: candidate for row, candidate in converted}
+                store.db.executemany('delete from member_parts where rowid=?', [(row[0],) for row in rows])
+                store.db.executemany('insert into member_parts(rowid,source,locator,part,url,sha256,bytes,retrieved_at) values(?,?,?,?,?,?,?,?)',
+                    [(*row[:4], replacements.get(row[0], row[4]), *row[5:]) for row in rows])
+                for row in rows:
                     actual = store.db.execute('''select rowid,source,locator,part,url,sha256,bytes,retrieved_at
                         from member_parts where rowid=?''', (row[0],)).fetchone()
                     expected = (*row[:4], unpack_url(row[4]), *row[5:])
@@ -96,4 +111,5 @@ def repack_urls(store, *, after=None, max_rows=10000, max_seconds=30):
         cursor = tuple(rows[-1][1:4])
     return {'after': list(cursor), 'scanned_rows': scanned, 'repacked_rows': changed,
             'payload_saving_bytes': saved, 'physical_file_bytes_reclaimed': 0,
+            'net_reusable_bytes': (pages_before - allocated_pages()) * store.db.execute('pragma page_size').fetchone()[0],
             'logical_evidence_unchanged': True}
