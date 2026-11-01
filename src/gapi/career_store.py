@@ -19,6 +19,26 @@ from .queue_storage import pack_row
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
 
+def orcid_archive_sources(task):
+    """Annual archives are identified by their frozen transport kind, not year."""
+    return tuple(sorted(source for source,spec in task.config['sources'].items()
+                        if spec.get('kind')=='orcid-summary-tar-gzip'))
+
+
+def verified_archive_sql(task):
+    """Scoring predicate for events aliased e; partial annual sources stay out.
+
+    The bound source registry is shared by relation and denominator queries and
+    the quality audit. Non-archive per-record sources keep their own evidence
+    rules. Missing archive run rows fail closed.
+    """
+    sources=orcid_archive_sources(task)
+    if not sources:return '1',()
+    placeholders=','.join('?' for _ in sources)
+    return (f"(e.source NOT IN ({placeholders}) OR EXISTS(SELECT 1 FROM runs r "
+            "WHERE r.source=e.source AND r.status='verified'))",sources)
+
+
 def bounded_run_detail(detail):
     """Keep control JSON valid; full acquisition errors belong to failures/retries."""
     if not detail:return None

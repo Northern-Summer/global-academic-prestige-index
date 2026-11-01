@@ -47,6 +47,50 @@ class AnalysisTests(unittest.TestCase):
                 self.assertIsNone(node['formal_rank'])
         finally:s.close()
 
+    def test_archive_verification_is_year_independent_and_denominators_match(self):
+        from gapi.global_analysis import relation_rows
+        from gapi.career_store import verified_archive_sql
+        from gapi.career_normalization import DDL,VERSION,POLICY_SHA256
+        sources=('orcid-2025-summary','annual-careers-snapshot')
+        for source in sources:
+            self.config['sources'][source]=dict(self.config['sources']['orcid-2026-summary'])
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            for source in sources:
+                s.start(source)
+                with s.member(source,'summary.xml'):
+                    for kind,stage,role,inst,start,end in (
+                            ('education','doctorate','PhD','wd:Q1',2000,2005),
+                            ('employment','academic','Professor','wd:Q2',2010,None)):
+                        s.event(dict(source=source,person='private-'+source,institution=inst,
+                            kind=kind,stage=stage,role=role,year_start=start,year_end=end,
+                            locator='summary.xml',status='observed',country='CN'))
+                    s.finish_member(source,'summary.xml','c'*64)
+            for enriched in (False,True):
+                if enriched:
+                    s.db.executescript(DDL)
+                    with s.db:
+                        row=s.db.execute("SELECT id,kind,stage,status FROM events WHERE source='wikidata' LIMIT 1").fetchone()
+                        s.db.execute('INSERT INTO event_interpretations VALUES(?,?,?,?,?,?,?)',
+                            (row[0],VERSION,POLICY_SHA256,*row[1:],0))
+                for state,expected_denominator,expected_relations in (
+                        ('provisional',1,1),('failed',1,1),('verified',3,3)):
+                    with self.subTest(enriched=enriched,state=state):
+                        for source in sources:s.status(source,state)
+                        rows=list(relation_rows(s))
+                        self.assertEqual(len(rows),expected_relations)
+                        result=rank_global(s)
+                        node=next(n for n in result['nodes'] if n['institution_id']=='wd:Q1')
+                        self.assertEqual(node['observed_training_denominator'],expected_denominator)
+                        self.assertAlmostEqual(sum(n['network_score'] or 0 for n in result['nodes']),1)
+            with s.db:s.db.execute('DELETE FROM runs WHERE source=?',(sources[0],))
+            predicate,params=verified_archive_sql(s.task)
+            rejected=s.db.execute('SELECT count(*) FROM events e WHERE NOT '+predicate,params).fetchone()[0]
+            self.assertEqual(rejected,2)
+            self.assertEqual(len(list(relation_rows(s))),2)
+        finally:s.close()
+
     def test_streamed_directory_labels_match_previous_sorted_query(self):
         s=self.store(archive([]))
         try:

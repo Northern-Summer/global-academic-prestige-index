@@ -81,9 +81,20 @@ still require a complete pass. The time limit also includes prefix replay, so a
 short time window can stop before any new member. This reduces redundant writes
 but does not remove gzip replay costs or provide random access.
 
-The CLI still selects the original frozen `orcid-2026-summary` source. The separately
-frozen 2025 pilot uses the shared Python importer in its isolated task directory;
-it is not merged into production or treated as fully verified archive data.
+The CLI defaults to `orcid-2026-summary`. Use `--source SOURCE_KEY --task TASK_CONFIG`
+to select another annual archive already present in that task's frozen registry.
+Only sources with kind `orcid-summary-tar-gzip` are accepted. Source selection does
+not edit a freeze or merge work directories. The separately frozen 2025 pilot
+remains isolated; it is not merged into production or treated as fully verified
+archive data.
+
+Relation scoring, observed-training denominators and the quality audit share the
+same registry-based archive verification predicate. Every configured annual
+archive requires a `verified` run, regardless of its source key or publication year.
+A missing, partial or failed run cannot contribute relationships or denominator
+observations. This applies to both original and versioned event interpretations;
+member evidence is also required in both denominator paths. Per-record API sources
+retain their existing evidence requirements.
 
 ## Actual source boundaries
 

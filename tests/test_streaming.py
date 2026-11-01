@@ -204,6 +204,47 @@ class StreamingTests(unittest.TestCase):
                         stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=limit)
         finally:s.close()
 
+    def test_cli_selects_frozen_archive_and_reports_selected_source_failure(self):
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from gapi.stream_cli import execute_task
+        source='orcid-2025-summary'
+        data=archive([(f'summaries/097/{PERSON}.xml',XML)])
+        self.config['sources'][source]={**self.config['sources']['orcid-2026-summary'],
+            'filename':'ORCID_2025_10_summaries.tar.gz','url':'https://example.org/frozen-2025.tar.gz',
+            'checksum':'sha256:'+hashlib.sha256(data).hexdigest(),'size_bytes':len(data)}
+        s=self.store(data)
+        task=s.task
+        s.close()
+        args=SimpleNamespace(command='ingest-orcid',source=source,max_members=None,
+            max_new_members=1,max_seconds=10)
+        urls=[]
+        class HTTP:
+            def open(self,url):
+                urls.append(url)
+                return io.BytesIO(data)
+            def close(self):pass
+        with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
+            for state in ('provisional','verified'):
+                output=io.StringIO()
+                with redirect_stdout(output):self.assertTrue(execute_task(task,args))
+                report=json.loads(output.getvalue())
+                self.assertEqual(report['sources'][0]['source'],source)
+                self.assertEqual(report['sources'][0]['status'],state)
+                self.assertEqual(report['events'],1)
+        self.assertEqual(urls,['https://example.org/frozen-2025.tar.gz']*2)
+        with patch.object(HTTP,'open',side_effect=OSError('bounded injected access failure')):
+            with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
+                with redirect_stdout(io.StringIO()),self.assertRaises(SystemExit) as raised:
+                    execute_task(task,args)
+                self.assertEqual(raised.exception.code,2)
+        args.source='wikidata'
+        with patch.object(HTTP,'open',side_effect=AssertionError('invalid source must not open HTTP')):
+            with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
+                with self.assertRaisesRegex(ValueError,'annual ORCID archive'):
+                    execute_task(task,args)
+
     def test_checksum_and_gzip_trailer_fail_closed(self):
         data = archive([(f"summaries/097/{PERSON}.xml", XML)])
         s = self.store(data)

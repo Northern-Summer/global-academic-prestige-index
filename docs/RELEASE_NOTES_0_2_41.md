@@ -1,0 +1,7 @@
+Annual ORCID archive verification now follows the source type in the frozen registry. Previously, relation scoring checked only the source key `orcid-2026-summary`; another annual source key could bypass that check. Relations and observed-training denominators now use the same verification predicate. Partial, failed or missing archive runs contribute neither relationships nor denominator observations.
+
+`ingest-orcid --source SOURCE_KEY --task TASK_CONFIG` can select another annual archive already registered in that task's freeze. The default remains unchanged. Selecting a source does not edit the registry, merge databases or treat the isolated 2025 pilot as production data.
+
+Validation: 458 Python tests passed locally. Tests cover multiple annual source keys, original and interpreted events, missing runs, source selection and access failure. A separate comparison of 500 synthetic replayed members reduced redundant member transactions from 500 to zero while preserving the event payload hash. That comparison does not measure full-archive acquisition speed.
+
+This is a code update. Published scores retain the v0.2.38 frozen input: 759,416 events, including 672,382 unresolved events. Collection continues separately. These counts are not verified careers or a complete world census. Independent external review and full-archive storage capacity remain unverified. Page typography and eligibility thresholds are unchanged.

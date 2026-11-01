@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from .career_store import CareerStore, member_evidence_sql, CANDIDATE_SOURCES
+from .career_store import CareerStore, member_evidence_sql, CANDIDATE_SOURCES, orcid_archive_sources, verified_archive_sql
 from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
 from .orcid_stream import stream_archive
 from .source_http import PublicHTTP, StageDeadline, WIKIDATA_BATCH_LIMIT
@@ -114,6 +114,8 @@ def register(sub):
             parser.add_argument("--max-members", type=int)
             parser.add_argument("--max-seconds", type=float, default=300)
         if name == 'ingest-orcid':
+            parser.add_argument('--source',default='orcid-2026-summary',
+                help='annual archive source key in the frozen task registry')
             parser.add_argument('--max-new-members',type=int,
                 help='stop after this many previously uncommitted members; gzip still replays from the start')
         if name in ("ingest-wikidata", "ingest-orcid-api"):
@@ -270,7 +272,9 @@ def execute_task(task, args):
                 max_bytes=args.max_compressed_bytes,progress=lambda r:print(json.dumps(r),flush=True),
                 stage_careers=args.stage_careers,max_reconnects=args.max_reconnects)
         elif args.command == "ingest-orcid":
-            source = "orcid-2026-summary"
+            source = args.source
+            if source not in orcid_archive_sources(task):
+                raise ValueError('source must be an annual ORCID archive in the frozen registry')
             store.start(source)
             try:
                 with http.open(task.config["sources"][source]["url"]) as response:
@@ -305,8 +309,9 @@ def execute_task(task, args):
             result["sqlite_integrity"] = store.db.execute("PRAGMA quick_check").fetchone()[0]
             result['events_without_member_evidence'] = store.db.execute(
                 'SELECT count(*) FROM events e WHERE NOT ' + member_evidence_sql(observed_only=False)).fetchone()[0]
-            result['provisional_archive_events'] = store.db.execute('''SELECT count(*) FROM events e JOIN runs r ON r.source=e.source
-                WHERE e.source='orcid-2026-summary' AND r.status!='verified' ''').fetchone()[0]
+            archive_predicate,archive_params=verified_archive_sql(task)
+            result['provisional_archive_events'] = store.db.execute(
+                'SELECT count(*) FROM events e WHERE NOT '+archive_predicate,archive_params).fetchone()[0]
             from .frozen_input import verified_packed_snapshot
             archives = [p for p in task.root.rglob('*') if p.is_file() and p.suffix.lower() in ('.gz','.xz','.zip','.tar','.xml')]
             packed_inputs=[p for p in archives if verified_packed_snapshot(store,p)]
@@ -359,7 +364,7 @@ def execute_task(task, args):
             raise SystemExit(2)
         if args.command == 'ingest-nobel' and result and result.get('status') == 'resumable-source-boundary':
             raise SystemExit(2)
-        if args.command == 'ingest-orcid' and any(r['source']=='orcid-2026-summary' and r['status'] in ('access_failed','failed') for r in result['sources']):
+        if args.command == 'ingest-orcid' and any(r['source']==args.source and r['status'] in ('access_failed','failed') for r in result['sources']):
             raise SystemExit(2)
     finally:
         try:

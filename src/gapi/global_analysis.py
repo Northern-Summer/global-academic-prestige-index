@@ -15,7 +15,7 @@ from pathlib import Path
 from .ranking import DEFAULT_CONFIG, pagerank
 from .career_rules import classify
 from .storage import project_root
-from .career_store import member_evidence_sql
+from .career_store import member_evidence_sql, verified_archive_sql
 from .task import BudgetStop, canonical, digest
 from .publication import public_sources
 
@@ -172,13 +172,13 @@ def relation_rows(store, *, allowed_sources=None):
     enriched = has_interpretations(store)
     from .corroboration import decisions
     verified = decisions(store, allowed_sources=allowed_sources)
-    statuses = {r[0]: r[1] for r in store.db.execute("SELECT source,status FROM runs")}
+    archive_predicate,archive_params=verified_archive_sql(store.task)
     columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
     cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source,e.id""" + columns + """
         FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution""" + join + """
-        WHERE """ + member_evidence_sql() + """
-        ORDER BY e.person,e.id""", (VERSION, POLICY_SHA256) if enriched else ())
+        WHERE """ + member_evidence_sql() + " AND " + archive_predicate + """
+        ORDER BY e.person,e.id""", ((VERSION, POLICY_SHA256) if enriched else ()) + archive_params)
     person, events = None, []
     for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
         if person is not None and pid != person:
@@ -192,8 +192,6 @@ def relation_rows(store, *, allowed_sources=None):
         if status not in ("observed", "corroborated") or not institution:
             continue
         if allowed_sources is not None and source not in allowed_sources:
-            continue
-        if source == "orcid-2026-summary" and statuses.get(source) != "verified":
             continue
         row = json.loads(payload)
         row["institution"], row["status"] = institution, status
@@ -313,11 +311,11 @@ def rank_global(store, *, public=False, publication_policy=None):
             FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
             LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?
             WHERE COALESCE(i.kind,e.kind) IN ('education','training')
-            AND COALESCE(i.status,e.status) IN ('observed','corroborated')
-            AND """ + member_evidence_sql() + """
-            AND (e.source!='orcid-2026-summary' OR EXISTS(
-                SELECT 1 FROM runs r WHERE r.source=e.source AND r.status='verified'))"""
+            AND COALESCE(i.status,e.status) IN ('observed','corroborated')"""
         params = (VERSION, POLICY_SHA256)
+    archive_predicate,archive_params=verified_archive_sql(store.task)
+    denominator_sql += " AND " + member_evidence_sql() + " AND " + archive_predicate
+    params += archive_params
     if allowed is not None:
         denominator_sql += " AND e.source IN (" + ','.join('?' for _ in allowed) + ")"
         params += tuple(sorted(allowed))
