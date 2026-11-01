@@ -16,6 +16,12 @@ describe their original test conditions rather than a second active limit.
 
 ## Reproduce and resume
 
+Member-ledger progress uses the authoritative `members` table. A source start
+reconciles its `runs.members` counter once; each newly inserted member advances
+the counter in the same transaction. Repeated members do not advance it, and a
+rollback undoes both changes. This avoids recounting an entire source ledger
+after every person. It changes neither source evidence nor qualification rules.
+
 ```powershell
 $env:PYTHONPATH='src'
 python -m gapi sources freeze
@@ -1093,3 +1099,27 @@ Checkpoints can contain private evidence locators: keep them outside public
 assets. The command preserves all URLs and evidence fields. Its reported payload
 reduction is not filesystem deletion, and page reuse must be measured separately
 from the change in field bytes. Do not migrate beside an active collector.
+
+### Reuse historical institution candidates
+
+The online identifier bridge normally selects Ringgold identifiers from current
+career events. To include the already processed historical aggregate directory:
+
+```text
+python -m gapi resolve-institutions-online --candidate-manifest outputs/easy-orcid-web/manifest.json --max-aliases 100 --max-seconds 180
+```
+
+Run this only after the collector has released its sole-writer lock. The reader
+checks the public manifest schema, node count, content-addressed filename, decoded
+size and SHA-256 before making requests. Existing gzip repository assets are read
+in memory with a 32 MiB decoded bound; no decoded file or personal projection is
+saved. A selection can contain at most 200,000 institution identifiers. The result
+records both manifest and node hashes, so the historical input can be identified.
+Repeated decisions under the same bridge version are not fetched again.
+
+An aggregate identifier only nominates a candidate. The existing revision-pinned
+Wikidata statements and reciprocal frozen ROR checks still own identity promotion;
+neither names nor historical network scores confirm an identity. This does not
+independently verify anyone's career or change the source's coverage claim. To
+show confirmed mappings in historical scores, explicitly rerun the historical
+ranking and export; this command never rewrites existing published scores.

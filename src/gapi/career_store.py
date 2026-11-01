@@ -195,6 +195,10 @@ class CareerStore:
         if old and old[0] != identity:
             raise ValueError("source identity changed; resume forbidden")
         self.db.execute("INSERT OR IGNORE INTO runs(source,identity,status) VALUES(?,?,?)", (source, identity, "provisional"))
+        # Reconcile once when a source resumes, rather than recount its entire
+        # growing member ledger after every person. New members advance this
+        # counter in the same transaction as their ledger insert.
+        self.db.execute("UPDATE runs SET members=(SELECT count(*) FROM members WHERE source=?) WHERE source=?", (source, source))
         self.db.commit()
 
     def status(self, source: str, status: str, *, byte_count=0, sha256=None, detail=None):
@@ -431,8 +435,9 @@ class CareerStore:
         old = self.seen(source, locator)
         if old and old[0] != sha256:
             raise ValueError("member changed within frozen source")
-        self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, sha256, status, reason))
-        self.db.execute("UPDATE runs SET members=(SELECT count(*) FROM members WHERE source=?) WHERE source=?", (source, source))
+        added=self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, sha256, status, reason)).rowcount
+        if added:
+            self.db.execute("UPDATE runs SET members=members+? WHERE source=?", (added, source))
 
     def report(self):
         return {

@@ -83,6 +83,8 @@ def register(sub):
         if name == 'resolve-institutions-online':
             parser.add_argument('--max-aliases',type=int,default=100)
             parser.add_argument('--max-seconds',type=float,default=300)
+            parser.add_argument('--candidate-manifest',type=Path,
+                help='hash-verified public aggregate institution directory; candidates only, never identity evidence')
         if name in ('discover-wikidata-dump','collect-global'):
             parser.add_argument('--feed', type=Path, default=Path('configs/discovery-dump.json'))
             parser.add_argument('--max-seconds', type=float, default=300)
@@ -228,7 +230,7 @@ def execute_task(task, args):
         elif args.command == 'resolve-institutions-online':
             from .institution_bridge import resolve_online
             result=resolve_online(store,http,max_aliases=args.max_aliases,max_seconds=args.max_seconds,
-                progress=lambda r: print(json.dumps(r),flush=True))
+                progress=lambda r: print(json.dumps(r),flush=True),candidate_manifest=args.candidate_manifest)
         elif args.command == 'project-awards':
             from .award_projection import project_awards
             result = project_awards(store)

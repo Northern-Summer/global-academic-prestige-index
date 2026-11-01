@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import gzip
 import json
 import unittest
 from contextlib import nullcontext
@@ -6,7 +8,7 @@ from unittest.mock import patch
 
 import test_streaming as fixtures
 from test_streaming import archive
-from gapi.institution_bridge import resolve_online, entity_target, fetch_entities, ROR_SHA256
+from gapi.institution_bridge import resolve_online, entity_target, fetch_entities, aggregate_candidates, ROR_SHA256
 
 TARGET='ror:03vek6s52'
 
@@ -32,6 +34,73 @@ class InstitutionBridgeTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def aggregate(self,rows):
+        raw=json.dumps(rows).encode();sha=hashlib.sha256(raw).hexdigest()
+        (self.root/(sha+'.json')).write_bytes(raw)
+        path=self.root/'manifest.json'
+        path.write_text(json.dumps({'schema_version':'gapi-derived-browser/v1',
+            'node_columns':['institution_id'],'node_count':len(rows),'source':'historical-test',
+            'nodes':{'file':sha+'.json','sha256':sha,'bytes':len(raw)}}))
+        return path
+
+    def test_historical_aggregate_candidates_use_same_evidence_rules_and_resume(self):
+        s=self.store(archive([]));http=HTTP()
+        try:
+            # No career event exists for the historical institution.
+            with s.db:s.db.execute('INSERT INTO institution_aliases VALUES(?,?,?)',('wd:Q1',TARGET,ROR_SHA256))
+            path=self.aggregate([['ringgold:1234'],[TARGET]])
+            with patch('gapi.institution_bridge.resolve_institutions',side_effect=lambda st,**kw:
+                       {'verified_reciprocal':dict(st.db.execute('SELECT alias,institution FROM active_institution_aliases'))}):
+                result=resolve_online(s,http,candidate_manifest=path)
+                self.assertEqual(result['confirmed_identifier_bridges'],1)
+                calls=len(http.calls)
+                again=resolve_online(s,http,candidate_manifest=path)
+            self.assertEqual(result['selection']['total'],1)
+            self.assertEqual(again['selection']['pending'],0)
+            self.assertEqual(again['processed_aliases'],0)
+            self.assertEqual(len(http.calls),calls)
+            self.assertFalse(result['selection']['aggregate_input']['identity_evidence'])
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+        finally:s.close()
+
+    def test_aggregate_name_or_identifier_alone_cannot_promote(self):
+        s=self.store(archive([]));http=HTTP()
+        try:
+            path=self.aggregate([['ringgold:1234']])
+            with patch('gapi.institution_bridge.resolve_institutions',return_value={'verified_reciprocal':{}}):
+                result=resolve_online(s,http,candidate_manifest=path)
+            self.assertEqual(result['confirmed_identifier_bridges'],0)
+            self.assertEqual(result['totals'],{'reciprocal_or_current_identifier_unconfirmed':1})
+        finally:s.close()
+
+    def test_compressed_public_assets_keep_decoded_identity_without_writing_json(self):
+        path=self.aggregate([['ringgold:1234'],[TARGET]])
+        manifest=json.loads(path.read_text());asset=path.parent/manifest['nodes']['file']
+        expected=aggregate_candidates(path)
+        packed=asset.with_suffix('.json.gz');packed.write_bytes(gzip.compress(asset.read_bytes(),mtime=0))
+        asset.unlink()
+        self.assertEqual(aggregate_candidates(path),expected)
+        self.assertFalse(asset.exists())
+        packed.write_bytes(packed.read_bytes()[:-8])
+        with self.assertRaisesRegex(ValueError,'compressed'):aggregate_candidates(path)
+
+    def test_aggregate_tampering_traversal_count_and_duplicate_rejected_before_network(self):
+        s=self.store(archive([]));http=HTTP()
+        try:
+            for attack in ('hash','path','count','duplicate','schema','oversize'):
+                with self.subTest(attack=attack):
+                    path=self.aggregate([['ringgold:1234'],['ringgold:1234']] if attack=='duplicate' else [['ringgold:1234']])
+                    manifest=json.loads(path.read_text())
+                    if attack=='hash':(path.parent/manifest['nodes']['file']).write_bytes(b'[]')
+                    if attack=='path':manifest['nodes']['file']='../secret.json'
+                    if attack=='count':manifest['node_count']=2
+                    if attack=='schema':manifest['schema_version']='personal-records/v1'
+                    if attack=='oversize':path.write_bytes(b' '*(1024**2+1))
+                    else:path.write_text(json.dumps(manifest))
+                    with self.assertRaises(ValueError):resolve_online(s,http,candidate_manifest=path)
+            self.assertEqual(http.calls,[])
+        finally:s.close()
 
     def seed(self,s):
         s.start('orcid-public-api')

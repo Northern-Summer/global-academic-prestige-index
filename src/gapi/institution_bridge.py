@@ -5,9 +5,13 @@ one unqualified Ringgold and ROR value, and the frozen ROR directory must point
 back to that same entity. Names play no part. No personal or raw response storage.
 """
 import json
+import hashlib
+import gzip
+import io
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
 
 from .career_rules import institution_id
@@ -127,8 +131,65 @@ def revalidate_predecessor(store):
     return len(old)
 
 
-def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None):
+def aggregate_candidates(manifest_path):
+    """Read only hash-verified public institution IDs, never personal projections.
+
+    These are discovery candidates, not identity evidence. Promotion still needs
+    the revision-pinned reciprocal identifier checks below.
+    """
+    path=Path(manifest_path)
+    def bounded_read(file,limit):
+        if file.is_symlink() or getattr(file,'is_junction',lambda:False)():
+            raise ValueError('institution candidate links forbidden')
+        with file.open('rb') as handle:raw=handle.read(limit+1)
+        if len(raw)>limit:raise ValueError('institution candidate asset exceeds bound')
+        return raw
+    raw=bounded_read(path,1024**2);manifest=json.loads(raw)
+    if not isinstance(manifest,dict) or manifest.get('schema_version')!='gapi-derived-browser/v1':
+        raise ValueError('invalid institution candidate manifest')
+    entry=manifest.get('nodes');columns=manifest.get('node_columns');count=manifest.get('node_count')
+    if (not isinstance(entry,dict) or not isinstance(columns,list)
+            or columns.count('institution_id')!=1 or type(count) is not int or not 0<=count<=200000):
+        raise ValueError('invalid institution candidate node contract')
+    sha=entry.get('sha256')
+    if not isinstance(sha,str) or not re.fullmatch('[0-9a-f]{64}',sha) or entry.get('file')!=sha+'.json':
+        raise ValueError('invalid content-addressed institution candidate path')
+    asset=path.parent/entry['file']
+    if asset.exists():nodes_raw=bounded_read(asset,32*1024**2)
+    else:
+        # Public repository assets use gzip storage while the manifest hashes
+        # the unchanged decoded JSON. Never materialize the decoded file.
+        packed=bounded_read(asset.with_suffix('.json.gz'),32*1024**2)
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:nodes_raw=stream.read(32*1024**2+1)
+        except (OSError,EOFError) as exc:raise ValueError('invalid compressed institution candidate asset') from exc
+        if len(nodes_raw)>32*1024**2:raise ValueError('institution candidate asset exceeds bound')
+    if len(nodes_raw)!=entry.get('bytes') or hashlib.sha256(nodes_raw).hexdigest()!=sha:
+        raise ValueError('institution candidate asset hash/size mismatch')
+    nodes=json.loads(nodes_raw);index=columns.index('institution_id');identifiers=set()
+    if not isinstance(nodes,list) or len(nodes)!=count:
+        raise ValueError('institution candidate count mismatch')
+    seen=set()
+    for row in nodes:
+        if not isinstance(row,list) or len(row)!=len(columns) or not isinstance(row[index],str):
+            raise ValueError('invalid institution candidate row')
+        identifier=row[index]
+        if identifier in seen:raise ValueError('duplicate institution candidate')
+        seen.add(identifier)
+        if identifier.startswith('ringgold:'):identifiers.add(identifier)
+    return identifiers,{'manifest_sha256':hashlib.sha256(raw).hexdigest(),
+        'nodes_sha256':sha,'source':manifest.get('source'),'node_count':count,
+        'ringgold_candidates':len(identifiers),'identity_evidence':False}
+
+
+def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None,candidate_manifest=None):
     if not 1<=max_aliases<=1000 or not 0<max_seconds<=3600:raise ValueError('invalid institution bridge budget')
+    identifiers,aggregate=(aggregate_candidates(candidate_manifest) if candidate_manifest is not None else (set(),None))
+    for (identifier,) in store.db.execute("SELECT DISTINCT institution FROM events WHERE institution LIKE 'ringgold:%'"):
+        identifiers.add(identifier)
+        if len(identifiers)>200000:raise ValueError('institution candidate selection exceeds bound')
+    identifiers=sorted(identifiers)
+    store.task.check_memory()
     store.task.check(2*1024**2)
     store.db.executescript(DDL)
     mismatch=store.db.execute('SELECT 1 FROM institution_bridge WHERE version=? AND spec_sha256!=? LIMIT 1',
@@ -142,10 +203,8 @@ def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None):
         return {'status':'server-backoff-pending','global_complete':False}
     # Already decided aliases, including no-match/ambiguous cases, do not refetch
     # within this frozen selection version. New versions must be explicit.
-    aliases=[r[0] for r in store.db.execute('''SELECT DISTINCT e.institution FROM events e
-        WHERE e.institution LIKE 'ringgold:%' AND NOT EXISTS(
-            SELECT 1 FROM institution_bridge b WHERE b.alias=e.institution AND b.version=?)
-        ORDER BY e.institution LIMIT ?''',(VERSION,max_aliases))]
+    decided={r[0] for r in store.db.execute('SELECT alias FROM institution_bridge WHERE version=?',(VERSION,))}
+    aliases=[identifier for identifier in identifiers if identifier not in decided][:max_aliases]
     started=time.monotonic(); processed=promoted=failed=0
     for offset in range(0,len(aliases),20):
         if time.monotonic()-started>=max_seconds:break
@@ -192,6 +251,7 @@ def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None):
                             store.db.execute('INSERT OR IGNORE INTO institution_alias_issues VALUES(?,?,?,?)',
                                 (alias,VERSION,status,canonical(detail).decode()))
                 processed+=len(records);promoted+=sum(r[1]=='confirmed_identifier_bridge' for r in records)
+                decided.update(r[0] for r in records)
                 if progress:progress({'processed_aliases':processed,'confirmed_identifier_bridges':promoted})
         except (OSError,ValueError,RuntimeError) as exc:
             from .task import BudgetStop
@@ -201,15 +261,14 @@ def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None):
                 store.pause_source('wikidata',exc.retry_at,str(exc))
             store.failure(source,digest(selected),str(exc));failed+=1
             break
-    observed=store.db.execute("SELECT count(DISTINCT institution) FROM events WHERE institution LIKE 'ringgold:%'").fetchone()[0]
-    remaining=store.db.execute('''SELECT count(DISTINCT e.institution) FROM events e
-        WHERE e.institution LIKE 'ringgold:%' AND NOT EXISTS(
-            SELECT 1 FROM institution_bridge b WHERE b.alias=e.institution AND b.version=?)''',(VERSION,)).fetchone()[0]
-    selection_hash=__import__('hashlib').sha256()
-    for (identifier,) in store.db.execute("SELECT DISTINCT institution FROM events WHERE institution LIKE 'ringgold:%' ORDER BY institution"):
+    observed=len(identifiers)
+    remaining=sum(identifier not in decided for identifier in identifiers)
+    selection_hash=hashlib.sha256()
+    for identifier in identifiers:
         selection_hash.update(canonical(identifier))
     return {'version':VERSION,'spec_sha256':digest(SPEC),'processed_aliases':processed,'revalidated_predecessor_decisions':revalidated,
-        'selection':{'kind':'observed-ringgold-identifiers','total':observed,'processed':observed-remaining,
+        'selection':{'kind':'observed-and-aggregate-ringgold-identifiers' if aggregate else 'observed-ringgold-identifiers',
+            'aggregate_input':aggregate,'total':observed,'processed':observed-remaining,
             'pending':remaining,'sha256':selection_hash.hexdigest(),'enumeration_complete':remaining==0,
             'not_a_global_personnel_denominator':True},
         'confirmed_identifier_bridges':promoted,'failed_batches':failed,'global_complete':False,
