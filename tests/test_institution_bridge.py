@@ -5,10 +5,13 @@ import json
 import unittest
 from contextlib import nullcontext
 from unittest.mock import patch
+from urllib.parse import urlsplit,parse_qs
 
 import test_streaming as fixtures
 from test_streaming import archive
 from gapi.institution_bridge import resolve_online, entity_target, fetch_entities, aggregate_candidates, ROR_SHA256
+from gapi.global_sources import wikidata_batch_url
+from gapi.source_http import entity_batch_route,SourcePause
 
 TARGET='ror:03vek6s52'
 
@@ -198,3 +201,51 @@ class InstitutionBridgeTests(unittest.TestCase):
         class Refused:
             def json(self,url):raise PermissionError('source refused')
         with self.assertRaises(PermissionError):fetch_entities(Refused(),['Q1','Q2'])
+
+    def test_batch_reuses_readonly_contract_and_preserves_individual_entity_content(self):
+        calls=[]
+        class Batch:
+            def json(self,url):
+                calls.append(url)
+                ids=parse_qs(urlsplit(url).query).get('ids')
+                ids=ids[0].split('|') if ids else [url.rsplit('/',1)[-1].removesuffix('.json')]
+                return {'entities':{q:dict(entity(),id=q) for q in ids}},'a'*64
+        ids=['Q1','Q2','Q3','Q4','Q5'];http=Batch()
+        singles=fetch_entities(http,ids);self.assertEqual(len(calls),5)
+        calls.clear();batched=fetch_entities(http,ids,batch=True)
+        self.assertEqual(len(calls),1)
+        self.assertTrue(entity_batch_route(urlsplit(calls[0])))
+        for q in ids:
+            self.assertEqual(batched[q][0],singles[q][0])
+            self.assertEqual(batched[q][1],'a'*64)
+            self.assertEqual(batched[q][2],calls[0])
+        for invalid in ([],['Q0'],['Q1','Q1'],['Q1|Q2'],[None],['Q'+str(i) for i in range(1,52)]):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):wikidata_batch_url(invalid)
+
+    def test_batch_size_failure_splits_but_refusal_pause_and_malformed_do_not(self):
+        calls=[]
+        class Sized:
+            def json(self,url):
+                calls.append(url)
+                ids=parse_qs(urlsplit(url).query).get('ids')
+                ids=ids[0].split('|') if ids else [url.rsplit('/',1)[-1].removesuffix('.json')]
+                if len(ids)>2 or ids==['Q3']:raise ValueError('structured response exceeds bound')
+                return {'entities':{q:dict(entity(),id=q) for q in ids}},'b'*64
+        result=fetch_entities(Sized(),['Q1','Q2','Q3','Q4','Q5'],batch=True)
+        self.assertIsNone(result['Q3'][0])
+        self.assertEqual(set(result),{'Q1','Q2','Q3','Q4','Q5'})
+        self.assertTrue(all(result[q][0]['id']==q for q in ('Q1','Q2','Q4','Q5')))
+        for response in (PermissionError('refused'),OSError('offline'),ValueError('invalid JSON'),
+                         {'error':{'code':'maxlag'}},{'entities':{'Q999':entity()}},
+                         {'entities':{'Q1':entity()}}):
+            observed=[]
+            class Failed:
+                def json(self,url):
+                    observed.append(url)
+                    if isinstance(response,Exception):raise response
+                    return response,'c'*64
+            with self.subTest(response=str(response)):
+                with self.assertRaises((OSError,ValueError,SourcePause)):
+                    fetch_entities(Failed(),['Q1','Q2'],batch=True)
+                self.assertEqual(len(observed),1)
+                self.assertIn('/w/api.php?',observed[0])

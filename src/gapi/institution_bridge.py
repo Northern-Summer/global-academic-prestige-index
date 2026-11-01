@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from .career_rules import institution_id
 from .global_analysis import resolve_institutions
-from .global_sources import wd_value
+from .global_sources import wd_value, wikidata_batch_url
 from .source_http import SourcePause
 from .task import canonical, digest
 
@@ -86,10 +86,31 @@ def discover(http, aliases):
                     'retrieved_at':datetime.now(timezone.utc).isoformat()}
 
 
-def fetch_entities(http,qids):
-    """Use the robots-allowed EntityData route; bulk api.php is disallowed."""
-    if len(qids)>20 or len(qids)!=len(set(qids)) or any(not re.fullmatch('Q[1-9][0-9]*',q) for q in qids):
+def fetch_entities(http,qids,*,batch=False):
+    """Reuse the existing bounded claims/info route, retaining EntityData reads.
+
+    Only a response-size limit permits splitting. Refusals and source pauses
+    propagate without trying a different route or consuming candidate decisions.
+    """
+    if (type(batch) is not bool or not isinstance(qids,(list,tuple)) or len(qids)>20
+            or any(not isinstance(q,str) or not re.fullmatch('Q[1-9][0-9]*',q) for q in qids)
+            or len(qids)!=len(set(qids))):
         raise ValueError('invalid bounded institution entity selection')
+    if batch and len(qids)>1:
+        url=wikidata_batch_url(qids)
+        try:data,sha=http.json(url)
+        except ValueError as exc:
+            if str(exc)!='structured response exceeds bound':raise
+            middle=len(qids)//2
+            return {**fetch_entities(http,qids[:middle],batch=True),
+                    **fetch_entities(http,qids[middle:],batch=True)}
+        if isinstance(data,dict) and isinstance(data.get('error'),dict) and data['error'].get('code') in ('maxlag','ratelimited','readonly'):
+            raise SourcePause(503,time.time()+60,'Wikibase service requested a source pause')
+        entities=data.get('entities') if isinstance(data,dict) else None
+        if not isinstance(entities,dict) or set(entities)!=set(qids):
+            raise ValueError('institution API returned a different entity selection')
+        retrieved=datetime.now(timezone.utc).isoformat()
+        return {qid:(entities[qid],sha,url,retrieved) for qid in qids}
     found={}
     for qid in qids:
         url=SPEC['source']+qid+'.json'
@@ -215,7 +236,7 @@ def resolve_online(store,http,*,max_aliases=100,max_seconds=300,progress=None,ca
                 candidates,evidence=discover(http,valid) if valid else ({},{})
                 qids=sorted({next(iter(v)) for v in candidates.values() if len(v)==1})
                 safe=resolve_institutions(store,extra_identifiers=['wd:'+q for q in qids])['verified_reciprocal']
-                entities=fetch_entities(http,qids)
+                entities=fetch_entities(http,qids,batch=True)
                 records=[]
                 for alias in selected:
                     detail=dict(evidence); status='unmatched'; target=None

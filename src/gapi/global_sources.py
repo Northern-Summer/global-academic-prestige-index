@@ -137,6 +137,17 @@ def commit_wikidata_entity(store, qid, entity, checksum, *, batch_url=None, batc
                 pack_row(('ingest-orcid-api',next(iter(ids)),query_hash,checksum)))
 
 
+def wikidata_batch_url(qids):
+    """The shared read-only claims/info transport contract; no fact decisions."""
+    if (not isinstance(qids,(list,tuple)) or not 1<=len(qids)<=WIKIDATA_BATCH_LIMIT
+            or any(not isinstance(q,str) or not re.fullmatch(r'Q[1-9]\d*',q) for q in qids)
+            or len(qids)!=len(set(qids))):
+        raise ValueError('invalid bounded Wikidata batch selection')
+    return 'https://www.wikidata.org/w/api.php?'+urlencode({
+        'action':'wbgetentities','ids':'|'.join(qids),'props':'claims|info',
+        'format':'json','maxlag':'5'})
+
+
 def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch_size=1, report=True):
     if type(batch_size) is not int or not 1<=batch_size<=WIKIDATA_BATCH_LIMIT:
         raise ValueError(f'Wikidata entity batch size must be between 1 and {WIKIDATA_BATCH_LIMIT}')
@@ -159,9 +170,7 @@ def ingest_wikidata(store, http, qids, *, max_seconds=None, progress=None, batch
             stage_ended=True
             break
         group=pending[offset:offset+batch_size]
-        batch_url=('https://www.wikidata.org/w/api.php?'+urlencode({
-            'action':'wbgetentities','ids':'|'.join(group),'props':'claims|info',
-            'format':'json','maxlag':'5'})) if batch_size>1 else None
+        batch_url=wikidata_batch_url(group) if batch_size>1 else None
         url=batch_url or f'https://www.wikidata.org/wiki/Special:EntityData/{group[0]}.json'
         response_start=getattr(http,'bytes_received',0)
         try:

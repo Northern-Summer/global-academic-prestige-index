@@ -1123,3 +1123,18 @@ neither names nor historical network scores confirm an identity. This does not
 independently verify anyone's career or change the source's coverage claim. To
 show confirmed mappings in historical scores, explicitly rerun the historical
 ranking and export; this command never rewrites existing published scores.
+
+Institution identity reads now reuse the same bounded read-only claims/info URL
+builder as career acquisition. Each discovered group contains at most 20 entity
+IDs; a normal group needs one HTTP response rather than one per institution.
+Response keys must match the requested group exactly. Per-entity revision and
+identifier validation remain the existing identity policy. Evidence retains the
+actual response URL and hash as well as the canonical entity hash.
+
+Only an explicit structured-response size overflow permits splitting the group
+into smaller requests. An oversized single entity remains a bounded unresolved
+identity record. Authentication/access refusals, service pauses, malformed JSON
+and missing/unexpected response keys do not trigger alternate-route attempts.
+Current source backoff and the sole-writer boundary still apply. Local transport
+fixtures establish request-count reduction and content consistency; actual
+network throughput must be measured during a later exclusive identity batch.
