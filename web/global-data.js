@@ -1,7 +1,9 @@
 // Directory capacity is independent of the much smaller rendered graph.
-export const MAX_DIRECTORY_NODES = 65536;
+import {decodeGlobalTransport, MAX_DIRECTORY_NODES} from './global-transport.js';
+export {MAX_DIRECTORY_NODES};
 
 export function validateGlobal(data) {
+  data = decodeGlobalTransport(data);
   if (data?.schema_version !== 'gapi-global-observed/v1' || data.dataset_kind !== 'real/global-public-observations') throw new Error('Invalid real global observation schema');
   if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || data.nodes.length > MAX_DIRECTORY_NODES || data.edges.length > 200000) throw new Error('Global slice exceeds browser budget');
   const ids = new Set();

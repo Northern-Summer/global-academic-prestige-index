@@ -1,0 +1,29 @@
+{
+  "logical": {
+    "schema_version": "gapi-global-observed/v1",
+    "dataset_kind": "real/global-public-observations",
+    "coverage": {"events": 3, "people": 1},
+    "nodes": [
+      {"institution_id": "test:A", "name": "测试甲", "network_score": 0.7, "award_score": null, "unranked_reasons": ["pending"], "flag": false},
+      {"institution_id": "test:B", "name": "Test B", "network_score": 0.3, "award_score": null, "unranked_reasons": ["pending"], "flag": 0},
+      {"institution_id": "test:C", "name": "Test C", "network_score": null, "award_score": null, "unranked_reasons": ["missing"], "flag": false}
+    ],
+    "edges": [{"source": "test:B", "target": "test:A", "weight": 1}]
+  },
+  "wire": {
+    "schema_version": "gapi-institution-defaults/1",
+    "payload": {
+      "schema_version": "gapi-global-observed/v1",
+      "dataset_kind": "real/global-public-observations",
+      "coverage": {"events": 3, "people": 1},
+      "edges": [{"source": "test:B", "target": "test:A", "weight": 1}]
+    },
+    "node_defaults": {"award_score": null, "unranked_reasons": ["pending"], "flag": false},
+    "node_rows": [
+      {"institution_id": "test:A", "name": "测试甲", "network_score": 0.7},
+      {"institution_id": "test:B", "name": "Test B", "network_score": 0.3, "flag": 0},
+      {"institution_id": "test:C", "name": "Test C", "network_score": null, "unranked_reasons": ["missing"]}
+    ]
+  },
+  "scope": "synthetic protocol test fixture only; never a published observation dataset"
+}

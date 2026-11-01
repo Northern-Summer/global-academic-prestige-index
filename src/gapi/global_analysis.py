@@ -459,7 +459,7 @@ def _write_public_snapshot(task, out, filename, content, *, compress=False):
     return metadata
 
 
-def export_release(store, out: Path, *, publication_policy=None, frozen_input=None, compress_snapshot=False):
+def export_release(store, out: Path, *, publication_policy=None, frozen_input=None, compress_snapshot=False, compact_nodes=False):
     """Public, licensed institution aggregates only; no individual trajectories."""
     if out.resolve() != (project_root()/"outputs/global").resolve():
         raise ValueError("public release output must use the budget-accounted outputs/global directory")
@@ -472,6 +472,12 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
     if not result["convergence"]["converged"]:
         raise ValueError("non-converged scoring output cannot be released")
     out.mkdir(parents=True, exist_ok=True)
+    if type(compact_nodes) is not bool:
+        raise ValueError('compact_nodes must be boolean')
+    logical_checksum = hashlib.sha256(canonical(result)).hexdigest()
+    if compact_nodes:
+        from .public_transport import pack
+        result = pack(result)
     content = canonical(result)
     store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()
@@ -501,7 +507,10 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         "code_tree_sha256":digest({str(p.relative_to(project_root())).replace('\\','/'):hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest()
             for p in sorted((project_root()/'src/gapi').glob('*.py'))}),
         "environment":{"python":platform.python_version()},"review_status":"pending-independent-dual-track",
-        "publication_status":result["publication_status"]}
+        "publication_status":result.get('payload',result)["publication_status"]}
+    if compact_nodes:
+        manifest['logical_output_sha256'] = logical_checksum
+        manifest['transport'] = result['schema_version']
     if publication_policy is not None:
         manifest['publication_policy']=publication_policy
         manifest['publication_policy_sha256']=digest(publication_policy)
@@ -509,8 +518,9 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
         manifest['private_normalized_input']=frozen_input
     if repository_snapshot is not None:
         manifest['repository_snapshot']=repository_snapshot
-    if 'official_award_inventory' in result:
-        awards = result['official_award_inventory']
+    logical_result = result.get('payload',result)
+    if 'official_award_inventory' in logical_result:
+        awards = logical_result['official_award_inventory']
         manifest['official_award_source_sha256'] = awards['source_sha256']
         manifest['normalized_award_index_sha256'] = awards['normalized_award_index_sha256']
         manifest['official_award_page_index_sha256'] = awards['page_index_sha256']

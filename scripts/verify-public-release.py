@@ -19,6 +19,26 @@ def bounded(path, maximum=32*1024**2):
     return body
 
 
+def expand_transport(value):
+    """Independent reader for docs/DATA_TRANSPORT.md; no canonical gapi imports."""
+    if not isinstance(value,dict) or value.get('schema_version')!='gapi-institution-defaults/1':return value
+    if set(value)!={'schema_version','payload','node_defaults','node_rows'}:raise ValueError('compact envelope')
+    body,defaults,rows=value['payload'],value['node_defaults'],value['node_rows']
+    forbidden={'__proto__','constructor','prototype'}
+    def fields(v):return isinstance(v,dict) and len(v)<=64 and all(isinstance(k,str) and 0<len(k)<=64 and k not in forbidden for k in v)
+    if (not isinstance(body,dict) or body.get('schema_version')!='gapi-global-observed/v1'
+            or 'nodes' in body or forbidden & body.keys() or not fields(defaults)
+            or {'institution_id','name'} & defaults.keys()
+            or len(json.dumps(defaults,ensure_ascii=True,sort_keys=True,separators=(',',':')).encode())>65536
+            or not isinstance(rows,list) or len(rows)>65536):raise ValueError('compact structure')
+    restored=[]
+    for row in rows:
+        if not fields(row) or not {'institution_id','name'}<=row.keys() or len(defaults.keys()|row.keys())>64:
+            raise ValueError('compact row')
+        restored.append({**defaults,**row})
+    return {**body,'nodes':restored}
+
+
 def replay(data):
     rows=data['nodes']; nodes=sorted(row['institution_id'] for row in rows if row['network_score'] is not None)
     if not nodes or len(nodes)>200000 or len(set(nodes))!=len(nodes):raise ValueError('invalid graph universe')
@@ -74,7 +94,11 @@ def verify(manifest_path):
     else:body=bounded(manifest_path.parent/name)
     sha=hashlib.sha256(body).hexdigest()
     if sha!=manifest['output_sha256']:raise ValueError('snapshot hash mismatch')
-    data=json.loads(body);result=replay(data)
+    data=expand_transport(json.loads(body))
+    if 'logical_output_sha256' in manifest:
+        logical=json.dumps(data,ensure_ascii=True,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+        if hashlib.sha256(logical).hexdigest()!=manifest['logical_output_sha256']:raise ValueError('logical snapshot identity mismatch')
+    result=replay(data)
     return {'schema_version':'gapi-public-independent-replay/v1','status':'passed',
         'snapshot_sha256':sha,'manifest_sha256':hashlib.sha256(manifest_bytes).hexdigest(),**result,
         'scope':'independently implemented public graph-to-score replay; no canonical gapi ranking imports',

@@ -121,6 +121,7 @@ def register(sub):
             parser.add_argument('--freeze-base',help='retained full HASH.rows baseline for bounded row differences')
             parser.add_argument('--allow-delta-base',action='store_true',help='explicitly permit a retained delta base; dependency depth capped at four')
             parser.add_argument('--compress-snapshot',action='store_true',help='keep a hash-bound gzip aggregate in the repository; build serves decoded JSON')
+            parser.add_argument('--compact-nodes',action='store_true',help='losslessly share repeated institution fields in the public transport')
             group=parser.add_mutually_exclusive_group()
             group.add_argument('--freeze-input',action='store_true')
             group.add_argument('--frozen-input',help='private normalized snapshot filename, never a public file')
@@ -329,7 +330,7 @@ def execute_task(task, args):
                 if snapshot is not None and not fresh_rows and not snapshot['filename'].endswith('.rows'):
                     snapshot['bytes']=store.db.execute('PRAGMA page_count').fetchone()[0]*store.db.execute('PRAGMA page_size').fetchone()[0]
                 result=export_release(store,args.out,publication_policy=policy,frozen_input=snapshot,
-                    compress_snapshot=getattr(args,'compress_snapshot',False))
+                    compress_snapshot=getattr(args,'compress_snapshot',False),compact_nodes=getattr(args,'compact_nodes',False))
         else:
             from .global_analysis import corroborate, export_release, export_local
             result = {"corroborate": corroborate,
