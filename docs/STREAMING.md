@@ -1,10 +1,18 @@
 # Bounded real-career ingestion
 
-The task contract is `configs/streaming.json`. It limits new data to 2 GiB (including
+The task contract is `configs/streaming.json`. It limits new data to 4 GiB (including
 the task-local optional DuckDB runtime, journals, release staging and builds), keeps
 a 256 MiB write reserve, limits each transaction to 1,000 events, reads compressed
 data in chunks no larger than 64 KiB, and samples process resident memory against
 512 MiB. Defaults use the D drive on Windows. No cloud accounts or billing are used.
+
+The original 2 GiB limit remains the historical baseline for earlier measurements.
+On 2026-11-01, after lossless primary-key delta repacks saved 9,544,716 bytes,
+freezing the new real input still failed the 2 GiB admission check. The user then
+authorized a conditional increase to 4 GiB. The configured ceiling was raised;
+the 256 MiB reserve, 512 MiB process limit, single writer, no raw-file storage and
+incremental transaction limits remain unchanged. Older sections recording 2 GiB
+describe their original test conditions rather than a second active limit.
 
 ## Reproduce and resume
 
@@ -1029,6 +1037,24 @@ sort. It cannot promise savings: allocated pages can remain unchanged and later
 rows may reduce the freelist. Report net reusable pages across the whole run;
 do not describe them as filesystem bytes reclaimed. New ingestion can consume
 the freed pages while retaining the same total file size.
+
+### Primary-key alignment in private deltas
+
+New row freezes can align rows by the existing table's ascending BINARY primary
+key, after both archive headers match its exact table declaration. This prevents
+a same-table insertion longer than the bounded exact-line lookahead from causing
+unchanged rows to be encoded again. Composite and BLOB keys use SQLite storage
+class ordering. NULL, unknown declarations, custom collation, descending keys
+and mismatched schemas retain the previous exact-line synchronization.
+
+The decoder and archive formats do not change: the writer still emits only
+copy, skip and exact additions. Complete baseline and reconstructed target hashes
+remain mandatory. This changes neither evidence nor ranking rules. The existing
+`rebase_delta` owner accepts `primary_key_alignment=True` for a separately
+admitted, sole-writer retained-input replacement; dry-run output must fit staging,
+and size regressions retain the predecessor. Repetition may recompute a candidate
+but never rewrites a non-smaller successor. Production savings must be measured
+separately from a memory-only preview.
 
 ### Inline evidence URLs
 
