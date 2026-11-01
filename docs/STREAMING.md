@@ -1042,8 +1042,10 @@ No URL-access, evidence-confidence or source-independence rule is changed.
 The frame stores the decoded UTF-8 byte count and a zlib stream. Both compressed
 and decoded frames are bounded to 65,536 bytes, with complete stream and CRC
 checks. Unprofitable, empty or unusually large legacy strings remain TEXT.
-Private row archives preserve this self-contained representation without a new
-dependency table, and current readers also support historical TEXT archives.
+New private row archives emit the exact restored URL text so a physical URL
+repack cannot change their logical input identity or hide repetition from the
+outer archive compressor. No dictionary table is needed. Readers also support
+historical TEXT and inline-compressed archives.
 
 The optional command uses the existing sole-writer lock and budget checks:
 
@@ -1053,9 +1055,15 @@ python -m gapi repack-evidence-urls --after SOURCE LOCATOR PART --max-rows 10000
 ```
 
 Each transaction changes at most 128 rows and checks the complete restored row
-and original rowid before commit. Only a successful returned checkpoint may
+and original rowid before commit. Batches with shorter URLs are deleted and
+reinserted inside that same transaction with their original rowids, allowing
+whole pages to become reusable. Unknown table columns, triggers and incoming
+foreign keys fail closed before mutation. `net_reusable_bytes` measures the
+decrease in occupied SQLite pages, not physical file shrinkage; fragmentation
+can make that value differ from payload savings or even become negative.
+Only a successful returned checkpoint may
 advance the next call. Repeating the same range is a no-op after conversion.
 Checkpoints can contain private evidence locators: keep them outside public
 assets. The command preserves all URLs and evidence fields. Its reported payload
-reduction is not filesystem deletion; shrinking a field in place may only create
-space inside existing pages. Do not migrate beside an active collector.
+reduction is not filesystem deletion, and page reuse must be measured separately
+from the change in field bytes. Do not migrate beside an active collector.
