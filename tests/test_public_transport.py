@@ -19,6 +19,18 @@ spec.loader.exec_module(independent)
 
 
 class PublicTransportTests(unittest.TestCase):
+    def test_directory_above_legacy_limit_preserves_all_unranked_entries(self):
+        data = {'schema_version':'gapi-global-observed/v1', 'nodes':[
+            {'institution_id':f'test:{i}', 'name':f'Institution {i}',
+             'network_score':None, 'formal_rank':None}
+            for i in range(65920)]}
+        expected = canonical(data)
+        wire = pack(data)
+        for reader in (unpack, independent.expand_transport):
+            self.assertEqual(canonical(reader(wire)), expected)
+        self.assertEqual(len(unpack(wire)['nodes']),65920)
+        self.assertLess(len(canonical(wire)),32*1024**2)
+
     def fixture(self):
         return json.loads(Path('data/samples/public-transport-contract.json').read_bytes())
 

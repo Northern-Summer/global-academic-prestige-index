@@ -30,7 +30,7 @@ def expand_transport(value):
             or 'nodes' in body or forbidden & body.keys() or not fields(defaults)
             or {'institution_id','name'} & defaults.keys()
             or len(json.dumps(defaults,ensure_ascii=True,sort_keys=True,separators=(',',':')).encode())>65536
-            or not isinstance(rows,list) or len(rows)>65536):raise ValueError('compact structure')
+            or not isinstance(rows,list) or len(rows)>131072):raise ValueError('compact structure')
     restored=[]
     for row in rows:
         if not fields(row) or not {'institution_id','name'}<=row.keys() or len(defaults.keys()|row.keys())>64:

@@ -1,0 +1,5 @@
+This update adds 96,712 public education and employment events from ORCID and Wikidata. The input contains 657,184 events associated with 176,844 internal person keys across 162 country and region codes. Of these events, 583,386 remain unresolved; input counts do not represent verified careers or qualifying talent-flow relationships. Input, configuration and output hashes are recorded in the release manifest. The 2023 historical dataset remains separately labelled.
+
+The institution directory can now retain up to 131,072 entries. The previous limit of 65,536 blocked this export as the observed directory grew. The 32 MiB snapshot limit and the separate network rendering limits remain in place; scores and eligibility rules are unchanged.
+
+Scores describe observed talent-flow relationships. Coverage is incomplete, and independent external review is pending. Award and composite scores remain missing where supporting evidence is insufficient. Public downloads contain institution aggregates, without individual career trajectories.

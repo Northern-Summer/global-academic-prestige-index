@@ -8,7 +8,9 @@ from collections import Counter
 from .task import canonical
 
 FORMAT = 'gapi-institution-defaults/1'
-MAX_NODES = 65536
+# Directory entries include unranked observed institutions. Independent readers
+# mirror this transport bound; shared boundary tests enforce compatibility.
+MAX_NODES = 131072
 MAX_FIELDS = 64
 MAX_DEFAULT_BYTES = 65536
 FORBIDDEN = {'__proto__', 'constructor', 'prototype'}

@@ -1,6 +1,6 @@
 // Versioned storage protocol only; eligibility and scores remain server outputs.
 // Python owner: gapi.public_transport. Cross-runtime tests prove equivalence.
-export const MAX_DIRECTORY_NODES = 65536;
+export const MAX_DIRECTORY_NODES = 131072;
 const FORMAT = 'gapi-institution-defaults/1';
 const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);

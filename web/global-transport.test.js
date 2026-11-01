@@ -6,6 +6,15 @@ import {validateGlobal} from './global-data.js';
 
 const fixture = () => JSON.parse(readFileSync(new URL('../data/samples/public-transport-contract.json', import.meta.url)));
 
+test('directory above legacy 65536 limit retains unranked institutions', () => {
+  const wire = fixture().wire;
+  wire.node_rows = Array.from({length: 65920}, (_, i) => ({institution_id: `test:${i}`, name: `Institution ${i}`}));
+  const decoded = decodeGlobalTransport(wire);
+  assert.equal(decoded.nodes.length, 65920);
+  assert.equal(decoded.nodes.at(-1).institution_id, 'test:65919');
+  assert.equal(decoded.nodes.at(-1).name, 'Institution 65919');
+});
+
 test('shared Python/JavaScript protocol fixture preserves every field, type and legacy input', () => {
   const {logical, wire} = fixture();
   const before = JSON.stringify(wire);
