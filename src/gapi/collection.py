@@ -17,6 +17,8 @@ from .crossref_discovery import discover_crossref
 from .task import BudgetStop
 from .source_http import SourcePause, StageDeadline, WIKIDATA_BATCH_LIMIT
 
+DISCOVERY_WINDOW_SECONDS = 60
+
 
 def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True):
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
@@ -27,6 +29,8 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
     suspended=set()
     dump_attempted=False
     discovery_suspended=set()
+    discovery_retry_after={}
+    wikidata_scope='academic'
     stages=deque(maxlen=10)
     discovery_pages=0
     storage_contended=False
@@ -44,26 +48,31 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                                   ('ingest-orcid-api','crossref-discovery'),
                                   ('ingest-wikidata','wikidata-discovery')):
             if not discovery:continue
+            if feed_name in discovery_retry_after and time.monotonic()>=discovery_retry_after[feed_name]:
+                discovery_suspended.discard(feed_name)
+                del discovery_retry_after[feed_name]
             if command in suspended or feed_name in discovery_suspended or time.monotonic()>=deadline or not store.source_ready(feed_name):
                 continue
             if store.pending(command,batch_members):
                 continue
             try:
                 before=store.db.execute('SELECT count(*) FROM discovery_pages').fetchone()[0]
-                with window(min(60,deadline-time.monotonic())):
+                with window(min(DISCOVERY_WINDOW_SECONDS,deadline-time.monotonic())):
                     if feed_name=='openalex-discovery':
                         result=discover_openalex(store,http,pages=1,progress=progress)
                     elif feed_name=='crossref-discovery':
                         result=discover_crossref(store,http,pages=1,progress=progress)
                     else:
-                        result=enqueue_discovery(store,http,command,limit=200)
-                        if result.get('status')=='live-query-exhausted-not-global-complete':
+                        options={} if wikidata_scope=='academic' else {'scope':wikidata_scope}
+                        result=enqueue_discovery(store,http,command,limit=200,**options)
+                        if result.get('status')=='live-query-exhausted-not-global-complete' and wikidata_scope=='academic':
                             # Separate persisted selection/cursor, same deduped
                             # candidate queue. Exhausting an occupation query
                             # must not strand the existing explicit-degree feed.
                             result=enqueue_discovery(store,http,command,limit=200,
                                                      scope='degree-employer')
-                            result={'scope':'degree-employer',**result}
+                            wikidata_scope='degree-employer'
+                        result={'scope':wikidata_scope,**result}
                 advanced=store.db.execute('SELECT count(*) FROM discovery_pages').fetchone()[0]-before
                 discovery_pages+=advanced
                 progressed|=advanced>0
@@ -73,6 +82,14 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 raise
             except StageDeadline:
                 discovery_suspended.add(feed_name)
+                # No sleep or idle loop: only independent productive work can
+                # keep this invocation alive until a full window has elapsed.
+                discovery_retry_after[feed_name]=time.monotonic()+DISCOVERY_WINDOW_SECONDS
+                if feed_name=='wikidata-discovery':
+                    # Independent persisted selections share the same source
+                    # backoff and dedup queue. A slow query must not require
+                    # exhausting its whole universe before trying the other.
+                    wikidata_scope=('degree-employer' if wikidata_scope=='academic' else 'academic')
                 if progress:progress({'stage':feed_name,'status':'resumable-stage-time-boundary'})
             except SourcePause as exc:
                 # A server deadline is already persisted and checked above.

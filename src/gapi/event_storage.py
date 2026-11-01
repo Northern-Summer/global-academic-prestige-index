@@ -19,6 +19,61 @@ DICT_MAGIC = b'GAPIz2\0'
 MAX_DICTIONARY_BYTES = 8192
 DICTIONARY_DDL = '''CREATE TABLE IF NOT EXISTS event_dictionaries(
  digest BLOB PRIMARY KEY, compressed_bytes BLOB NOT NULL);'''
+MAX_BLOCK_EVENTS = 128
+MAX_BLOCK_BYTES = MAX_BLOCK_EVENTS * (MAX_BYTES + 4)
+
+
+def encode_event_block(texts):
+    """Encode a bounded group of normalized events, retaining every UTF-8 byte.
+
+    This codec alone does not enable a live database format or migration.
+    Blocks have no external dictionary dependency; their SHA-256 binds framing
+    and order as well as contents. Iterables are consumed with a hard count cap.
+    """
+    frames=[]
+    for text in texts:
+        if len(frames)>=MAX_BLOCK_EVENTS:
+            raise ValueError('event block exceeds count limit')
+        if not isinstance(text,str):raise ValueError('event block requires text')
+        if not 0<len(text)<=MAX_BYTES:raise ValueError('invalid event block item size')
+        raw=text.encode('utf-8')
+        if not 0<len(raw)<=MAX_BYTES:raise ValueError('invalid event block item size')
+        frames.append(len(raw).to_bytes(4,'big')+raw)
+    if not frames:raise ValueError('event block is empty')
+    raw=b''.join(frames)
+    return hashlib.sha256(raw).digest(),zlib.compress(raw,6)
+
+
+def decode_event_block(key, body):
+    """Reject oversized, corrupt, trailing or invalid UTF-8 block data.
+
+    No persistent cache: callers that cache must bind it to an immutable input
+    or a transaction, and must not hide subsequent database mutations.
+    """
+    if not isinstance(key,bytes) or len(key)!=32:
+        raise ValueError('invalid event block digest')
+    # zlib overhead for this bounded payload is well under 64 KiB, including
+    # incompressible legitimate inputs. Reject huge compressed input up front.
+    if not isinstance(body,bytes) or not 0<len(body)<=MAX_BLOCK_BYTES+65536:
+        raise ValueError('invalid compressed event block size')
+    try:
+        decoder=zlib.decompressobj()
+        raw=decoder.decompress(body,MAX_BLOCK_BYTES+1)
+        if (len(raw)>MAX_BLOCK_BYTES or not decoder.eof or decoder.unused_data
+                or decoder.unconsumed_tail or hashlib.sha256(raw).digest()!=key):
+            raise ValueError('event block integrity mismatch')
+        cursor=0;parts=[]
+        while cursor<len(raw):
+            if cursor+4>len(raw):raise ValueError('truncated event block frame')
+            length=int.from_bytes(raw[cursor:cursor+4],'big');cursor+=4
+            if not 0<length<=MAX_BYTES or cursor+length>len(raw):
+                raise ValueError('invalid event block frame size')
+            parts.append(raw[cursor:cursor+length].decode('utf-8'));cursor+=length
+            if len(parts)>MAX_BLOCK_EVENTS:raise ValueError('event block exceeds count limit')
+        if not parts:raise ValueError('event block is empty')
+        return tuple(parts)
+    except (zlib.error,UnicodeDecodeError) as exc:
+        raise ValueError('invalid compressed event block') from exc
 
 
 def pack(text, *, dictionary=None):
