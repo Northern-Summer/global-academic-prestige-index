@@ -448,5 +448,6 @@ def enqueue_discovery(store, http, command, *, limit=200, scope='academic'):
         if value and (command == 'ingest-wikidata' or valid_orcid(value)):
             ids.add(value)
     end = page['rows'][-1]['qid'] if page['rows'] else cursor
-    store.queue_page(page_source,command,cursor,end,page['query_sha256'],page['response_sha256'],ids,len(page['rows']))
-    return {'status': page['enumeration'], 'cursor': end, 'rows': len(page['rows']), 'queued': len(ids)}
+    inserted=store.queue_page(page_source,command,cursor,end,page['query_sha256'],page['response_sha256'],ids,len(page['rows']))
+    return {'status': page['enumeration'], 'cursor': end, 'rows': len(page['rows']),
+            'selected':len(ids),'queued':inserted}

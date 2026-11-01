@@ -412,6 +412,57 @@ class CollectionTests(unittest.TestCase):
                 collect(s,None,{'id':'feed'},discovery=False)
         finally:s.close()
 
+    def test_discovery_server_pause_recovers_without_restart(self):
+        self._check_discovery_server_pause(expires=True)
+
+    def test_discovery_server_pause_never_retries_before_deadline(self):
+        self._check_discovery_server_pause(expires=False)
+
+    def _check_discovery_server_pause(self, *, expires):
+        from gapi.source_http import SourcePause
+        s=self.store(archive([]));clock=[1000.0];attempts=[];progress=[]
+        try:
+            with s.db:
+                s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
+                    ('ingest-orcid-api',value,'a','b') for value in ('one','two')])
+            retry_at=1002 if expires else 2000
+            def discover(store,http,command,**kwargs):
+                attempts.append(clock[0])
+                if len(attempts)==1:
+                    raise SourcePause(429,retry_at,'temporary discovery limit')
+                self.assertGreaterEqual(clock[0],retry_at)
+                store.queue_page('ingest-wikidata:academic',command,'','Q1',
+                                 'a'*64,'b'*64,{'Q1'},1)
+                return {'rows':1,'queued':1}
+            def orcid(store,http,ids,**kwargs):
+                clock[0]+=1
+                store.start('orcid-public-api')
+                with store.member('orcid-public-api',ids[0]):
+                    store.finish_member('orcid-public-api',ids[0],'a'*64)
+            def wikidata(store,http,ids,**kwargs):
+                store.start('wikidata')
+                with store.member('wikidata','Q1@1'):
+                    store.finish_member('wikidata','Q1@1','a'*64)
+                clock[0]=1010
+            with patch('gapi.collection.enqueue_discovery',side_effect=discover), \
+                 patch('gapi.collection.discover_openalex',return_value={}), \
+                 patch('gapi.collection.discover_crossref',return_value={}), \
+                 patch('gapi.collection.ingest_orcid_api',side_effect=orcid), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=wikidata), \
+                 patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('gapi.career_store.time.time',side_effect=lambda:clock[0]):
+                result=collect(s,None,batch_members=1,max_seconds=10,progress=progress.append)
+            self.assertEqual(attempts,[1000,1002] if expires else [1000])
+            self.assertNotIn('wikidata-discovery',result['suspended_discovery'])
+            self.assertEqual(bool(s.seen('wikidata','Q1@1')),expires)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM members WHERE source=?',
+                                          ('orcid-public-api',)).fetchone()[0],2)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM failures WHERE source=?',
+                                          ('wikidata-discovery',)).fetchone()[0],1)
+            self.assertTrue(any(r.get('status')=='server-backoff-pending' for r in progress))
+            self.assertFalse(result['global_complete'])
+        finally:s.close()
+
     def test_discovery_window_exhaustion_is_pending_not_a_source_failure(self):
         from gapi.source_http import StageDeadline
         s=self.store(archive([]));progress=[]

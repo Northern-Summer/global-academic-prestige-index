@@ -334,13 +334,14 @@ class CareerStore:
                 (command,identifier,attempts,(time.time() if now is None else now)+delay,str(reason)[:512]))
 
     def queue_page(self, feed, command, before, after, query_hash, response_hash, identifiers, row_count):
-        """The candidate queue and its discovery cursor share one commit boundary."""
+        """Commit queue/cursor atomically; return only newly inserted candidates."""
         self.task.check(1024**2)
         with self.db:
-            self.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
-                [pack_row((command,value,query_hash,response_hash)) for value in sorted(identifiers)])
+            inserted=self.db.executemany('INSERT OR IGNORE INTO discovery VALUES(?,?,?,?)',
+                [pack_row((command,value,query_hash,response_hash)) for value in sorted(identifiers)]).rowcount
             self.db.execute('INSERT INTO discovery_pages VALUES(?,?,?,?,?,?,?)',
                 (feed,before,after,query_hash,response_hash,datetime.now(timezone.utc).isoformat(),row_count))
+        return inserted
 
     def source_ready(self, source, *, now=None):
         row=self.db.execute('SELECT retry_at FROM source_pauses WHERE source=?',(source,)).fetchone()

@@ -26,6 +26,17 @@ class DiscoveryTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_selected_candidates_do_not_inflate_new_queue_count(self):
+        s=self.store(archive([]))
+        try:
+            s.queue_page('other-feed','ingest-wikidata','','Q1','c'*64,'d'*64,['Q1'],1)
+            result=enqueue_discovery(s,FakeHTTP([[('Q1',''),('Q2','')]]),'ingest-wikidata')
+            self.assertEqual((result['rows'],result['selected'],result['queued']),(2,2,1))
+            self.assertEqual(s.db.execute('SELECT count(*) FROM discovery').fetchone()[0],2)
+            self.assertEqual(s.queue_page('duplicate-feed','ingest-wikidata','','Q2','c'*64,'d'*64,['Q1','Q2'],2),0)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+        finally:s.close()
+
     def test_advancing_atomic_pages_survive_reopen_and_keep_legacy_queue(self):
         s = self.store(archive([]))
         http = FakeHTTP([[('Q10', ''), ('Q2', '')], [('Q30', '')], []])

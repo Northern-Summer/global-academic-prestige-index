@@ -23,8 +23,10 @@ class CrossrefDiscoveryTests(unittest.TestCase):
         s=self.store(archive([]))
         try:
             http=HTTP([page('next'),page('later')])
-            discover_crossref(s,http,per_page=1)
-            discover_crossref(s,http,per_page=1)
+            first=discover_crossref(s,http,per_page=1)
+            second=discover_crossref(s,http,per_page=1)
+            self.assertEqual((first['candidate_ids'],first['new_candidate_ids']),(1,1))
+            self.assertEqual((second['candidate_ids'],second['new_candidate_ids']),(1,0))
             params=parse_qs(urlsplit(http.urls[1]).query)
             self.assertEqual(params['cursor'],['next'])
             self.assertEqual(params['select'],['DOI,author'])

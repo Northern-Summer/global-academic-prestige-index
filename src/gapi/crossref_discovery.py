@@ -29,7 +29,7 @@ def discover_crossref(store,http,*,pages=1,per_page=50,progress=None):
     cursor=previous[0] if previous else '*'
     if previous and not cursor:
         return {'feed':FEED,'status':'live-selection-exhausted-not-global-complete','pages':0}
-    committed=queued=0
+    committed=queued=inserted_total=0
     for _ in range(pages):
         store.task.check();store.task.check_memory()
         params={key:POLICY[key] for key in ('filter','select','sort','order')}
@@ -64,10 +64,11 @@ def discover_crossref(store,http,*,pages=1,per_page=50,progress=None):
                 if value.startswith(('https://orcid.org/','http://orcid.org/')):
                     value=value.rsplit('/',1)[-1]
                     if valid_orcid(value):ids.add(value)
-        store.queue_page(FEED,'ingest-orcid-api',cursor,following,digest(params),response_hash,ids,len(rows))
+        inserted=store.queue_page(FEED,'ingest-orcid-api',cursor,following,digest(params),response_hash,ids,len(rows))
+        inserted_total+=inserted
         committed+=1;queued+=len(ids);cursor=following
-        if progress:progress({'feed':FEED,'page_committed':committed,'candidate_ids':len(ids),
+        if progress:progress({'feed':FEED,'page_committed':committed,'candidate_ids':len(ids),'new_candidate_ids':inserted,
             'reported_work_count':message.get('total-results'),'requested_fields':['DOI','author']})
         if not cursor:break
-    return {'feed':FEED,'pages':committed,'candidate_ids':queued,'status':'live-selection-incomplete' if cursor else 'live-selection-exhausted-not-global-complete',
+    return {'feed':FEED,'pages':committed,'candidate_ids':queued,'new_candidate_ids':inserted_total,'status':'live-selection-incomplete' if cursor else 'live-selection-exhausted-not-global-complete',
             'canonical_events_written':0,'paid_api_key_used':False}

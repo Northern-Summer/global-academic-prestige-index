@@ -30,8 +30,10 @@ class OpenAlexDiscoveryTests(unittest.TestCase):
         s=self.store(archive([]))
         try:
             http=HTTP([page('next-1'),page('next-2')])
-            discover_openalex(s,http)
-            discover_openalex(s,http)
+            first=discover_openalex(s,http)
+            second=discover_openalex(s,http)
+            self.assertEqual((first['candidate_ids'],first['new_candidate_ids']),(1,1))
+            self.assertEqual((second['candidate_ids'],second['new_candidate_ids']),(1,0))
             params=parse_qs(urlsplit(http.urls[1]).query)
             self.assertEqual(params['cursor'],['next-1'])
             self.assertEqual(params['select'],['id,orcid'])

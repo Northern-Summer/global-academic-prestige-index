@@ -67,8 +67,15 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
             except StageDeadline:
                 discovery_suspended.add(feed_name)
                 if progress:progress({'stage':feed_name,'status':'resumable-stage-time-boundary'})
+            except SourcePause as exc:
+                # A server deadline is already persisted and checked above.
+                # Re-admit after independent work outlasts it; suspending this
+                # feed for the invocation would ignore an expired Retry-After.
+                store.pause_source(feed_name,exc.retry_at,str(exc))
+                store.failure(feed_name,'collection-loop',str(exc))
+                if progress:progress({'stage':feed_name,'status':'server-backoff-pending',
+                                      'retry_at':exc.retry_at,'failed':str(exc)[:256]})
             except (OSError,ValueError,RuntimeError) as exc:
-                if isinstance(exc,SourcePause):store.pause_source(feed_name,exc.retry_at,str(exc))
                 discovery_suspended.add(feed_name)
                 store.failure(feed_name,'collection-loop',str(exc))
                 if progress:progress({'stage':feed_name,'failed':str(exc)[:256]})
