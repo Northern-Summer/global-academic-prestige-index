@@ -13,6 +13,7 @@ from .career_rules import classify, year, valid_orcid
 from .orcid_stream import private_person, SummaryParser, CHUNK
 from .task import digest, BudgetStop
 from .queue_storage import pack_row
+from .evidence_storage import pack_url
 from .source_http import SourcePause, SourceRedirect, StageDeadline, ORCID_ANONYMOUS_DAILY_READS, WIKIDATA_BATCH_LIMIT
 
 # Historical acquisition/v1 mapping, frozen by sources.lock.json. Q177232 was
@@ -126,7 +127,7 @@ def commit_wikidata_entity(store, qid, entity, checksum, *, batch_url=None, batc
             store.event(event)
         if batch_url:
             store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
-                ('wikidata',locator,'entity-batch/v1',batch_url,checksum,batch_bytes,retrieved))
+                ('wikidata',locator,'entity-batch/v1',pack_url(batch_url),checksum,batch_bytes,retrieved))
         store.finish_member('wikidata',locator,entity_hash)
         ids = {wd_value(claim['mainsnak']) for claim in entity.get('claims',{}).get('P496',[])
                if claim.get('rank')!='deprecated' and valid_orcid(wd_value(claim['mainsnak']))}
@@ -341,7 +342,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, repor
                         parser.feed(b"", final=True)
                     parts[section]=checksum.hexdigest()
                     store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
-                        (source,orcid,section,url,parts[section],section_bytes,retrieved))
+                        (source,orcid,section,pack_url(url),parts[section],section_bytes,retrieved))
                 store.finish_member(source, orcid, digest({'transport':'incremental-affiliation-xml/v1','parts':parts}))
             if progress:
                 progress({"source":source,"committed_members":store.db.execute("SELECT count(*) FROM members WHERE source=?",(source,)).fetchone()[0]})

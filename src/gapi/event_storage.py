@@ -11,6 +11,7 @@ import math
 import time
 import zlib
 from .queue_storage import COLUMNS, unpack_digest
+from .evidence_storage import unpack_url
 
 MAGIC = b'GAPIz1\0'
 MAX_BYTES = 16384
@@ -68,13 +69,17 @@ def payload_row(cursor, row, *, decode=unpack):
     """Preserve tuple API, exposing owned encoded columns as original TEXT.
 
     Aliasing a raw column as stored_payload explicitly inspects physical bytes.
-    Candidate query_sha256/response_sha256 columns use their own lossless codec.
-    Other BLOB columns are not interpreted or modified.
+    Candidate query_sha256/response_sha256 columns and evidence `url` columns
+    use their own lossless codecs. Other BLOB columns are not interpreted.
     """
     if any(column[0] in COLUMNS and isinstance(value,bytes)
            for column,value in zip(cursor.description,row)):
         row=tuple(unpack_digest(value) if column[0] in COLUMNS and isinstance(value,bytes)
                   else value for column,value in zip(cursor.description,row))
+    if any(column[0] == 'url' and isinstance(value, bytes)
+           for column, value in zip(cursor.description, row)):
+        row=tuple(unpack_url(value) if column[0] == 'url' and isinstance(value, bytes)
+                  else value for column, value in zip(cursor.description, row))
     if any(column[0] == 'payload' and isinstance(value, bytes)
            for column, value in zip(cursor.description, row)):
         return tuple(decode(value) if column[0] == 'payload' and isinstance(value, bytes)

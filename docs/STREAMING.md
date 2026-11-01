@@ -1029,3 +1029,33 @@ sort. It cannot promise savings: allocated pages can remain unchanged and later
 rows may reduce the freelist. Report net reusable pages across the whole run;
 do not describe them as filesystem bytes reclaimed. New ingestion can consume
 the freed pages while retaining the same total file size.
+
+### Inline evidence URLs
+
+`member_parts.url` may contain legacy TEXT or a `GAPIu1` compressed BLOB.
+The ordinary row reader exposes the exact original URL string; raw inspections
+must use `url AS stored_url` or a cursor without the configured row factory.
+SQL functions applied directly to `url`, such as `length(url)`, measure the
+physical representation and must not be interpreted as the original URL length.
+No URL-access, evidence-confidence or source-independence rule is changed.
+
+The frame stores the decoded UTF-8 byte count and a zlib stream. Both compressed
+and decoded frames are bounded to 65,536 bytes, with complete stream and CRC
+checks. Unprofitable, empty or unusually large legacy strings remain TEXT.
+Private row archives preserve this self-contained representation without a new
+dependency table, and current readers also support historical TEXT archives.
+
+The optional command uses the existing sole-writer lock and budget checks:
+
+```text
+python -m gapi repack-evidence-urls --max-rows 10000 --max-seconds 30
+python -m gapi repack-evidence-urls --after SOURCE LOCATOR PART --max-rows 10000 --max-seconds 30
+```
+
+Each transaction changes at most 128 rows and checks the complete restored row
+and original rowid before commit. Only a successful returned checkpoint may
+advance the next call. Repeating the same range is a no-op after conversion.
+Checkpoints can contain private evidence locators: keep them outside public
+assets. The command preserves all URLs and evidence fields. Its reported payload
+reduction is not filesystem deletion; shrinking a field in place may only create
+space inside existing pages. Do not migrate beside an active collector.
