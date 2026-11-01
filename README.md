@@ -6,7 +6,7 @@ The site shows a global observation view plus a separately named historical US f
 
 ## Quick start
 
-Python 3.11+ and Node.js 22+. The Windows task defaults to external D-drive processing, a 2 GiB total data cap and a 512 MiB parser budget. Source XML/archives are never saved by the new streaming pipeline.
+Python 3.11+ and Node.js 22+. The Windows task defaults to external D-drive processing. Storage, write reserve and parser memory limits are defined in [`configs/streaming.json`](configs/streaming.json); see [the streaming guide](docs/STREAMING.md) for the resource policy and its changes. Source XML/archives are never saved by the new streaming pipeline.
 
 ```powershell
 python -m pip install -e .
