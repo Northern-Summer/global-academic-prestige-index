@@ -1,0 +1,5 @@
+This update adds 102,232 public education and employment events from ORCID and Wikidata. The input contains 759,416 events associated with 205,725 internal person keys across 169 country and region codes. Of these events, 672,382 remain unresolved; input counts do not represent verified careers or qualifying talent-flow relationships. Input, configuration and output hashes are recorded in the release manifest. The 2023 historical dataset remains separately labelled.
+
+When the academic-occupation candidate query is exhausted, collection can now continue the existing explicit-degree-and-employer query. Each selection retains its own cursor and shares the deduplicated candidate queue. Neither query provides a complete world personnel census. Ranking methods, eligibility rules and typography are unchanged.
+
+Scores describe observed talent-flow relationships. Coverage is incomplete, and independent external review is pending. Award and composite scores remain missing where supporting evidence is insufficient. Public downloads contain institution aggregates, without individual career trajectories.

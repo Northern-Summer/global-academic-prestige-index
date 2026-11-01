@@ -26,6 +26,32 @@ class DiscoveryTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_degree_employer_cursor_survives_reopen_separate_from_exhausted_academic(self):
+        s=self.store(archive([]));http=FakeHTTP([[],[('Q1','')],[('Q2','')],[]])
+        try:
+            enqueue_discovery(s,http,'ingest-wikidata')
+            self.assertEqual(enqueue_discovery(s,http,'ingest-wikidata')['status'],
+                             'live-query-exhausted-not-global-complete')
+            first=enqueue_discovery(s,http,'ingest-wikidata',scope='degree-employer')
+            self.assertEqual(first['queued'],1)
+            self.assertIn('pq:P512 ?degree',http.urls[-1])
+            self.assertIn('wdt:P108 ?employer',http.urls[-1])
+            self.assertNotIn('wdt:P106',http.urls[-1])
+            s.close()
+            from gapi.career_store import CareerStore
+            from gapi.task import Task
+            s=CareerStore(Task(self.path))
+            second=enqueue_discovery(s,http,'ingest-wikidata',scope='degree-employer')
+            self.assertEqual(second['cursor'],'Q2')
+            self.assertIn('http://www.wikidata.org/entity/Q1',http.urls[-1])
+            enqueue_discovery(s,http,'ingest-wikidata',scope='degree-employer')
+            self.assertEqual(enqueue_discovery(s,http,'ingest-wikidata',scope='degree-employer')['status'],
+                             'live-query-exhausted-not-global-complete')
+            self.assertEqual(len(http.urls),4)
+            self.assertEqual(s.pending('ingest-wikidata'),['Q1','Q2'])
+            self.assertEqual(s.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+        finally:s.close()
+
     def test_selected_candidates_do_not_inflate_new_queue_count(self):
         s=self.store(archive([]))
         try:

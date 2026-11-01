@@ -57,6 +57,13 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                         result=discover_crossref(store,http,pages=1,progress=progress)
                     else:
                         result=enqueue_discovery(store,http,command,limit=200)
+                        if result.get('status')=='live-query-exhausted-not-global-complete':
+                            # Separate persisted selection/cursor, same deduped
+                            # candidate queue. Exhausting an occupation query
+                            # must not strand the existing explicit-degree feed.
+                            result=enqueue_discovery(store,http,command,limit=200,
+                                                     scope='degree-employer')
+                            result={'scope':'degree-employer',**result}
                 advanced=store.db.execute('SELECT count(*) FROM discovery_pages').fetchone()[0]-before
                 discovery_pages+=advanced
                 progressed|=advanced>0

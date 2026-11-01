@@ -412,6 +412,48 @@ class CollectionTests(unittest.TestCase):
                 collect(s,None,{'id':'feed'},discovery=False)
         finally:s.close()
 
+    def test_exhausted_academic_selection_continues_existing_degree_employer_feed(self):
+        s=self.store(archive([]));progress=[];calls=[];clock=[0.0]
+        try:
+            def discover(store,http,command,**kwargs):
+                scope=kwargs.get('scope','academic');calls.append(scope)
+                if scope=='academic':
+                    return {'status':'live-query-exhausted-not-global-complete','cursor':'Q9'}
+                store.queue_page('ingest-wikidata:degree-employer',command,'','Q1',
+                                 'a'*64,'b'*64,{'Q1'},1)
+                return {'status':'ordered-live-selection-not-frozen-global-enumeration',
+                        'rows':1,'selected':1,'queued':1}
+            def ingest(store,http,ids,**kwargs):
+                self.assertEqual(ids,['Q1'])
+                store.start('wikidata')
+                with store.member('wikidata','Q1@1'):
+                    store.finish_member('wikidata','Q1@1','a'*64)
+                clock[0]=10
+            with patch('gapi.collection.enqueue_discovery',side_effect=discover), \
+                 patch('gapi.collection.discover_openalex',return_value={}), \
+                 patch('gapi.collection.discover_crossref',return_value={}), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]):
+                result=collect(s,None,max_seconds=10,progress=progress.append)
+            self.assertEqual(calls,['academic','degree-employer'])
+            self.assertIsNotNone(s.seen('wikidata','Q1@1'))
+            self.assertEqual(result['discovery_pages_committed'],1)
+            self.assertTrue(any(r.get('scope')=='degree-employer' for r in progress))
+            self.assertFalse(result['global_complete'])
+        finally:s.close()
+
+    def test_active_academic_selection_does_not_start_degree_employer_feed(self):
+        s=self.store(archive([]))
+        try:
+            with patch('gapi.collection.enqueue_discovery',return_value={}) as discover, \
+                 patch('gapi.collection.discover_openalex',return_value={}), \
+                 patch('gapi.collection.discover_crossref',return_value={}):
+                result=collect(s,None,max_seconds=10)
+            discover.assert_called_once()
+            self.assertNotIn('scope',discover.call_args.kwargs)
+            self.assertFalse(result['global_complete'])
+        finally:s.close()
+
     def test_discovery_server_pause_recovers_without_restart(self):
         self._check_discovery_server_pause(expires=True)
 
