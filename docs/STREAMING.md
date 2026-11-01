@@ -70,6 +70,21 @@ No checksum, truncated input, changed member hash or an incomplete stream cannot
 produce a verified annual source. Normalized provisional rows can be retained for
 replay, but the scoring reader excludes them.
 
+For annual archive replay, `ingest-orcid --max-new-members 500` stops after 500
+previously uncommitted members, including rejected members. The existing
+`--max-members` remains a bound on all members scanned in this pass; if both are
+given, the first reached limit stops the pass. Previously committed members are
+read and hashed without a member write transaction. Their stored hash must match
+before replay advances. Reaching a member limit leaves the archive provisional,
+even when the last data member has been consumed; full EOF and checksum validation
+still require a complete pass. The time limit also includes prefix replay, so a
+short time window can stop before any new member. This reduces redundant writes
+but does not remove gzip replay costs or provide random access.
+
+The CLI still selects the original frozen `orcid-2026-summary` source. The separately
+frozen 2025 pilot uses the shared Python importer in its isolated task directory;
+it is not merged into production or treated as fully verified archive data.
+
 ## Actual source boundaries
 
 ### Bounded Wikibase entity batches

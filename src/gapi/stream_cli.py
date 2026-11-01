@@ -113,6 +113,9 @@ def register(sub):
             parser.add_argument("--resume", action="store_true")
             parser.add_argument("--max-members", type=int)
             parser.add_argument("--max-seconds", type=float, default=300)
+        if name == 'ingest-orcid':
+            parser.add_argument('--max-new-members',type=int,
+                help='stop after this many previously uncommitted members; gzip still replays from the start')
         if name in ("ingest-wikidata", "ingest-orcid-api"):
             parser.add_argument("--ids", nargs="*", default=[])
             parser.add_argument("--discover", action="store_true")
@@ -272,6 +275,7 @@ def execute_task(task, args):
             try:
                 with http.open(task.config["sources"][source]["url"]) as response:
                     result = stream_archive(store, source, response, max_members=args.max_members,
+                        max_new_members=args.max_new_members,
                         max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r), flush=True))
             except (OSError, RuntimeError, ValueError) as exc:
                 store.status(source, "access_failed", detail=f"{type(exc).__name__}: {exc}")

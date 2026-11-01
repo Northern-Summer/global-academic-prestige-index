@@ -60,6 +60,36 @@ class StreamingTests(unittest.TestCase):
         self.assertEqual(rows[0]["year_end"], 2000)
         self.assertEqual(rows[0]["institution"], "ror:03vek6s52")
 
+    def test_declared_archive_root_and_x_checksum_directory_parse(self):
+        person='0000-0002-7869-831X'
+        data=archive([(f'./ORCID_2026_10_summaries/31X/{person}.xml',
+                       XML.replace(PERSON.encode(),person.encode()))])
+        s=self.store(data)
+        try:
+            result=stream_archive(s,'orcid-2026-summary',io.BytesIO(data))
+            self.assertEqual(result['events'],1)
+            self.assertEqual(result['member_status'],{'observed':1})
+            self.assertEqual(result['sources'][0]['status'],'verified')
+        finally:s.close()
+
+    def test_other_vintage_and_malicious_member_roots_remain_rejected(self):
+        from gapi.orcid_stream import summary_member_pattern
+        spec=self.config['sources']['orcid-2026-summary']
+        pattern=summary_member_pattern(spec)
+        for name in (f'ORCID_2025_10_summaries/097/{PERSON}.xml',
+                     f'../ORCID_2026_10_summaries/097/{PERSON}.xml',
+                     f'ORCID_2026_10_summaries/../097/{PERSON}.xml',
+                     f'ORCID_2026_10_summaries/3XX/{PERSON}.xml',
+                     f'ORCID_2026_10_summaries/31x/{PERSON}.xml'):
+            with self.subTest(name=name):self.assertIsNone(pattern.fullmatch(name))
+        data=archive([(f'ORCID_2025_10_summaries/097/{PERSON}.xml',XML)])
+        s=self.store(data)
+        try:
+            result=stream_archive(s,'orcid-2026-summary',io.BytesIO(data))
+            self.assertEqual(result['events'],0)
+            self.assertEqual(result['member_status'],{'rejected':1})
+        finally:s.close()
+
     def test_wrong_root_diagnostic_does_not_disclose_unexpected_person_identifier(self):
         rows=[]
         parser=SummaryParser('p','source',PERSON,rows.append,section='educations')
@@ -126,6 +156,53 @@ class StreamingTests(unittest.TestCase):
             self.assertEqual(b["sources"][0]["status"], "verified")
             self.assertEqual(b["events"], 1)
         finally: s.close()
+
+    def test_new_member_limit_advances_across_reopened_prefix_replay(self):
+        from unittest.mock import patch
+        people=[PERSON,'0000-0002-7869-831X','0000-0001-5109-3700']
+        data=archive([(f'summaries/097/{p}.xml',XML.replace(PERSON.encode(),p.encode())) for p in people])
+        s=self.store(data)
+        try:
+            for expected in (1,2,3):
+                with patch.object(s,'member',wraps=s.member) as writes:
+                    report=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=1)
+                self.assertEqual(writes.call_count,1)
+                self.assertEqual(report['events'],expected)
+                self.assertEqual(report['sources'][0]['members'],expected)
+                self.assertEqual(report['sources'][0]['status'],'provisional')
+                task=s.task
+                s.close()
+                s=CareerStore(task,source_compression=False)
+            with patch.object(s,'member',side_effect=AssertionError('replay must not open a write transaction')):
+                complete=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=1)
+            self.assertEqual(complete['events'],3)
+            self.assertEqual(complete['sources'][0]['status'],'verified')
+            self.assertEqual(s.db.execute('PRAGMA quick_check').fetchone()[0],'ok')
+        finally:s.close()
+
+    def test_new_limit_counts_rejected_members_without_weakening_scan_limit(self):
+        data=archive([('../../invalid.xml',XML),(f'summaries/097/{PERSON}.xml',XML)])
+        s=self.store(data)
+        try:
+            first=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=1)
+            self.assertEqual(first['member_status'],{'rejected':1})
+            limited=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=1,max_members=1)
+            self.assertEqual(limited['events'],0)
+            advanced=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=1)
+            self.assertEqual(advanced['events'],1)
+            self.assertEqual(advanced['sources'][0]['status'],'provisional')
+        finally:s.close()
+
+    def test_invalid_new_member_limit_does_not_consume_or_start_source(self):
+        from unittest.mock import patch
+        data=archive([])
+        s=self.store(data)
+        try:
+            for limit in (0,-1,True,1.5):
+                with patch.object(s,'start',side_effect=AssertionError('must validate before starting')):
+                    with self.assertRaisesRegex(ValueError,'positive integer'):
+                        stream_archive(s,'orcid-2026-summary',io.BytesIO(data),max_new_members=limit)
+        finally:s.close()
 
     def test_checksum_and_gzip_trailer_fail_closed(self):
         data = archive([(f"summaries/097/{PERSON}.xml", XML)])
