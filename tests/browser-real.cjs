@@ -8,6 +8,7 @@ const screenshotPath=name=>`${process.env.GAPI_TEST_SCREENSHOT_PREFIX || 'output
 const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-10-29.json';
 
 (async () => {
+  const {decodeGlobalTransport}=await import('../web/global-transport.js');
   const browser = await chromium.launch({headless:true, executablePath:process.env.GAPI_BROWSER, args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const results = {tested_url:process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/'}, errors = [], requests = [];
   try {
@@ -28,18 +29,22 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       const response = await fetch(new URL('data/global/'+manifest.snapshot,base));
       const bytes = await response.arrayBuffer();
       const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
-      const data = JSON.parse(new TextDecoder().decode(bytes));
-      return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,institutions:data.nodes.length,events:data.coverage.events,edges:data.edges.length,people:data.coverage.people,relations:data.nodes.reduce((sum,n)=>sum+n.relations,0),scored:data.nodes.filter(n=>n.network_score!=null).length,award_recipients:data.official_award_inventory?.processed_recipients,award_attribution_labels:data.official_award_attribution?.label_count};
+      return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,wire:JSON.parse(new TextDecoder().decode(bytes))};
     });
+    const publicData=decodeGlobalTransport(results.version.wire);
+    delete results.version.wire;
+    Object.assign(results.version,{institutions:publicData.nodes.length,events:publicData.coverage.events,
+      edges:publicData.edges.length,people:publicData.coverage.people,
+      relations:publicData.nodes.reduce((sum,n)=>sum+n.relations,0),
+      scored:publicData.nodes.filter(n=>n.network_score!=null).length,
+      award_recipients:publicData.official_award_inventory?.processed_recipients,
+      award_attribution_labels:publicData.official_award_attribution?.label_count});
     assert.equal(results.version.actual,results.version.expected);
     assert.match(status,/正式全球排名尚未发布/);
     const metricText=await page.locator('#global-metrics').innerText();
     for (const value of [results.version.people,results.version.events,results.version.relations,results.version.scored]) assert.ok(metricText.replaceAll(',','').includes(String(value)));
     results.coverage_counts_match=true;
-    const acquisition=await page.evaluate(async()=>{
-      const base=new URL('.',location.href),m=await(await fetch(new URL('data/global/manifest.json',base))).json();
-      return(await(await fetch(new URL('data/global/'+m.snapshot,base))).json()).acquisition_progress;
-    });
+    const acquisition=publicData.acquisition_progress;
     if(acquisition?.sources?.length){
       await page.locator('#global-acquisition summary').click();
       const bars=page.locator('#global-acquisition progress');
@@ -196,10 +201,6 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await fallback.close();
     // A valid SHA binds hostile bytes as well as safe bytes. Verify the schema
     // gate and escaped labels in a real browser, without publishing fixtures.
-    const publicData=await page.evaluate(async()=>{
-      const base=new URL('.',location.href),m=await(await fetch(new URL('data/global/manifest.json',base))).json();
-      return(await fetch(new URL('data/global/'+m.snapshot,base))).json();
-    });
     for(const unsafeNumber of [true,false]){
       const fixture=structuredClone(publicData);
       fixture.nodes[0][unsafeNumber?'relations':'name']='<img src=x onerror="window.__gapiInjected=1">';
