@@ -1,7 +1,7 @@
 {
   "schema_version": "gapi-task/v1",
   "work_dir": "D:/GAPI/global-academic-prestige-index",
-  "budget_bytes": 2147483648,
+  "budget_bytes": 4294967296,
   "reserve_bytes": 268435456,
   "memory_bytes": 536870912,
   "batch_events": 1000,

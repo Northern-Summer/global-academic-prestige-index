@@ -35,8 +35,8 @@ class Task:
         self.root = require_external_cache(Path(c["work_dir"]))
         if os.name == "nt" and self.root.drive.upper() != "D:":
             raise ValueError("this task must use the D drive")
-        if not 0 < c["budget_bytes"] <= 2 * 1024**3:
-            raise ValueError("budget must be within the authorized 2 GiB")
+        if not 0 < c["budget_bytes"] <= 4 * 1024**3:
+            raise ValueError("budget must be within the authorized 4 GiB")
         if not 0 < c["reserve_bytes"] < c["budget_bytes"]:
             raise ValueError("invalid journal/export reserve")
         if not 0 < c["batch_events"] <= 1000 or not 0 < c["memory_bytes"] <= 512 * 1024**2:

@@ -437,13 +437,14 @@ class CollectionTests(unittest.TestCase):
         finally:s.close()
 
     def test_temporary_source_pause_does_not_disable_source_after_expiry(self):
-        s=self.store(archive([]));calls=[]
+        s=self.store(archive([]));calls=[];clock=[0.0]
         try:
             with s.db:
                 s.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[
                     ('ingest-orcid-api','one','a','b'),('ingest-orcid-api','two','a','b'),
                     ('ingest-wikidata','Q1','a','b')])
             def orcid(store,http,ids,**kwargs):
+                clock[0]+=1
                 store.start('orcid-public-api')
                 with store.member('orcid-public-api',ids[0]):
                     store.finish_member('orcid-public-api',ids[0],'a'*64)
@@ -451,6 +452,7 @@ class CollectionTests(unittest.TestCase):
                 if ids==['two']:
                     with store.db:store.db.execute("DELETE FROM source_pauses WHERE source='wikidata'")
             def wikidata(store,http,ids,**kwargs):
+                clock[0]+=1
                 calls.append(ids)
                 store.start('wikidata')
                 if len(calls)==1:
@@ -462,7 +464,8 @@ class CollectionTests(unittest.TestCase):
                         store.finish_member('wikidata','Q1@1','a'*64)
                     store.status('wikidata','partial')
             with patch('gapi.collection.ingest_orcid_api',side_effect=orcid), \
-                 patch('gapi.collection.ingest_wikidata',side_effect=wikidata):
+                 patch('gapi.collection.ingest_wikidata',side_effect=wikidata), \
+                 patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]):
                 result=collect(s,None,discovery=False,batch_members=1,max_seconds=10)
             self.assertEqual(len(calls),2)
             self.assertNotIn('ingest-wikidata',result['suspended_sources'])

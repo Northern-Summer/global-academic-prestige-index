@@ -19,6 +19,117 @@ class RowDeltaTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_primary_key_alignment_preserves_long_insertions_in_one_table(self):
+        import sqlite3
+        from gapi.row_delta import snapshot_ordering
+        db=sqlite3.connect(':memory:')
+        try:
+            db.execute('create table records(id integer primary key,payload text)')
+            ordering=snapshot_ordering(db)
+            sql=ordering['records']['sql']
+            header=canonical({'schema':[['table','records','records',sql]]})+b'\n'
+            def row(i,value='unchanged'):
+                return canonical({'t':'records','v':[['v',i],['v',value]]})+b'\n'
+            old=[header]+[row(i) for i in range(1000,1100)]
+            new=[header]+[row(i) for i in range(300)]+[row(i,'changed' if i==1050 else 'unchanged') for i in range(1000,1100)]
+            def replay(ops):
+                index=0;result=[]
+                for op,value in ops:
+                    if op=='C':result.append(old[index]);index+=1
+                    elif op=='S':index+=1
+                    else:result.append(value)
+                self.assertEqual(index,len(old))
+                self.assertEqual(result,new)
+            legacy=list(commands(iter(old),iter(new)))
+            optimized=list(commands(iter(old),iter(new),ordering=ordering))
+            replay(legacy);replay(optimized)
+            self.assertEqual(sum(op=='C' for op,_ in optimized),100)
+            self.assertGreater(sum(op=='C' for op,_ in optimized),sum(op=='C' for op,_ in legacy))
+            changed=[canonical({'schema':[]})+b'\n']+new[1:]
+            self.assertEqual(list(commands(iter(old),iter(changed),ordering=ordering)),
+                             list(commands(iter(old),iter(changed))))
+        finally:db.close()
+
+    def test_ordering_respects_binary_composite_keys_and_avoids_custom_order(self):
+        import base64
+        import sqlite3
+        from gapi.row_delta import snapshot_ordering
+        db=sqlite3.connect(':memory:')
+        try:
+            db.execute('create table records(group_id text,item blob,payload text,primary key(group_id,item))')
+            db.execute('create table special(id text collate nocase primary key)')
+            db.execute('create table reverse_order(id integer primary key desc)')
+            ordering=snapshot_ordering(db)
+            self.assertNotIn('special',ordering)
+            self.assertNotIn('reverse_order',ordering)
+            header=canonical({'schema':[['table','records','records',ordering['records']['sql']]]})+b'\n'
+            def row(group,item,payload):
+                return canonical({'t':'records','v':[['v',group],['b',base64.b64encode(item).decode()],['v',payload]]})+b'\n'
+            old=[header,row('a',b'\x00','before'),row('b',b'\xff','kept')]
+            new=[header,row('a',b'\x00','after'),row('a',b'\xff','insert'),row('b',b'\xff','kept')]
+            result=[];index=0
+            for op,value in commands(iter(old),iter(new),ordering=ordering):
+                if op=='C':result.append(old[index]);index+=1
+                elif op=='S':index+=1
+                else:result.append(value)
+            self.assertEqual(result,new)
+            self.assertEqual(index,len(old))
+        finally:db.close()
+
+    def test_freeze_uses_primary_keys_and_reconstructs_exact_long_insert(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            with s.db:
+                s.db.execute('create table records(id integer primary key,payload text)')
+                s.db.executemany('insert into records values(?,?)',[(i,'retained-'+str(i)) for i in range(1000,1100)])
+            base=freeze_rows(s)
+            with s.db:
+                s.db.executemany('insert into records values(?,?)',[(i,'new-'+str(i)) for i in range(300)])
+            expected=hashlib.sha256(b''.join(ranking_lines(s))).hexdigest()
+            frozen=freeze_rows(s,base_filename=base['filename'])
+            path=s.task.root/'frozen-inputs'/(frozen['filename']+'.delta.xz')
+            self.assertEqual(inspect(path,s.task)[0],expected)
+            records=lzma.decompress(path.read_bytes()).splitlines()
+            self.assertGreaterEqual(sum(int(r[2:]) for r in records if r.startswith(b'C ')),100)
+            with frozen_reader(s,frozen['filename']):
+                self.assertEqual(s.db.execute('select count(*) from records').fetchone()[0],400)
+                self.assertEqual(s.db.execute('select payload from records where id=1099').fetchone()[0],'retained-1099')
+            self.assertEqual(freeze_rows(s,base_filename=base['filename'])['sha256'],frozen['sha256'])
+        finally:s.close()
+
+    def test_retained_keyed_repack_matches_preview_and_preserves_input_identity(self):
+        from gapi.row_delta import _emit_delta,rebase_delta
+        from gapi.row_snapshot import archive_path,lines
+        s=self.store(fixtures.archive([]))
+        try:
+            rng=random.Random(147)
+            with s.db:
+                s.db.execute('create table records(id integer primary key,payload text)')
+                s.db.executemany('insert into records values(?,?)',[(i,rng.randbytes(512).hex()) for i in range(1000,1100)])
+            base=freeze_rows(s)
+            with s.db:
+                s.db.executemany('insert into records values(?,?)',[(i,'new-'+str(i)) for i in range(300)])
+            # Construct an actual predecessor with the old exact-line writer.
+            base_path=archive_path(s,base['filename'])
+            encoded=[];old=lines(base_path,s.task);new=ranking_lines(s)
+            try:checksum,total=_emit_delta(old,new,base_path,encoded.append,FORMAT_V2)
+            finally:old.close();new.close()
+            filename=checksum+'.rows';path=archive_path(s,filename)
+            path.write_bytes(lzma.compress(b''.join(encoded),preset=6))
+            original=path.read_bytes()
+            preview=rebase_delta(s,filename,base['filename'],dry_run=True,primary_key_alignment=True)
+            self.assertEqual(path.read_bytes(),original)
+            self.assertGreater(preview['estimated_saved_bytes'],10000)
+            result=rebase_delta(s,filename,base['filename'],primary_key_alignment=True)
+            self.assertEqual(result['packed_bytes'],preview['candidate_bytes'])
+            self.assertEqual(inspect(path,s.task),(checksum,total))
+            accepted=path.read_bytes()
+            self.assertTrue(rebase_delta(s,filename,base['filename'],primary_key_alignment=True)['retained_predecessor'])
+            self.assertEqual(path.read_bytes(),accepted)
+            with self.assertRaises(ValueError):
+                rebase_delta(s,filename,base['filename'],primary_key_alignment='yes')
+        finally:s.close()
+
     def test_dense_compression_keeps_full_and_delta_identity(self):
         s=self.store(fixtures.archive([]))
         try:

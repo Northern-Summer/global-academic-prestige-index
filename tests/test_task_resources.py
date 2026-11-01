@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -14,6 +15,20 @@ class ResourceTests(unittest.TestCase):
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
+
+    def test_four_gib_authorization_keeps_memory_and_reserve_limits(self):
+        for cap in (2*1024**3,4*1024**3):
+            with self.subTest(cap=cap):
+                self.config['work_dir']=str(self.root/str(cap))
+                s=self.store(archive([]),budget_bytes=cap)
+                try:
+                    self.assertEqual(s.task.config['budget_bytes'],cap)
+                    self.assertEqual(s.task.config['reserve_bytes'],256*1024**2)
+                    self.assertEqual(s.task.config['memory_bytes'],512*1024**2)
+                finally:s.close()
+        self.config['budget_bytes']=4*1024**3+1
+        self.path.write_text(json.dumps(self.config))
+        with self.assertRaisesRegex(ValueError,'authorized 4 GiB'):Task(self.path)
 
     def test_file_maintenance_reuses_writer_lock_without_database_allowance(self):
         from gapi.career_store import CareerStore,exclusive_writer

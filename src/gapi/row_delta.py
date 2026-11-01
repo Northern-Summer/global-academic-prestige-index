@@ -184,9 +184,57 @@ def decoded_lines(path, task, ancestors=()):
         if base is not None:base.close()
 
 
-def commands(old, new):
+def snapshot_ordering(db):
+    """Describe existing ascending BINARY primary keys, never infer row identity.
+
+    Unknown collations/descending declarations retain the exact-line fallback.
+    Both archive headers must independently match these table declarations.
+    """
+    from .ranking_snapshot import quoted
+    result={}
+    for name,sql in db.execute("select name,sql from sqlite_master where type='table' and name not like 'sqlite_%'"):
+        if not sql or re.search(r'\b(COLLATE|DESC|VIRTUAL)\b',sql,re.I):continue
+        columns=list(db.execute('pragma table_info('+quoted(name)+')'))
+        primary=sorted((row[5],i) for i,row in enumerate(columns) if row[5])
+        if primary:result[name]={'sql':sql,'columns':tuple(i for _,i in primary)}
+    return result
+
+
+def commands(old, new, *, ordering=None):
     """Deterministic exact-line synchronization; bounded lookahead, no inference."""
     left=deque();right=deque()
+    eligible={}
+    if ordering:
+        # Consume only the two ordinary first records; preserve them in the
+        # exact stream. Header/schema mismatch disables the optimization.
+        first_old=next(old,None);first_new=next(new,None)
+        if first_old is not None:left.append(first_old)
+        if first_new is not None:right.append(first_new)
+        def tables(value):
+            try:
+                header=json.loads(value)
+                return {row[1]:row[3] for row in header.get('schema',[])
+                        if isinstance(row,list) and len(row)==4 and row[0]=='table'}
+            except (ValueError,TypeError,AttributeError):return {}
+        a,b=tables(first_old),tables(first_new)
+        eligible={name:spec['columns'] for name,spec in ordering.items()
+                  if a.get(name)==b.get(name)==spec['sql']}
+    def key(row,table):
+        cells=row.get('v')
+        if table not in eligible or not isinstance(cells,list):return None
+        values=[]
+        for index in eligible[table]:
+            if index>=len(cells):return None
+            cell=cells[index]
+            if not isinstance(cell,list) or len(cell)!=2:return None
+            tag,value=cell
+            if tag=='v' and type(value) in (int,float):values.append((1,value))
+            elif tag=='v' and isinstance(value,str):values.append((2,value))
+            elif tag=='b' and isinstance(value,str):
+                try:values.append((3,base64.b64decode(value,validate=True)))
+                except ValueError:return None
+            else:return None
+        return tuple(values)
     def fill(queue, source):
         size=sum(map(len,queue))
         while len(queue)<WINDOW and size<WINDOW_BYTES:
@@ -202,6 +250,14 @@ def commands(old, new):
             left.popleft();yield 'S',None;continue
         if left[0]==right[0]:
             left.popleft();right.popleft();yield 'C',None;continue
+        if eligible:
+            a=json.loads(left[0]);b=json.loads(right[0])
+            if isinstance(a,dict) and isinstance(b,dict) and a.get('t')==b.get('t'):
+                table=a.get('t');ka=key(a,table);kb=key(b,table)
+                if ka is not None and kb is not None:
+                    if ka<=kb:left.popleft();yield 'S',None
+                    if kb<=ka:yield 'A',right.popleft()
+                    continue
         positions={value:i for i,value in reversed(list(enumerate(right)))}
         matches=[(i+positions[value],i,positions[value]) for i,value in enumerate(left) if value in positions]
         if matches:
@@ -224,7 +280,7 @@ def commands(old, new):
             yield 'A',right.popleft()
 
 
-def _emit_delta(old,new,base_path,emit,target_format):
+def _emit_delta(old,new,base_path,emit,target_format,*,ordering=None):
     """One command/identity owner for fresh freezes and immutable rebasing."""
     old_hash=hashlib.sha256();new_hash=hashlib.sha256();total=0
     def observed(source,sha,target=False):
@@ -238,7 +294,7 @@ def _emit_delta(old,new,base_path,emit,target_format):
     def flush():
         nonlocal run
         if run:emit(f'{operation} {run}\n'.encode());run=0
-    for op,value in commands(iter(observed(old,old_hash)),iter(observed(new,new_hash,True))):
+    for op,value in commands(iter(observed(old,old_hash)),iter(observed(new,new_hash,True)),ordering=ordering):
         if op=='A':flush();operation=None;emit(addition_record(value))
         else:
             if operation!=op or run==MAX_RUN:flush()
@@ -276,7 +332,7 @@ def freeze_delta(store, filename, *, compression_preset=3, allow_delta_base=Fals
                 if packed:
                     write(packed)
             old=lines(base_path,task);new=ranking_lines(store)
-            checksum,total=_emit_delta(old,new,base_path,emit,target_format)
+            checksum,total=_emit_delta(old,new,base_path,emit,target_format,ordering=snapshot_ordering(store.db))
             packed=encoder.flush();write(packed)
             output.flush();os.fsync(output.fileno())
         # Name-independent full reconstruction validates both inputs before promotion.
@@ -317,7 +373,7 @@ def inspect_delta(path,task):
     return sha.hexdigest(),total
 
 
-def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=False):
+def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=False,primary_key_alignment=False):
     """Atomically replace one retained delta after exact, complete reconstruction.
 
     Keep every logical input and dependency. Caller owns writer exclusion;
@@ -328,6 +384,7 @@ def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=Fal
     from .row_snapshot import _packed_lines,lines,validate_compression_preset
     validate_compression_preset(compression_preset)
     if type(dry_run) is not bool:raise ValueError('dry_run must be boolean')
+    if type(primary_key_alignment) is not bool:raise ValueError('primary_key_alignment must be boolean')
     if store.db.in_transaction:raise ValueError('cannot rebase unfinished transaction')
     path=snapshot_path(store,filename).with_suffix('.rows.delta.xz')
     if not filename.endswith('.rows') or not path.is_file():raise ValueError('retained row delta required')
@@ -340,7 +397,8 @@ def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=Fal
     finally:records.close()
     if not isinstance(header,dict) or header.get('format') not in (FORMAT,FORMAT_V2,FORMAT_V3):
         raise ValueError('unsupported row delta')
-    if header.get('format')==FORMAT_V3 and header.get('base')==base_filename:
+    ordering=snapshot_ordering(store.db) if primary_key_alignment else None
+    if header.get('format')==FORMAT_V3 and header.get('base')==base_filename and not primary_key_alignment:
         if inspect_delta(path,task)[0]!=filename[:64]:raise ValueError('retained delta identity mismatch')
         return {'filename':filename,'already_rebased':True,'saved_bytes':0,'dependency_depth':depth}
     before=path.stat().st_size;original_hash=file_hash(path)
@@ -352,7 +410,7 @@ def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=Fal
         old=lines(base_path,task);new=lines(path,task)
         try:
             checksum,total=_emit_delta(old,new,base_path,measure,
-                FORMAT_V3 if base_path.name.endswith('.delta.xz') else FORMAT_V2)
+                FORMAT_V3 if base_path.name.endswith('.delta.xz') else FORMAT_V2,ordering=ordering)
             written+=len(encoder.flush())
         finally:old.close();new.close()
         if checksum!=filename[:64] or file_hash(path)!=original_hash:raise ValueError('retained delta identity mismatch')
@@ -374,7 +432,7 @@ def rebase_delta(store,filename,base_filename,*,compression_preset=6,dry_run=Fal
                 packed=encoder.compress(value)
                 if packed:write(packed)
             old=lines(base_path,task);new=lines(path,task)
-            checksum,total=_emit_delta(old,new,base_path,emit,target_format)
+            checksum,total=_emit_delta(old,new,base_path,emit,target_format,ordering=ordering)
             if checksum!=filename[:64]:raise ValueError('retained delta identity mismatch')
             write(encoder.flush());output.flush();os.fsync(output.fileno())
         if inspect_delta(temporary,task)!=(checksum,total):raise ValueError('rebased reconstruction mismatch')

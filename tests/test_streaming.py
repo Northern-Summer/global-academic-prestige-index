@@ -150,7 +150,7 @@ class StreamingTests(unittest.TestCase):
         data = archive([])
         s = self.store(data)
         try:
-            with self.assertRaises(BudgetStop): s.task.check(2*1024**3)
+            with self.assertRaises(BudgetStop): s.task.check(s.task.config['budget_bytes'])
             s.task.config["rules_version"] = "changed"
             with self.assertRaises(ValueError): s.task.require_frozen()
         finally: s.close()
