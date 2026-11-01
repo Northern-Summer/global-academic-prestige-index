@@ -31,7 +31,8 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
       return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,wire:JSON.parse(new TextDecoder().decode(bytes))};
     });
-    const publicData=decodeGlobalTransport(results.version.wire);
+    const publicWire=results.version.wire;
+    const publicData=decodeGlobalTransport(publicWire);
     delete results.version.wire;
     Object.assign(results.version,{institutions:publicData.nodes.length,events:publicData.coverage.events,
       edges:publicData.edges.length,people:publicData.coverage.people,
@@ -202,9 +203,14 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     // A valid SHA binds hostile bytes as well as safe bytes. Verify the schema
     // gate and escaped labels in a real browser, without publishing fixtures.
     for(const unsafeNumber of [true,false]){
-      const fixture=structuredClone(publicData);
-      fixture.nodes[0][unsafeNumber?'relations':'name']='<img src=x onerror="window.__gapiInjected=1">';
+      // Mutate the actual transport, preserving its compact representation.
+      // Expanding directory defaults can exceed the 32 MiB ingress guard as
+      // real coverage grows, masking the XSS assertion behind a size refusal.
+      const fixture=structuredClone(publicWire);
+      const firstNode=Array.isArray(fixture.node_rows)?fixture.node_rows[0]:fixture.nodes[0];
+      firstNode[unsafeNumber?'relations':'name']='<img src=x onerror="window.__gapiInjected=1">';
       const bytes=Buffer.from(JSON.stringify(fixture)),sha=createHash('sha256').update(bytes).digest('hex');
+      assert.ok(bytes.length<=32*1024*1024,'hostile fixture must exercise content checks within the byte budget');
       const hostile=await browser.newPage();
       await hostile.route('**/data/global/**',route=>route.fulfill({status:200,contentType:'application/json',body:route.request().url().includes('manifest.json')?JSON.stringify({snapshot:'attack.json',output_sha256:sha}):bytes}));
       await hostile.goto(results.tested_url,{waitUntil:'networkidle'});

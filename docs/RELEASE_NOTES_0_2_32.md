@@ -21,6 +21,14 @@ The 256 MiB write reserve, 512 MiB process limit, single writer and raw-file
 prohibition remain in force. Raising the ceiling does not preallocate it.
 All 430 Python regression tests passed after the resource-contract change.
 
+Production browser validation exposed a test-fixture size regression as the
+directory grew: the compact transport is 15,014,575 bytes, but expanding its
+defaults produced a 35,840,439-byte attack fixture, exceeding the unchanged
+32 MiB ingress limit. Attack tests now mutate the actual compact transport and
+assert that the fixture fits the ingress limit before testing number rejection
+and label escaping. All 50 frontend unit tests passed. The failed browser run
+blocked deployment; production browser validation must pass before release.
+
 This version refreshes institution aggregates from a newly frozen real input.
 Its committed manifest identifies the exact counts, scope and checksums.
 Candidate projections, canonical events, evidence and frozen inputs have
