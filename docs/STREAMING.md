@@ -179,6 +179,32 @@ source and rules. `all_archives_verified` covers those annual archives only;
 it does not establish completion of other discovery feeds, independent fact
 corroboration, or world coverage. No global personnel percentage is available.
 
+Freeze a finite API candidate set only after the active writer has settled:
+
+```text
+python -m gapi freeze-candidates --task configs/streaming.json
+python -m gapi acquisition-status --task configs/streaming.json --candidate-selection SELECTION_ID
+python -m gapi collect-global --task configs/streaming.json --queued-only --candidate-selection SELECTION_ID --max-seconds 900
+```
+
+The returned selection ID binds the frozen task configuration, a discovery
+rowid upper boundary, and each source's candidate count and provenance hash.
+The small manifest lives in the existing database; candidate IDs are not copied.
+Repeated freezing of unchanged inputs reuses the same record. Later discovery
+is outside the original denominator. Candidate deletion, identity/provenance
+changes or configuration drift invalidate that selection rather than silently
+changing its denominator. Lossless digest maintenance preserves its identity.
+
+Frozen collection disables discovery, filters both fresh work and due retries
+through the same boundary, and verifies the selection before requests and again
+at settlement. `frozen_candidate_processing` reports per-source processed and
+observed fractions with the fixed candidate counts. A rejected member is counted
+as processed but prevents `processing_complete`; pending retries remain pending.
+The legacy current-queue report is retained. Neither finite candidate completion
+nor an empty frozen queue establishes full-source enumeration, verified facts,
+annual archive integrity, or global coverage. A rejected-member API redirect
+outside the frozen set requires a later selection; it cannot expand this one.
+
 Each annual source also exposes `member_processing`: committed, parsed,
 rejected and unclassified member counts, plus reconciliation against the
 transactional `runs.members` counter. `all_archive_members_processed` requires

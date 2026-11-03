@@ -20,11 +20,18 @@ from .source_http import SourcePause, StageDeadline, WIKIDATA_BATCH_LIMIT
 DISCOVERY_WINDOW_SECONDS = 60
 
 
-def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True):
+def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True,candidate_selection=None):
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
         raise ValueError('invalid collection time/batch budget')
     if not discovery and feed is not None:
         raise ValueError('queued-only acquisition cannot enable dump discovery')
+    selection_options={}
+    if candidate_selection is not None:
+        if discovery or feed is not None:
+            raise ValueError('frozen candidate collection requires queued-only acquisition')
+        from .candidate_selection import verify
+        selection,_=verify(store,candidate_selection)
+        selection_options={'max_candidate_rowid':selection['max_candidate_rowid']}
     deadline=time.monotonic()+max_seconds
     suspended=set()
     dump_attempted=False
@@ -111,7 +118,7 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 continue
             batch_started=time.monotonic()
             ids=store.pending(command,batch_members,
-                priority_source='wikidata' if command=='ingest-orcid-api' else None)
+                priority_source='wikidata' if command=='ingest-orcid-api' else None,**selection_options)
             if not ids:continue
             if time.monotonic()>=deadline:break
             events_before=store.db.execute('SELECT count(*) FROM events').fetchone()[0]
@@ -185,10 +192,14 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 if progress:progress({'stage':'dump-discovery','failed':str(exc)[:256]})
             continue
         break
-    return {'status':'resumable-storage-contention' if storage_contended else
+    result={'status':'resumable-storage-contention' if storage_contended else
             'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
         'suspended_sources':sorted(suspended),'suspended_discovery':sorted(discovery_suspended),
         'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':store.report(),
         'scheduling_policy':'least-source-service-time/1',
         'source_service_seconds':{key:round(value,3) for key,value in service_seconds.items()},
         'global_complete':False,'archive_discovery_enabled':feed is not None,'discovery_enabled':discovery}
+    if candidate_selection is not None:
+        from .candidate_selection import processing
+        result['frozen_candidate_processing']=processing(store,candidate_selection)
+    return result

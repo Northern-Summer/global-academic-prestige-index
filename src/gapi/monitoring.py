@@ -47,7 +47,10 @@ def report_projection(snapshot, task, check):
         for table,columns in REPORT_COLUMNS.items():
             check()
             if time.monotonic()>until:raise BudgetStop('monitor projection read-lock deadline exhausted')
-            snapshot.execute(f'CREATE TABLE main.{table} AS SELECT {columns} FROM live.{table}')
+            selected=('rowid AS rowid,' if table=='discovery' else '')+columns
+            snapshot.execute(f'CREATE TABLE main.{table} AS SELECT {selected} FROM live.{table}')
+        if snapshot.execute("SELECT 1 FROM live.sqlite_master WHERE name='candidate_selections' AND type='table'").fetchone():
+            snapshot.execute('CREATE TABLE main.candidate_selections AS SELECT id,payload FROM live.candidate_selections')
         snapshot.commit()
     except BaseException:
         snapshot.rollback()
@@ -58,7 +61,7 @@ def report_projection(snapshot, task, check):
         snapshot.execute('DETACH DATABASE live')
 
 
-def snapshot_report(task, *, max_seconds=60):
+def snapshot_report(task, *, max_seconds=60, candidate_selection=None):
     """Release the live connection before running potentially expensive counts.
 
     SQLite backup copies bounded page steps and releases its source read lock
@@ -109,6 +112,9 @@ def snapshot_report(task, *, max_seconds=60):
         view = CareerStore.__new__(CareerStore)
         view.db, view.task = snapshot, task
         result = view.report()
+        if candidate_selection is not None:
+            from .candidate_selection import processing
+            result['frozen_candidate_processing']=processing(view,candidate_selection)
         check()
         return result
     except sqlite3.OperationalError:

@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from .task import Task, BudgetStop, canonical, digest
 from .event_storage import pack_event, configure_reader, DICTIONARY_DDL, source_dictionary
 from .queue_storage import pack_row, pack_digest
+from .candidate_selection import candidate_rowid_filter
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
@@ -235,7 +236,7 @@ class CareerStore:
     def seen(self, source, locator):
         return self.db.execute("SELECT sha256,status FROM members WHERE source=? AND locator=?", (source, locator)).fetchone()
 
-    def pending(self, command, limit=200, *, now=None, priority_source=None):
+    def pending(self, command, limit=200, *, now=None, priority_source=None, max_candidate_rowid=None):
         sources=CANDIDATE_SOURCES
         if command not in sources or not 1<=limit<=1000:
             raise ValueError('invalid pending source/batch limit')
@@ -265,6 +266,10 @@ class CareerStore:
         # can make SQLite choose repeated scans of either exact or prefix keys.
         # Both sets exclude NULL, preserving the original NOT EXISTS predicate.
         parameters=(sources[command],command,time.time() if now is None else now,sources[command])
+        bound,bound_parameters=candidate_rowid_filter(max_candidate_rowid)
+        query+=bound
+        retry_query+=bound
+        parameters+=bound_parameters
         # Reserve a quarter of a normal batch for due retries so a continuing
         # stream of fresh candidates cannot starve recovered records forever.
         due=[r[0] for r in self.db.execute(retry_query+''' AND r.identifier IS NOT NULL
@@ -538,16 +543,20 @@ class CareerStore:
                 'all_archive_members_processed':bool(rows) and all(r['member_processing']['processing_complete'] for r in rows),
                 'complete_global_census':False}
 
-    def candidate_progress(self, *, allowed_sources=None):
+    def candidate_progress(self, *, allowed_sources=None, max_candidate_rowid=None):
         """Counts committed candidate selection, not unknown world personnel."""
         from .ranking_snapshot import candidate_progress
         frozen=candidate_progress(self,allowed_sources=allowed_sources)
-        if frozen is not None:return frozen
+        bound,bound_parameters=candidate_rowid_filter(max_candidate_rowid)
+        if frozen is not None:
+            if max_candidate_rowid is not None:
+                raise ValueError('cannot rescope a projected ranking snapshot candidate selection')
+            return frozen
         rows=[]
         for command,source in CANDIDATE_SOURCES.items():
             if allowed_sources is not None and source not in allowed_sources:continue
             index=hashlib.sha256()
-            for row in self.db.execute('SELECT identifier,query_sha256,response_sha256 FROM discovery WHERE source=? ORDER BY identifier',(command,)):
+            for row in self.db.execute('SELECT identifier,query_sha256,response_sha256 FROM discovery d WHERE source=?'+bound+' ORDER BY identifier',(command,*bound_parameters)):
                 index.update(canonical(row))
             # Materialize each source's member keys once instead of scanning all
             # members for every candidate. Exact locators retain binary equality;
@@ -581,7 +590,7 @@ class CareerStore:
                     EXISTS(SELECT 1 FROM discovery_retries r WHERE r.source=d.source AND r.identifier=d.identifier) AS attempted
                 FROM discovery d LEFT JOIN exact_keys e ON e.locator=d.identifier
                 LEFT JOIN prefix_keys p ON p.prefix=lower(d.identifier)
-                WHERE d.source=?)''',(source,source,source,command)).fetchone()
+                WHERE d.source=?'''+bound+')',(source,source,source,command,*bound_parameters)).fetchone()
             if total:
                 rows.append({'source':source,'candidates':total,'processed':processed,
                     'observed_members':observed,'rejected_members':processed-observed,

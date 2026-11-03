@@ -13,6 +13,8 @@ from .task import Task
 
 
 def register(sub):
+    selection=sub.add_parser('freeze-candidates',help='freeze a finite selection in the existing candidate ledger without copying IDs')
+    selection.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     rejected=sub.add_parser('queue-archive-rejections',help='queue registered ORCID API follow-up without changing annual rejections')
     rejected.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     rejected.add_argument('--source',default='orcid-2026-summary')
@@ -93,6 +95,7 @@ def register(sub):
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name == 'acquisition-status':
             parser.add_argument('--max-seconds',type=float,default=60)
+            parser.add_argument('--candidate-selection',help='include verified finite candidate processing')
         if name == 'resolve-institutions-online':
             parser.add_argument('--max-aliases',type=int,default=100)
             parser.add_argument('--max-seconds',type=float,default=300)
@@ -108,6 +111,7 @@ def register(sub):
             parser.add_argument('--stage-careers',action='store_true',
                 help='retain normalized careers in isolated landing; replays old prefix, never stores raw entities')
         if name == 'collect-global':
+            parser.add_argument('--candidate-selection',help='verified immutable selection ID; requires --queued-only')
             parser.add_argument('--batch-members',type=int,default=50)
             parser.add_argument('--allow-dump-discovery',action='store_true',
                 help='explicitly enable optional compressed-stream candidate discovery; default uses finite APIs only')
@@ -159,7 +163,7 @@ def register(sub):
 
 def execute(args):
     names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
-    if args.command not in names and args.command not in ('queue-archive-rejections','compact-member-digests','repack-evidence-urls','repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
+    if args.command not in names and args.command not in ('freeze-candidates','queue-archive-rejections','compact-member-digests','repack-evidence-urls','repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
     task = Task(args.task)
     task.activate_runtime()
@@ -179,7 +183,8 @@ def execute_task(task, args):
         return True
     if args.command == 'acquisition-status':
         from .monitoring import snapshot_report
-        print(json.dumps(snapshot_report(task,max_seconds=args.max_seconds),indent=2))
+        print(json.dumps(snapshot_report(task,max_seconds=args.max_seconds,
+            candidate_selection=getattr(args,'candidate_selection',None)),indent=2))
         return True
     if args.command == 'census-easy-orcid':
         from .easy_orcid_census import census, load_spec
@@ -195,7 +200,10 @@ def execute_task(task, args):
     http=None
     try:
         http = PublicHTTP(task,reuse_connections=True)
-        if args.command == 'queue-archive-rejections':
+        if args.command == 'freeze-candidates':
+            from .candidate_selection import freeze
+            result=freeze(store)
+        elif args.command == 'queue-archive-rejections':
             from .archive_recovery import queue_archive_rejections
             result=queue_archive_rejections(store,args.source,after_rowid=args.after_rowid,
                 max_members=args.max_members,max_seconds=args.max_seconds)
@@ -287,7 +295,8 @@ def execute_task(task, args):
             from .collection import collect
             from .dump_discovery import load_feed
             result=collect(store,http,load_feed(args.feed) if args.allow_dump_discovery else None,max_seconds=args.max_seconds,
-                batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True),discovery=not args.queued_only)
+                batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True),discovery=not args.queued_only,
+                candidate_selection=getattr(args,'candidate_selection',None))
             result['transport']={'mode':'single-persistent-https',
                 'opened_connections':http.transport.opened_connections,
                 'reused_connections':http.transport.reused_connections}
