@@ -153,7 +153,7 @@ def exclusive_writer(task):
     """
     task.require_frozen()
     task.check(64*1024)
-    lock = (task.root / 'writer.lock').open('a+b')
+    lock = (getattr(task, 'resource_root', task.root) / 'writer.lock').open('a+b')
     try:
         try:
             lock.seek(0)

@@ -276,14 +276,19 @@ def execute_task(task, args):
             if source not in orcid_archive_sources(task):
                 raise ValueError('source must be an annual ORCID archive in the frozen registry')
             store.start(source)
+            scanning = False
             try:
                 with http.open(task.config["sources"][source]["url"]) as response:
+                    scanning = True
                     result = stream_archive(store, source, response, max_members=args.max_members,
                         max_new_members=args.max_new_members,
                         max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r), flush=True))
             except (OSError, RuntimeError, ValueError) as exc:
-                store.status(source, "access_failed", detail=f"{type(exc).__name__}: {exc}")
-                store.failure(source,'download',f"{type(exc).__name__}: {exc}")
+                # The stream owns parse/checksum status; an available download
+                # with invalid content must not be reported as access failure.
+                if not scanning:
+                    store.status(source, "access_failed", detail=f"{type(exc).__name__}: {exc}")
+                store.failure(source,'archive-scan' if scanning else 'download',f"{type(exc).__name__}: {exc}")
                 result = store.report()
         elif args.command in ("ingest-wikidata", "ingest-orcid-api"):
             ids = args.ids

@@ -145,6 +145,25 @@ def exact(stream, size):
     return bytes(result)
 
 
+def read_mtime_pax(stream, size):
+    """Accept only one bounded, non-semantic PAX modification timestamp.
+
+    No PAX path, link, size, encoding or sparse override reaches the parser.
+    Record lengths include their own prefix and final newline (POSIX PAX).
+    """
+    if not 1 <= size <= 128:
+        raise ValueError('PAX timestamp exceeds bound')
+    body = exact(stream, size)
+    prefix, separator, record = body.partition(b' ')
+    if (not separator or not prefix.isdigit() or int(prefix) != size
+            or not re.fullmatch(rb'mtime=-?[0-9]{1,20}(?:\.[0-9]{1,20})?\n', record)):
+        raise ValueError('unsupported or malformed PAX metadata')
+    if size % 512:
+        padding = exact(stream, 512-size % 512)
+        if any(padding):
+            raise ValueError('nonzero PAX padding')
+
+
 def stream_archive(store, source, raw, *, max_members=None, max_new_members=None, max_seconds=None, progress=None):
     """Replay from the start, optionally bounding new commits instead of scans.
 
@@ -157,10 +176,12 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
     spec = store.task.config["sources"][source]
     member_pattern=summary_member_pattern(spec)
     store.start(source)
+    store.status(source, 'provisional', detail='archive scan active; full verification pending')
     reader = HashReader(raw)
     started, processed, added, replayed = time.monotonic(), 0, 0, 0
     compressed = gzip.GzipFile(fileobj=reader, mode="rb")
     status, detail = "provisional", None
+    pending_pax = False
     try:
         while True:
             if ((max_members is not None and processed >= max_members)
@@ -170,6 +191,8 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                 break
             block = exact(compressed, 512)
             if block == b"\0"*512:
+                if pending_pax:
+                    raise ValueError('PAX timestamp has no following member')
                 if exact(compressed, 512) != block:
                     raise ValueError("invalid tar end marker")
                 # Drain padding and require the gzip CRC/trailer. No full reads.
@@ -189,7 +212,14 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                 status = "verified"
                 break
             header = tarfile.TarInfo.frombuf(block, "utf-8", "strict")
-            # No extraction, links, PAX/sparse expansion or long-name allocation.
+            if header.type == tarfile.XHDTYPE:
+                if pending_pax:
+                    raise ValueError('repeated PAX timestamp header')
+                read_mtime_pax(compressed, header.size)
+                pending_pax = True
+                continue
+            pending_pax = False
+            # No extraction, links, semantic PAX/sparse expansion or long names.
             if header.isdir() and header.size == 0:
                 continue
             if not header.isreg() or header.size < 0:

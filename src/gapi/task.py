@@ -33,6 +33,12 @@ class Task:
         if c.get("schema_version") != "gapi-task/v1":
             raise ValueError("unsupported task contract")
         self.root = require_external_cache(Path(c["work_dir"]))
+        self._resource_root = self.root
+        if c.get('resource_root') is not None:
+            self._resource_root = require_external_cache(Path(c['resource_root']))
+            if self.resource_root == self.root or not self.root.is_relative_to(self.resource_root):
+                raise ValueError('shared resource root must contain the separate task directory')
+            self.require_resource_contract()
         if os.name == "nt" and self.root.drive.upper() != "D:":
             raise ValueError("this task must use the D drive")
         if not 0 < c["budget_bytes"] <= 4 * 1024**3:
@@ -47,6 +53,10 @@ class Task:
             raise ValueError("unsafe HTTP limits")
         self.root.mkdir(parents=True, exist_ok=True)
         self.check()
+
+    @property
+    def resource_root(self):
+        return getattr(self, '_resource_root', self.root)
 
     def activate_runtime(self):
         """CLI-scoped temporary settings, restored before returning to the caller."""
@@ -97,13 +107,14 @@ class Task:
             return total
         # No cache: every admission still scans the complete owned trees. DirEntry
         # reuses OS enumeration metadata instead of probing each path repeatedly.
-        total = tree_size(self.root, strict=True)
+        total = tree_size(self.resource_root, strict=True)
         # Count new release/build outputs too; existing real input snapshots are not copied.
-        for directory in (project_root() / "outputs", project_root() / "dist"):
+        for directory in (project_root() / "outputs", project_root() / "dist", project_root() / "work"):
             total += tree_size(directory, strict=False)
         return total
 
     def check(self, anticipated: int = 0, *, minimum_used: int = 0) -> int:
+        self.require_resource_contract()
         # Windows directory enumeration may retain a writer's pre-open size.
         # Streaming writers supply their initial usage plus bytes written as
         # a floor; fresh enumeration still accounts for all other artifacts.
@@ -112,6 +123,26 @@ class Task:
         if used + needed > self.config["budget_bytes"] or shutil.disk_usage(self.root).free < needed:
             raise BudgetStop(f"storage admission stopped: used={used}, anticipated={anticipated}, reserve={needed-anticipated}")
         return used
+
+    def require_resource_contract(self):
+        """A nested source task shares its frozen owner's budget and writer lock.
+
+        A separate source database is not a new allowance. Pin the existing
+        resource owner's lock, including all sibling files in every admission.
+        """
+        if self.resource_root == self.root:
+            return
+        raw = (self.resource_root/'sources.lock.json').read_bytes()
+        if hashlib.sha256(raw).hexdigest() != self.config.get('resource_freeze_sha256'):
+            raise ValueError('shared resource owner freeze changed or is not pinned')
+        frozen = json.loads(raw)
+        owner = frozen['config']
+        if (frozen.get('schema_version') != 'gapi-source-freeze/v1'
+                or frozen.get('config_sha256') != digest(owner)
+                or owner.get('resource_root') is not None
+                or Path(owner['work_dir']).resolve() != self.resource_root
+                or any(self.config[k] != owner[k] for k in ('budget_bytes','reserve_bytes','memory_bytes'))):
+            raise ValueError('shared resource contract differs from its frozen owner')
 
     def available_growth(self, requested: int) -> int:
         """Admit enforceable SQLite growth while preserving reserve and 1 MiB.
@@ -172,6 +203,7 @@ class Task:
         return payload
 
     def require_frozen(self) -> dict:
+        self.require_resource_contract()
         path = self.root / "sources.lock.json"
         if not path.exists() or json.loads(path.read_bytes())["config_sha256"] != digest(self.config):
             raise ValueError("run sources freeze first; configuration must match the frozen source registry")

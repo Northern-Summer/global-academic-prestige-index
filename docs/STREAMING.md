@@ -16,6 +16,32 @@ describe their original test conditions rather than a second active limit.
 
 ## Reproduce and resume
 
+### Separate annual-source freezes within one resource allowance
+
+A task may set `resource_root` to its existing frozen parent's external work
+directory and `resource_freeze_sha256` to the SHA-256 of that parent's
+`sources.lock.json`. Its own `work_dir` must be a strict descendant. Budget,
+reserve and memory limits must equal the parent's frozen limits; nested resource
+owners are rejected. `Task.require_resource_contract` checks the pinned owner
+on admission and resume. All sibling source databases and retained inputs count
+toward the same allowance, and `exclusive_writer` uses the parent's writer lock.
+
+This permits a new annual archive identity and database without copying or
+mutating the previous source freeze. It does not increase capacity or verify
+the archive. The annual stream must still reach EOF and pass the upstream
+checksum before it contributes relationships or denominators. Separate-source
+records are not automatically merged into the older production database or
+published scoring snapshot. A stopped gzip stream must replay from the start.
+
+`configs/orcid-2026-production.json` pins the 2026 summary filename, official
+download URL, advertised length and MD5 from the recorded metadata, while
+retaining the original task freeze. Start its single stream with
+`python -B -m gapi ingest-orcid --task configs/orcid-2026-production.json --source orcid-2026-summary --resume --max-seconds 7200`.
+The first official tar header uses PAX `mtime` metadata. `read_mtime_pax` accepts
+only one length-checked timestamp record of at most 128 bytes, with zero padding;
+path, link, size, encoding, sparse and global PAX overrides remain rejected.
+An accessible gzip prefix is not full enumeration or checksum verification.
+
 ### Read acquisition progress
 
 `acquisition-status` reports `candidate_processing` separately from
