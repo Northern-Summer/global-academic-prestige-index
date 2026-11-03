@@ -10,10 +10,18 @@ from contextlib import nullcontext
 from xml.parsers import expat
 
 from .career_rules import classify, institution_id, year
-from .task import BudgetStop, digest
+from .event_storage import MAX_BYTES
+from .task import BudgetStop, canonical, digest
 
 CHUNK = 65536
+MAX_COMMIT_MEMBERS = 128
 ORCID = r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]"
+
+
+def validate_commit_members(value):
+    if type(value) is not int or not 1 <= value <= MAX_COMMIT_MEMBERS:
+        raise ValueError(f'commit_members must be between 1 and {MAX_COMMIT_MEMBERS}')
+    return value
 
 def summary_member_pattern(spec):
     """Accept documented roots and the exact frozen archive's actual root.
@@ -168,7 +176,49 @@ def read_mtime_pax(stream, size):
             raise ValueError('nonzero PAX padding')
 
 
-def stream_archive(store, source, raw, *, max_members=None, max_new_members=None, max_seconds=None, progress=None):
+class _ArchiveMemberBatch:
+    """Bound complete normalized members; commit their ledgers and events together.
+
+    No raw XML is retained. Uncommitted members are replayed after interruption,
+    exactly as a single interrupted member was before. Budget scans remain at
+    both transaction boundaries; SQLite's physical growth cap remains active.
+    """
+    def __init__(self, store, source, limit):
+        self.store, self.source, self.limit = store, source, limit
+        self.rows, self.known, self.events = [], {}, 0
+
+    def flush(self):
+        if not self.rows:
+            return
+        with self.store.member(self.source, 'archive-commit-batch'):
+            for locator, sha256, status, reason, events in self.rows:
+                if status == 'rejected':
+                    self.store.db.execute('DELETE FROM events WHERE source=? AND locator=?',
+                                          (self.source, locator))
+                else:
+                    for record in events:
+                        self.store.event(record)
+                self.store.finish_member(self.source, locator, sha256, status, reason)
+            self.store.task.check_memory()
+        self.rows.clear()
+        self.known.clear()
+        self.events = 0
+
+    def add(self, locator, sha256, status, reason, events):
+        maximum = self.store.task.config['batch_events']
+        if len(events) > maximum:
+            raise ValueError('archive commit exceeds event limit')
+        if self.events + len(events) > maximum:
+            self.flush()
+        self.rows.append((locator, sha256, status, reason, events))
+        self.known[locator] = (sha256, status)
+        self.events += len(events)
+        self.store.task.check_memory()
+        if len(self.rows) >= self.limit or self.events >= maximum:
+            self.flush()
+
+
+def stream_archive(store, source, raw, *, max_members=None, max_new_members=None, max_seconds=None, progress=None, commit_members=1):
     """Replay from the start, optionally bounding new commits instead of scans.
 
     Previously committed members still consume stream bytes and are hashed to
@@ -177,6 +227,7 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
     """
     if max_new_members is not None and (type(max_new_members) is not int or max_new_members <= 0):
         raise ValueError('max_new_members must be a positive integer')
+    validate_commit_members(commit_members)
     spec = store.task.config["sources"][source]
     member_pattern=summary_member_pattern(spec)
     store.start(source)
@@ -186,6 +237,7 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
     compressed = gzip.GzipFile(fileobj=reader, mode="rb")
     status, detail = "provisional", None
     pending_pax = False
+    batch = _ArchiveMemberBatch(store, source, commit_members) if commit_members > 1 else None
     try:
         while True:
             if ((max_members is not None and processed >= max_members)
@@ -235,10 +287,17 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                 reason = "invalid_summary_path"
             elif header.size > store.task.config["max_member_bytes"]:
                 reason = "member_exceeds_size_limit"
-            previous = store.seen(source, locator)
+            previous = (batch.known.get(locator) if batch else None) or store.seen(source, locator)
             h = hashlib.sha256()
-            with nullcontext() if previous else store.member(source, locator):
-                parser = None if reason or previous else SummaryParser(private_person(match[1]), source, locator, store.event,
+            events = []
+            def collect(record):
+                # Preserve the existing per-event rejection at parser ingress.
+                if len(canonical(record)) > MAX_BYTES:
+                    raise ValueError('normalized event exceeds 16 KiB')
+                events.append(record)
+                store.task.check_memory()
+            with nullcontext() if previous or batch else store.member(source, locator):
+                parser = None if reason or previous else SummaryParser(private_person(match[1]), source, locator, collect if batch else store.event,
                     min(store.task.config["max_events_per_member"], store.task.config["batch_events"]))
                 remaining = header.size
                 while remaining:
@@ -260,7 +319,7 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                         parser.feed(b"", final=True)
                     except (ValueError, expat.ExpatError) as exc:
                         reason = str(exc)[:256]
-                if reason and not previous:
+                if reason and not previous and batch is None:
                     store.db.execute("DELETE FROM events WHERE source=? AND locator=?", (source, locator))
                 if header.size % 512:
                     exact(compressed, 512 - header.size % 512)
@@ -268,16 +327,24 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                     if previous[0] != h.hexdigest():
                         raise ValueError('member changed within frozen source')
                 else:
-                    store.finish_member(source, locator, h.hexdigest(), "rejected" if reason else "observed", reason)
+                    if batch:
+                        batch.add(locator, h.hexdigest(), 'rejected' if reason else 'observed',
+                                  reason, [] if reason else events)
+                    else:
+                        store.finish_member(source, locator, h.hexdigest(), "rejected" if reason else "observed", reason)
             if previous:
                 replayed += 1
             else:
                 added += 1
             processed += 1
             if progress and processed % 100 == 0:
+                if batch:
+                    batch.flush()
                 progress({"processed_this_pass": processed, "new_members_this_pass": added,
                     "replayed_members_this_pass": replayed,
                     "compressed_bytes": reader.size, "storage_bytes": store.task.used()})
+        if batch:
+            batch.flush()
     except BudgetStop as exc:
         status, detail = "budget_stopped", str(exc)
     except BaseException as exc:

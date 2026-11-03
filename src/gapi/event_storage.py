@@ -129,7 +129,7 @@ def payload_row(cursor, row, *, decode=unpack):
     """Preserve tuple API, exposing owned encoded columns as original TEXT.
 
     Aliasing a raw column as stored_payload explicitly inspects physical bytes.
-    Candidate query_sha256/response_sha256 columns and evidence `url` columns
+    Named evidence digest columns and evidence `url` columns
     use their own lossless codecs. Other BLOB columns are not interpreted.
     """
     if any(column[0] in COLUMNS and isinstance(value,bytes)
@@ -155,15 +155,26 @@ def configure_reader(db):
 
 
 def load_dictionary(db, key):
-    # No persistent cache: every read checks its content-addressed dependency,
-    # including on restored snapshots and after a malicious database mutation.
+    # Read actual bytes before consulting the bounded decompression cache.
+    # Snapshot replacement, deletion and database mutation remain observable.
     reader=db.cursor();reader.row_factory=None
     try:row=reader.execute('SELECT compressed_bytes FROM event_dictionaries WHERE digest=?',(key,)).fetchone()
     finally:reader.close()
     if not row:raise ValueError('event dictionary missing')
+    body=row[0]
+    if not isinstance(body,bytes) or not 0<len(body)<=MAX_DICTIONARY_BYTES+64:
+        raise ValueError('invalid compressed event dictionary size')
+    return _decoded_stored_dictionary(body)
+
+
+@lru_cache(maxsize=8)
+def _decoded_stored_dictionary(body):
+    # Cache immutable compressed bytes, never a database handle or digest alone.
+    # At most eight bounded inputs and eight <=8 KiB outputs are retained.
+    # unpack() still verifies the decoded dictionary against the requested key.
     try:
         decoder=zlib.decompressobj()
-        raw=decoder.decompress(row[0],MAX_DICTIONARY_BYTES+1)
+        raw=decoder.decompress(body,MAX_DICTIONARY_BYTES+1)
         if (not raw or len(raw)>MAX_DICTIONARY_BYTES or not decoder.eof
                 or decoder.unused_data or decoder.unconsumed_tail):
             raise ValueError('invalid event dictionary framing')

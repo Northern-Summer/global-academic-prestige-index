@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 from .task import Task, BudgetStop, canonical, digest
 from .event_storage import pack_event, configure_reader, DICTIONARY_DDL, source_dictionary
-from .queue_storage import pack_row
+from .queue_storage import pack_row, pack_digest
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
 
@@ -456,7 +456,7 @@ class CareerStore:
         old = self.seen(source, locator)
         if old and old[0] != sha256:
             raise ValueError("member changed within frozen source")
-        added=self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, sha256, status, reason)).rowcount
+        added=self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, pack_digest(sha256), status, reason)).rowcount
         if added:
             self.db.execute("UPDATE runs SET members=members+? WHERE source=?", (added, source))
 
@@ -505,10 +505,17 @@ class CareerStore:
         rows=[]
         for source in orcid_archive_sources(self.task):
             spec=self.task.config['sources'][source]
-            run=self.db.execute('SELECT identity,status,bytes,sha256 FROM runs WHERE source=?',(source,)).fetchone()
+            run=self.db.execute('SELECT identity,status,bytes,sha256,members FROM runs WHERE source=?',(source,)).fetchone()
             identity=digest({'source':spec,'rules':self.task.config['rules_version']})
             matches=bool(run and run[0]==identity)
             verified=bool(matches and run[1]=='verified')
+            member_states=dict(self.db.execute(
+                'SELECT status,count(*) FROM members WHERE source=? GROUP BY status',(source,)))
+            total=sum(member_states.values())
+            parsed=member_states.get('observed',0)
+            rejected=member_states.get('rejected',0)
+            unclassified=total-parsed-rejected
+            reconciled=bool(run and run[4]==total)
             rows.append({'source':source,'kind':spec['kind'],
                 'status':run[1] if run else 'not_started',
                 'identity_matches':matches,'integrity_verified':verified,
@@ -516,9 +523,19 @@ class CareerStore:
                 'compressed_bytes':run[2] if run else 0,
                 'expected_compressed_bytes':spec.get('size_bytes'),
                 'upstream_checksum':spec.get('checksum'),
-                'observed_sha256':run[3] if run else None})
+                'observed_sha256':run[3] if run else None,
+                'member_processing':{
+                    'committed_members':total,'parsed_members':parsed,
+                    'rejected_members':rejected,'unclassified_members':unclassified,
+                    'run_member_count':run[4] if run else None,
+                    'ledger_reconciled':reconciled,
+                    'unsettled_rejections':rejected,
+                    'legal_exclusions_verified':None,
+                    'processing_complete':bool(verified and reconciled and not rejected and not unclassified),
+                    'parsed_fraction':parsed/total if verified and total else None}})
         return {'scope':'configured-annual-archives','sources':rows,
                 'all_archives_verified':bool(rows) and all(r['integrity_verified'] for r in rows),
+                'all_archive_members_processed':bool(rows) and all(r['member_processing']['processing_complete'] for r in rows),
                 'complete_global_census':False}
 
     def candidate_progress(self, *, allowed_sources=None):

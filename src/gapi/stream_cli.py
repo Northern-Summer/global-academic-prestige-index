@@ -7,12 +7,23 @@ from pathlib import Path
 
 from .career_store import CareerStore, member_evidence_sql, CANDIDATE_SOURCES, orcid_archive_sources, verified_archive_sql
 from .global_sources import enqueue_discovery, ingest_orcid_api, ingest_wikidata
-from .orcid_stream import stream_archive
+from .orcid_stream import stream_archive, validate_commit_members
 from .source_http import PublicHTTP, StageDeadline, WIKIDATA_BATCH_LIMIT
 from .task import Task
 
 
 def register(sub):
+    rejected=sub.add_parser('queue-archive-rejections',help='queue registered ORCID API follow-up without changing annual rejections')
+    rejected.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    rejected.add_argument('--source',default='orcid-2026-summary')
+    rejected.add_argument('--after-rowid',type=int,default=0)
+    rejected.add_argument('--max-members',type=int,default=10000)
+    rejected.add_argument('--max-seconds',type=float,default=60)
+    members=sub.add_parser('compact-member-digests',help='losslessly compact member hashes under the writer lock')
+    members.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
+    members.add_argument('--after-rowid',type=int,default=0)
+    members.add_argument('--max-rows',type=int,default=100000)
+    members.add_argument('--max-seconds',type=float,default=60)
     evidence=sub.add_parser('repack-evidence-urls',help='losslessly compress evidence URLs under the writer lock')
     evidence.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     evidence.add_argument('--after',nargs=3,metavar=('SOURCE','LOCATOR','PART'))
@@ -120,6 +131,8 @@ def register(sub):
                 help='annual archive source key in the frozen task registry')
             parser.add_argument('--max-new-members',type=int,
                 help='stop after this many previously uncommitted members; gzip still replays from the start')
+            parser.add_argument('--commit-members',type=int,default=1,
+                help='atomically commit up to 1–128 complete members within the existing event limit')
         if name in ("ingest-wikidata", "ingest-orcid-api"):
             parser.add_argument("--ids", nargs="*", default=[])
             parser.add_argument("--discover", action="store_true")
@@ -146,7 +159,7 @@ def register(sub):
 
 def execute(args):
     names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
-    if args.command not in names and args.command not in ('repack-evidence-urls','repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
+    if args.command not in names and args.command not in ('queue-archive-rejections','compact-member-digests','repack-evidence-urls','repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
     task = Task(args.task)
     task.activate_runtime()
@@ -182,7 +195,15 @@ def execute_task(task, args):
     http=None
     try:
         http = PublicHTTP(task,reuse_connections=True)
-        if args.command == 'repack-evidence-urls':
+        if args.command == 'queue-archive-rejections':
+            from .archive_recovery import queue_archive_rejections
+            result=queue_archive_rejections(store,args.source,after_rowid=args.after_rowid,
+                max_members=args.max_members,max_seconds=args.max_seconds)
+        elif args.command == 'compact-member-digests':
+            from .queue_storage import compact_members
+            result=compact_members(store,after_rowid=args.after_rowid,
+                max_rows=args.max_rows,max_seconds=args.max_seconds)
+        elif args.command == 'repack-evidence-urls':
             from .evidence_storage import repack_urls
             result=repack_urls(store,after=args.after,max_rows=args.max_rows,max_seconds=args.max_seconds)
         elif args.command == 'repack-full-input':
@@ -279,6 +300,7 @@ def execute_task(task, args):
                 stage_careers=args.stage_careers,max_reconnects=args.max_reconnects)
         elif args.command == "ingest-orcid":
             source = args.source
+            validate_commit_members(getattr(args, 'commit_members', 1))
             if source not in orcid_archive_sources(task):
                 raise ValueError('source must be an annual ORCID archive in the frozen registry')
             store.start(source)
@@ -288,6 +310,7 @@ def execute_task(task, args):
                     scanning = True
                     result = stream_archive(store, source, response, max_members=args.max_members,
                         max_new_members=args.max_new_members,
+                        commit_members=getattr(args, 'commit_members', 1),
                         max_seconds=args.max_seconds, progress=lambda r: print(json.dumps(r), flush=True))
             except (OSError, RuntimeError, ValueError) as exc:
                 # The stream owns parse/checksum status; an available download
