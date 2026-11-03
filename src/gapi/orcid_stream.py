@@ -47,6 +47,10 @@ class SummaryParser:
         self.path, self.current = [], None
         self.max_events, self.count = max_events, 0
         self.parser = expat.ParserCreate(namespace_separator="}")
+        # Coalesce fragmented text before Python callbacks. Keep the buffer
+        # bounded; affiliation field limits and structural handlers still apply.
+        self.parser.buffer_size = 8192
+        self.parser.buffer_text = True
         self.parser.StartElementHandler = self.start
         self.parser.EndElementHandler = self.end
         self.parser.CharacterDataHandler = self.characters

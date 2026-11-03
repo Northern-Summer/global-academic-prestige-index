@@ -35,7 +35,9 @@ def register(sub):
     repack.add_argument('--after-rowid',type=int,default=0)
     repack.add_argument('--max-events',type=int,default=20000)
     repack.add_argument('--max-seconds',type=float,default=60)
-    repack.add_argument('--share-sources',action='store_true',help='losslessly reuse bounded source seed dictionaries')
+    repack_codec = repack.add_mutually_exclusive_group()
+    repack_codec.add_argument('--share-sources',action='store_true',help='losslessly reuse bounded source seed dictionaries')
+    repack_codec.add_argument('--blocks',action='store_true',help='opt in to lossless bounded event blocks')
     compact_snapshots=sub.add_parser('compact-frozen-inputs',help='losslessly pack selected private derived snapshots under the writer lock')
     compact_snapshots.add_argument('--task',type=Path,default=Path('configs/streaming.json'))
     compact_snapshots.add_argument('--filenames',nargs='+',required=True)
@@ -221,9 +223,13 @@ def execute_task(task, args):
             result=repacker(store,table=args.table,after_row=args.after_row,
                           max_rows=args.max_rows,max_seconds=args.max_seconds)
         elif args.command == 'repack-event-pages':
-            from .event_storage import repack_event_pages
-            result=repack_event_pages(store,after_rowid=args.after_rowid,
-                                      max_events=args.max_events,max_seconds=args.max_seconds,share_sources=args.share_sources)
+            from .event_storage import repack_event_pages, repack_event_blocks
+            if getattr(args, 'blocks', False):
+                result=repack_event_blocks(store,after_rowid=args.after_rowid,
+                    max_events=args.max_events,max_seconds=args.max_seconds)
+            else:
+                result=repack_event_pages(store,after_rowid=args.after_rowid,
+                    max_events=args.max_events,max_seconds=args.max_seconds,share_sources=args.share_sources)
         elif args.command == 'compact-events':
             from .event_storage import compact_events
             result=compact_events(store,max_events=args.max_events,max_seconds=args.max_seconds)

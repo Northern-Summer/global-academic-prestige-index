@@ -10,6 +10,7 @@ import json
 import math
 import time
 import zlib
+from functools import lru_cache
 from .queue_storage import COLUMNS, unpack_digest
 from .evidence_storage import unpack_url
 
@@ -21,6 +22,10 @@ DICTIONARY_DDL = '''CREATE TABLE IF NOT EXISTS event_dictionaries(
  digest BLOB PRIMARY KEY, compressed_bytes BLOB NOT NULL);'''
 MAX_BLOCK_EVENTS = 128
 MAX_BLOCK_BYTES = MAX_BLOCK_EVENTS * (MAX_BYTES + 4)
+BLOCK_MAGIC = b'GAPIb1\0'
+BLOCK_REFERENCE_BYTES = len(BLOCK_MAGIC) + 32 + 2
+BLOCK_DDL = '''CREATE TABLE IF NOT EXISTS event_blocks(
+ digest BLOB PRIMARY KEY, packed BLOB NOT NULL);'''
 
 
 def encode_event_block(texts):
@@ -167,12 +172,37 @@ def load_dictionary(db, key):
 
 
 def decode_event(db, value):
+    if isinstance(value, bytes) and value.startswith(BLOCK_MAGIC):
+        if len(value) != BLOCK_REFERENCE_BYTES:
+            raise ValueError('invalid event block reference')
+        key = value[len(BLOCK_MAGIC):len(BLOCK_MAGIC)+32]
+        slot = int.from_bytes(value[-2:], 'big')
+        reader = db.cursor(); reader.row_factory = None
+        try:
+            row = reader.execute('SELECT packed FROM event_blocks WHERE digest=?', (key,)).fetchone()
+        finally:
+            reader.close()
+        if row is None:
+            raise ValueError('event block missing')
+        # Always read actual bytes before consulting the one-block cache.
+        # A changed or missing dependency must not reuse validated old content.
+        values = _decoded_stored_block(key, row[0])
+        if slot >= len(values):
+            raise ValueError('event block slot out of range')
+        return values[slot]
     return unpack(value,dictionary_lookup=lambda key:load_dictionary(db,key))
+
+
+@lru_cache(maxsize=1)
+def _decoded_stored_block(key, body):
+    # Retain one block only. Its framed UTF-8 input is bounded by MAX_BLOCK_BYTES;
+    # Python strings and tuple overhead add to that byte bound.
+    return decode_event_block(key, body)
 
 
 def snapshot_payload(db, value):
     """Keep ranking snapshots self-contained in the existing GAPIz1 format."""
-    if isinstance(value,bytes) and value.startswith(DICT_MAGIC):
+    if isinstance(value,bytes) and value.startswith((DICT_MAGIC, BLOCK_MAGIC)):
         return pack(decode_event(db,value))
     return value
 
@@ -260,22 +290,13 @@ def compact_events(store, *, max_events=5000, max_seconds=120):
             'note': 'payload savings and reusable pages are not filesystem bytes reclaimed'}
 
 
-def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60, share_responses=False, share_sources=False):
-    """Rebalance bounded contiguous rows, retaining rowids and decoded facts.
-
-    The caller owns CareerStore's writer lock. Every <=128-row batch is one
-    rollback-protected transaction; the returned cursor advances only after
-    commit. Default mode retains physical bytes. Optional response sharing
-    changes only the payload codec, retaining every original decoded byte.
-    """
+def _validate_event_repack(store, after_rowid, max_events, max_seconds):
     if type(after_rowid) is not int or after_rowid<0:
         raise ValueError('invalid event page cursor')
     if type(max_events) is not int or not 1<=max_events<=100000:
         raise ValueError('invalid event page limit')
     if not math.isfinite(max_seconds) or max_seconds<=0:
         raise ValueError('invalid event page deadline')
-    if type(share_responses) is not bool:raise ValueError('invalid response sharing policy')
-    if type(share_sources) is not bool:raise ValueError('invalid source sharing policy')
     if store.db.in_transaction:raise ValueError('cannot repack unfinished transaction')
     if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name='events'").fetchone():
         raise ValueError('event page repack forbids triggers')
@@ -284,6 +305,21 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
         if any(row[2]=='events' for row in store.db.execute('PRAGMA foreign_key_list('+quoted(name)+')')):
             raise ValueError('event page repack forbids incoming foreign keys')
     columns=[row[1] for row in store.db.execute('PRAGMA table_info(events)')]
+    return columns
+
+
+def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60, share_responses=False, share_sources=False):
+    """Rebalance bounded contiguous rows, retaining rowids and decoded facts.
+
+    The caller owns CareerStore's writer lock. Every <=128-row batch is one
+    rollback-protected transaction; the returned cursor advances only after
+    commit. Default mode retains physical bytes. Optional response sharing
+    changes only the payload codec, retaining every original decoded byte.
+    """
+    if type(share_responses) is not bool:raise ValueError('invalid response sharing policy')
+    if type(share_sources) is not bool:raise ValueError('invalid source sharing policy')
+    columns = _validate_event_repack(store, after_rowid, max_events, max_seconds)
+    from .ranking_snapshot import quoted
     insert='INSERT INTO events(rowid,'+','.join(map(quoted,columns))+') VALUES('+','.join('?' for _ in range(len(columns)+1))+')'
     def pages():
         return (store.db.execute('PRAGMA page_count').fetchone()[0],
@@ -335,3 +371,67 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
             'physical_file_bytes_reclaimed':0,'stored_rows_unchanged':changed==0,
             'logical_event_bytes_unchanged':True,
             'note':'internal reusable capacity only; resume with committed after_rowid'}
+
+
+def repack_event_blocks(store, *, after_rowid=0, max_events=20000, max_seconds=60):
+    """Opt-in, bounded replacement under CareerStore's existing writer lock.
+
+    Commit the block and every reference atomically. Existing references are
+    immutable and skipped, making retries idempotent. No source fact, scalar,
+    event identity, rowid or index is removed. Snapshots remain self-contained.
+    The returned cursor covers committed batches only; no live collector calls
+    this maintenance function automatically.
+    """
+    columns = _validate_event_repack(store, after_rowid, max_events, max_seconds)
+    from .ranking_snapshot import quoted
+    payload_index = columns.index('payload')+1
+    insert = ('INSERT INTO events(rowid,'+','.join(map(quoted, columns))+') VALUES('
+              +','.join('?' for _ in range(len(columns)+1))+')')
+    cursor = after_rowid; scanned = changed = blocks = saved = 0
+    deadline = time.monotonic()+max_seconds
+    while scanned < max_events and time.monotonic() < deadline:
+        store.task.check_memory()
+        reader = store.db.cursor(); reader.row_factory = None
+        try:
+            rows = reader.execute('SELECT rowid,* FROM events WHERE rowid>? ORDER BY rowid LIMIT ?',
+                (cursor, min(MAX_BLOCK_EVENTS, max_events-scanned))).fetchall()
+        finally:
+            reader.close()
+        if not rows:
+            break
+        pending = [row for row in rows if not (
+            isinstance(row[payload_index], bytes) and row[payload_index].startswith(BLOCK_MAGIC))]
+        if pending:
+            texts = [decode_event(store.db, row[payload_index]) for row in pending]
+            key, body = encode_event_block(texts)
+            old_bytes = sum(len(value.encode('utf-8')) if isinstance(value, str) else len(value)
+                            for value in (row[payload_index] for row in pending))
+            benefit = old_bytes-len(body)-BLOCK_REFERENCE_BYTES*len(pending)-128
+            if benefit > 0:
+                with store.member('storage-page-repack', 'event-blocks', max_growth_bytes=8*1024**2):
+                    store.db.execute(BLOCK_DDL)
+                    store.db.execute('INSERT OR IGNORE INTO event_blocks VALUES(?,?)', (key, body))
+                    replacements = []
+                    for slot, (row, text) in enumerate(zip(pending, texts)):
+                        ref = BLOCK_MAGIC+key+slot.to_bytes(2, 'big')
+                        if decode_event(store.db, ref) != text:
+                            raise ValueError('stored event block conflicts with predecessor')
+                        replacements.append((*row[:payload_index], ref, *row[payload_index+1:]))
+                    store.db.executemany('DELETE FROM events WHERE rowid=?', [(row[0],) for row in pending])
+                    store.db.executemany(insert, replacements)
+                    reader = store.db.cursor(); reader.row_factory = None
+                    try:
+                        actual = reader.execute('SELECT rowid,* FROM events WHERE rowid>=? AND rowid<=? ORDER BY rowid',
+                            (rows[0][0], rows[-1][0])).fetchall()
+                    finally:
+                        reader.close()
+                    expected = {row[0]: row for row in replacements}
+                    if actual != [expected.get(row[0], row) for row in rows]:
+                        raise ValueError('event block replacement changed stored rows')
+                    store.task.check_memory()
+                changed += len(pending); blocks += 1; saved += benefit
+        scanned += len(rows); cursor = rows[-1][0]
+    return {'scanned_events': scanned, 'after_rowid': cursor, 'repacked_events': changed,
+            'new_blocks': blocks, 'estimated_payload_bytes_saved': saved,
+            'physical_file_bytes_reclaimed': 0, 'logical_event_bytes_unchanged': True,
+            'note': 'internal reusable pages only; no global capacity claim'}
