@@ -51,7 +51,49 @@ inputs. See [Python's Expat buffering contract](https://docs.python.org/3/librar
 The local synthetic microbenchmark is not a full-archive throughput measurement;
 running collectors retain the parser implementation loaded at startup.
 
+### Optional bounded archive commits
+
+`ingest-orcid --commit-members 32` groups complete normalized members into one
+atomic transaction. The default remains one member; the explicit limit is
+1–128. Each group also obeys the existing `batch_events` event limit. A pending
+group and the current member can each hold at most `batch_events` normalized
+events; each event retains the existing 16 KiB limit. No raw XML is buffered or
+written to disk. Process memory checks remain active during parsing and commit.
+
+Storage is fully measured before and after every transaction. The existing
+sole-writer lock, SQLite growth cap, FULL synchronous commits and rollback
+reserve remain in force; no cached storage estimate substitutes for admission.
+Events, member digests and source member counts commit together. Rejected
+members discard partial events; duplicate buffered members still require exact
+digest agreement. Progress callbacks flush pending groups before reporting.
+
+A normal bounded stop flushes complete pending members. An exception or process
+exit may leave the last group uncommitted; restart replays the gzip stream and
+those members under the same frozen identity. Counts reflect committed rows.
+EOF, gzip trailer, advertised length and upstream checksum gates remain
+mandatory, including when the final group fails to commit. Successful group
+commits alone never verify the annual source.
+
+Use the explicit batching option only on the next normal collector start,
+after the preceding writer settles. It changes no source identity or ranking
+rule and requires no database migration. Do not restart a healthy full read
+to enable it. Same-input synthetic benchmarks exercise storage admission and
+fsync but do not establish full-archive throughput or capacity.
+
+On 2026-11-03, five alternating same-input runs of 128 synthetic one-event
+members measured median times of 2.361 seconds with individual commits and
+0.126 seconds with groups of 32. Complete storage scans fell from 257 to 9,
+while logical event hashes and all member counts matched. The isolated recheck
+ran after the local regression finished; the existing production collector
+continued unchanged. This 18.7-fold synthetic result isolates commit overhead
+and must not be presented as a measured full-archive speedup.
+
 ### Optional event block maintenance
+
+Bounded real-event query experiments found slower ID and person traversal with
+128-event blocks. Production migration is therefore deferred; payload savings
+alone do not justify adopting this representation. Group-specific dictionary
+experiments also did not establish sufficient benefit for migration.
 
 `repack-event-pages --blocks` groups at most 128 normalized event payloads into
 one independently hashed block. Event columns, rowids, indexes and provenance
@@ -76,6 +118,50 @@ Payload savings and reusable SQLite pages are distinct from filesystem space
 reclaimed. Neither bounded sample measurements nor successful maintenance prove
 that the complete annual source fits within the task budget.
 
+### Bounded dictionary decompression reuse
+
+`event_storage.load_dictionary` reads the current compressed dictionary bytes
+from SQLite on every lookup. Up to eight exact compressed byte strings and
+their decoded dictionaries are cached; each compressed input is limited to
+`MAX_DICTIONARY_BYTES + 64` bytes and each decoded dictionary to
+`MAX_DICTIONARY_BYTES`. The event decoder still checks the requested SHA-256.
+Deletion, replacement, rollback and different database contents cannot reuse a
+previous value merely because the dictionary key matches. Invalid decoding is
+not cached. This changes no stored data and requires no migration.
+
+Paired local experiments on three 2,048-event annual-source samples compared
+the same SQLite readers with and without decompression reuse. Across rowid,
+ID and person order, median speed ratios were 1.14–1.31 over five alternating
+repeats; every returned row matched. These in-memory sample results do not
+measure full-archive throughput, disk performance or production capacity.
+Running collectors retain their startup implementation until a normal restart.
+
+### Compact member digests
+
+New member commits encode lowercase 64-character SHA-256 values using the same
+bounded, reversible digest codec as the candidate queue. Owned readers still
+return the exact hexadecimal text. Uppercase or legacy arbitrary values retain
+their original TEXT representation; member locators, statuses, rejection reasons
+and replay checks are unchanged. The digest codec and column names have one
+owner in `queue_storage.py`; member and candidate maintenance share its bounded
+transaction implementation.
+
+`compact-member-digests` converts existing member hashes in batches of at most
+128 rows under the existing writer lock, budget and reserve. Resume using the
+returned `after_rowid`. Repeated compaction does not write already encoded rows.
+Oversized legacy rows are retained and counted rather than widening the memory
+or journal bound. Triggers, incoming foreign keys and unexpected ledger columns
+are rejected before mutation.
+
+```powershell
+python -B -m gapi compact-member-digests --task configs/orcid-2026-production.json --max-rows 100000 --max-seconds 60
+```
+
+Run this only after the collector settles. Logical member hashes and all three
+snapshot routes remain readable; this changes storage bytes, not the upstream
+checksum algorithm or the source-integrity gate. Reusable-page savings are not
+filesystem reclamation or proof of full-source capacity.
+
 ### Read acquisition progress
 
 `acquisition-status` reports `candidate_processing` separately from
@@ -92,6 +178,38 @@ for a parser-verified run whose source identity matches the configured frozen
 source and rules. `all_archives_verified` covers those annual archives only;
 it does not establish completion of other discovery feeds, independent fact
 corroboration, or world coverage. No global personnel percentage is available.
+
+Each annual source also exposes `member_processing`: committed, parsed,
+rejected and unclassified member counts, plus reconciliation against the
+transactional `runs.members` counter. `all_archive_members_processed` requires
+verified archive integrity, reconciled counts, and no rejected or unclassified
+members in any configured annual source. It covers annual member parsing only,
+not dynamic API queues, independent facts or ranking qualification.
+
+A fully checksum-verified archive may contain `<error>` documents instead of
+summary records. These remain rejected and unsettled. Oversized members and
+other parse failures also remain unsettled; no rejection reason is automatically
+promoted to a legal exclusion. `legal_exclusions_verified` is unknown (`null`)
+because the current ledger has no independently verified exclusion decision.
+The parsed fraction has a denominator only after archive integrity completes;
+partial scans return `null`. Legacy integrity fields retain their byte-level
+meaning and cannot substitute for member processing.
+
+After the active collector releases its writer lock, rejected annual members
+can nominate follow-up candidates in the existing ORCID public API queue:
+
+```text
+python -m gapi queue-archive-rejections --task configs/orcid-2026-production.json --max-members 10000 --max-seconds 60
+```
+
+Use the returned `after_rowid` with `--after-rowid` to continue committed groups.
+Only frozen annual source identities, matching member paths, valid ORCID IDs
+and SHA-256 digests qualify. This command performs no HTTP requests and retains
+existing candidate provenance. Repeated scans insert no duplicate candidates;
+it never changes annual rejection reasons, creates career events, or establishes
+independent corroboration. Subsequent API retrieval uses the existing queue,
+backoff and source policy. A retrieved API record does not retroactively repair
+the annual member or complete its settlement.
 
 Member-ledger progress uses the authoritative `members` table. A source start
 reconciles its `runs.members` counter once; each newly inserted member advances
