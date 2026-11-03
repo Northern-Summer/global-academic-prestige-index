@@ -42,6 +42,40 @@ only one length-checked timestamp record of at most 128 bytes, with zero padding
 path, link, size, encoding, sparse and global PAX overrides remain rejected.
 An accessible gzip prefix is not full enumeration or checksum verification.
 
+`SummaryParser` enables Expat text buffering with an explicit 8 KiB buffer.
+This reduces fragmented Python character callbacks while retaining the existing
+2,048-character affiliation-field limit, structural handlers and DTD/entity
+rejection. Differential tests compare buffered and unbuffered parsing across
+single-byte and normal chunks, entities, CDATA, multilingual text and malformed
+inputs. See [Python's Expat buffering contract](https://docs.python.org/3/library/pyexpat.html#xmlparser.buffer_text).
+The local synthetic microbenchmark is not a full-archive throughput measurement;
+running collectors retain the parser implementation loaded at startup.
+
+### Optional event block maintenance
+
+`repack-event-pages --blocks` groups at most 128 normalized event payloads into
+one independently hashed block. Event columns, rowids, indexes and provenance
+remain intact. The existing writer lock, task budget and transaction admission
+apply; run maintenance only after the collector has safely settled. The default
+page-repack mode and ingestion format remain unchanged. `--blocks` and
+`--share-sources` are mutually exclusive.
+
+```powershell
+python -B -m gapi repack-event-pages --task configs/orcid-2026-production.json --blocks --max-events 20000 --max-seconds 60
+```
+
+Resume with the returned `after_rowid`. Each batch commits its block and
+references together, verifies every original payload and skips existing block
+references on replay. Readers check the stored block bytes before consulting a
+single-block decode cache; missing, changed, truncated and corrupt dependencies
+are rejected. Full database backups retain the blocks; ranking SQLite and row
+snapshots convert them to self-contained legacy payloads. Existing freezes
+remain readable. No blocks or dictionaries are deleted by this command.
+
+Payload savings and reusable SQLite pages are distinct from filesystem space
+reclaimed. Neither bounded sample measurements nor successful maintenance prove
+that the complete annual source fits within the task budget.
+
 ### Read acquisition progress
 
 `acquisition-status` reports `candidate_processing` separately from
