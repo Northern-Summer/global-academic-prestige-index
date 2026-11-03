@@ -16,6 +16,23 @@ describe their original test conditions rather than a second active limit.
 
 ## Reproduce and resume
 
+### Read acquisition progress
+
+`acquisition-status` reports `candidate_processing` separately from
+`source_integrity`. Candidate processing fractions use only the currently
+discovered selection, identified by its selection hash. A finished selection
+does not prove complete source enumeration. The legacy
+`acquisition_progress.sources[].enumeration_complete` field is retained for
+snapshot compatibility; it means that selection has no pending candidates.
+New consumers should use `candidate_processing.sources[].processing_complete`.
+
+`source_integrity.sources` lists every configured annual ORCID archive,
+including sources without a run. Full enumeration and integrity are true only
+for a parser-verified run whose source identity matches the configured frozen
+source and rules. `all_archives_verified` covers those annual archives only;
+it does not establish completion of other discovery feeds, independent fact
+corroboration, or world coverage. No global personnel percentage is available.
+
 Member-ledger progress uses the authoritative `members` table. A source start
 reconciles its `runs.members` counter once; each newly inserted member advances
 the counter in the same transaction. Repeated members do not advance it, and a

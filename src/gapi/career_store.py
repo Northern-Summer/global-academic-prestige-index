@@ -461,6 +461,7 @@ class CareerStore:
             self.db.execute("UPDATE runs SET members=members+? WHERE source=?", (added, source))
 
     def report(self):
+        progress=self.candidate_progress()
         return {
             "sources": [dict(zip(("source", "identity", "status", "bytes", "members", "sha256", "detail"), row)) for row in self.db.execute("SELECT * FROM runs ORDER BY source")],
             "people": self.db.execute("SELECT count(DISTINCT person) FROM events").fetchone()[0],
@@ -480,10 +481,45 @@ class CareerStore:
             "discovery_feeds":[dict(zip(('id','status','compressed_bytes','lines','candidates','rejected','sha256','detail'), row))
                 for row in self.db.execute('SELECT id,status,compressed_bytes,lines,candidates,rejected,sha256,detail FROM discovery_feeds ORDER BY id')],
             "storage_bytes": self.task.used(), "storage_budget": self.task.config["budget_bytes"],
-            "acquisition_progress":self.candidate_progress(),
+            "acquisition_progress":progress,
+            "candidate_processing":{
+                'scope':progress['scope'],
+                'sources':[{'source':r['source'],'selection_sha256':r['selection_sha256'],
+                    'candidates':r['candidates'],'processed':r['processed'],
+                    'pending':r['pending'],'pending_with_errors':r['pending_with_errors'],
+                    'processing_complete':r['pending']==0,
+                    'processing_fraction':r['processed']/r['candidates'] if r['candidates'] else None}
+                    for r in progress['sources']],
+                'source_enumeration_proven':False},
+            "source_integrity":self.source_integrity(),
             "institution_alias_issues":dict(self.db.execute('SELECT reason,count(*) FROM institution_alias_issues GROUP BY reason')),
             "complete_global_census": False,
         }
+
+    def source_integrity(self):
+        """Archive completion is independent of the discovered candidate queue.
+
+        The existing parser owns the verified state. This projection also binds
+        that state to the current frozen source identity; it never promotes rows.
+        """
+        rows=[]
+        for source in orcid_archive_sources(self.task):
+            spec=self.task.config['sources'][source]
+            run=self.db.execute('SELECT identity,status,bytes,sha256 FROM runs WHERE source=?',(source,)).fetchone()
+            identity=digest({'source':spec,'rules':self.task.config['rules_version']})
+            matches=bool(run and run[0]==identity)
+            verified=bool(matches and run[1]=='verified')
+            rows.append({'source':source,'kind':spec['kind'],
+                'status':run[1] if run else 'not_started',
+                'identity_matches':matches,'integrity_verified':verified,
+                'enumeration_complete':verified,
+                'compressed_bytes':run[2] if run else 0,
+                'expected_compressed_bytes':spec.get('size_bytes'),
+                'upstream_checksum':spec.get('checksum'),
+                'observed_sha256':run[3] if run else None})
+        return {'scope':'configured-annual-archives','sources':rows,
+                'all_archives_verified':bool(rows) and all(r['integrity_verified'] for r in rows),
+                'complete_global_census':False}
 
     def candidate_progress(self, *, allowed_sources=None):
         """Counts committed candidate selection, not unknown world personnel."""
