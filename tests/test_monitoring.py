@@ -15,6 +15,10 @@ class MonitoringTests(unittest.TestCase):
     store = fixtures.StreamingTests.store
 
     def test_projection_excludes_large_private_landing_and_matches_report_owner(self):
+        # Compare the same owned trees, not concurrently growing real test logs.
+        project = self.root/'projection-project'
+        project.mkdir()
+        self.enterContext(patch('gapi.task.project_root', return_value=project))
         store=self.store(archive([]))
         try:
             with store.db:

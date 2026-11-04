@@ -90,6 +90,17 @@ checks are owned by `corroboration.py`. Its derived decisions retain field scope
 and evidence hashes. Historical v2 bytes require their pinned predecessor code
 and inputs; a new rule is not retroactively labelled as the previous method.
 
+Method `gapi-observed-network/4` corrects the training-population boundary:
+explicitly unfinished qualifications and known reversed date intervals cannot
+enter either relations or the observed training denominator. The shared
+eligibility predicate is owned by `career_rules.training_observation_eligible`.
+Unknown labels/dates and valid training observations without an employment
+record remain eligible for that observed population; relations still require
+a recognized stage, a completion year and a subsequent academic appointment.
+Known reversed employment intervals cannot form relations or suppress valid
+appointments through overlap checks. Earlier published method versions retain
+their original bytes and require their pinned code for reproduction.
+
 ## Official award-time label attribution
 
 The Nobel-only view is owned by `award_projection.py`, policy

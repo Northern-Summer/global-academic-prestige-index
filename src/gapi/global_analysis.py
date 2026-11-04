@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from .ranking import DEFAULT_CONFIG, pagerank
-from .career_rules import classify
+from .career_rules import classify, valid_interval, training_observation_eligible
 from .storage import project_root
 from .career_store import member_evidence_sql, verified_archive_sql
 from .task import BudgetStop, canonical, digest
@@ -134,8 +134,11 @@ def corroborate(store):
 
 
 def observed_relations(items):
-    trainings = [e for e in items if e["kind"] in ("education", "training") and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
-    jobs = [e for e in items if e["kind"] == "employment" and e.get("stage") == "academic" and e.get("year_start")]
+    trainings = [e for e in items if training_observation_eligible(
+        e['kind'], e.get('role'), e.get('year_start'), e.get('year_end'))
+        and e.get("year_end") and e.get("stage") in DEFAULT_CONFIG["stage_weights"]]
+    jobs = [e for e in items if e["kind"] == "employment" and e.get("stage") == "academic"
+            and e.get("year_start") and valid_interval(e.get('year_start'), e.get('year_end'))]
     grouped = {}
     for train in trainings:
         for job in jobs:
@@ -300,6 +303,9 @@ def rank_global(store, *, public=False, publication_policy=None):
     # Conditional intensity: denominator is observed training people, never graduates at risk.
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     denominators = Counter()
+    store.db.create_function('gapi_training_observation', 4,
+                             training_observation_eligible, deterministic=True)
+    effective_kind = 'e.kind'
     denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
         FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE e.kind IN ('education','training') AND e.status IN ('observed','corroborated')"""
@@ -313,8 +319,11 @@ def rank_global(store, *, public=False, publication_policy=None):
             WHERE COALESCE(i.kind,e.kind) IN ('education','training')
             AND COALESCE(i.status,e.status) IN ('observed','corroborated')"""
         params = (VERSION, POLICY_SHA256)
+        effective_kind = 'COALESCE(i.kind,e.kind)'
     archive_predicate,archive_params=verified_archive_sql(store.task)
     denominator_sql += " AND " + member_evidence_sql() + " AND " + archive_predicate
+    denominator_sql += (' AND gapi_training_observation('
+                        + effective_kind + ',e.role,e.year_start,e.year_end)')
     params += archive_params
     if allowed is not None:
         denominator_sql += " AND e.source IN (" + ','.join('?' for _ in allowed) + ")"
@@ -345,13 +354,14 @@ def rank_global(store, *, public=False, publication_policy=None):
     coverage = {k:report[k] for k in ("people","events","countries","event_status","member_status")}
     if public:
         placeholders = ','.join('?' for _ in allowed)
-        query = f"SELECT person,country,status FROM events WHERE source IN ({placeholders})"
-        people, countries, statuses = set(), set(), Counter()
-        for person, country, status in store.db.execute(query, tuple(sorted(allowed))):
-            people.add(person)
-            if country: countries.add(country)
-            statuses[status] += 1
-        coverage = {"people":len(people), "events":sum(statuses.values()), "countries":sorted(countries),
+        where = f" FROM events WHERE source IN ({placeholders})"
+        params = tuple(sorted(allowed))
+        people, event_count = store.db.execute(
+            'SELECT count(DISTINCT person),count(*)'+where, params).fetchone()
+        countries = [r[0] for r in store.db.execute(
+            'SELECT DISTINCT country'+where+" AND country IS NOT NULL AND country<>'' ORDER BY country", params)]
+        statuses = dict(store.db.execute('SELECT status,count(*)'+where+' GROUP BY status', params))
+        coverage = {"people":people, "events":event_count, "countries":countries,
                     "event_status":dict(statuses), "member_status":dict(store.db.execute(
                         f"SELECT status,count(*) FROM members WHERE source IN ({placeholders}) GROUP BY status", tuple(sorted(allowed))))}
     result = {"schema_version":"gapi-global-observed/v1","dataset_kind":"real/global-public-observations",
@@ -359,7 +369,7 @@ def rank_global(store, *, public=False, publication_policy=None):
         "scope":{"complete_global_census":False,"enumeration_complete":False,"source_scope":"committed, individually hashed records; annual archive excluded until verified"},
         "coverage":coverage,"nodes":rows,
         "edges":[{"source":s,"target":t,"weight":w,"stages":dict(stages[(s,t)])} for (s,t),w in sorted(edges.items())],
-        "algorithm":{"method_version":"gapi-observed-network/3", "direction":"employer -> training",
+        "algorithm":{"method_version":"gapi-observed-network/4", "direction":"employer -> training",
             "config":DEFAULT_CONFIG,"network_universe":nodes,
             "version_boundary":"New method outputs supersede predecessor calculations; historical bytes require their frozen inputs and pinned predecessor code."},
         "convergence":convergence,"sensitivity":scenarios,"expanded_universe_sensitivity":expanded_scenarios,

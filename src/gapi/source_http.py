@@ -276,7 +276,7 @@ class PublicHTTP:
         if origin not in self.robots:
             robot_url = origin + "/robots.txt"
             try:
-                with self._open(robot_url, "text/plain") as r:
+                with SourceResponse(self._open(robot_url, "text/plain"), self.remaining) as r:
                     chunks, size = [], 0
                     while chunk := r.read(min(65536,262145-size)):
                         chunks.append(chunk)

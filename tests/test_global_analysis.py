@@ -325,7 +325,7 @@ class AnalysisTests(unittest.TestCase):
             self.seed_conflicting_jobs(s)
             result=rank_global(s)
             self.assertEqual(result['algorithm']['network_universe'],['V','W'])
-            self.assertEqual(result['algorithm']['method_version'],'gapi-observed-network/3')
+            self.assertEqual(result['algorithm']['method_version'],'gapi-observed-network/4')
             fixed=result['sensitivity']['delete_source_wikidata']
             self.assertEqual((fixed['available_edges'],fixed['edges'],fixed['filtered_boundary_edges']),(2,1,1))
             self.assertEqual(fixed['new_endpoints'],['X','Z'])

@@ -12,6 +12,8 @@ from typing import Any
 from .storage import project_root, require_external_cache
 
 _WINDOWS_MEMORY_API = None
+MAX_STORAGE_BYTES = 32_000_000_000
+MIN_RESERVE_BYTES = 256 * 1024**2
 
 
 def canonical(value: Any) -> bytes:
@@ -41,9 +43,10 @@ class Task:
             self.require_resource_contract()
         if os.name == "nt" and self.root.drive.upper() != "D:":
             raise ValueError("this task must use the D drive")
-        if not 0 < c["budget_bytes"] <= 4 * 1024**3:
-            raise ValueError("budget must be within the authorized 4 GiB")
-        if not 0 < c["reserve_bytes"] < c["budget_bytes"]:
+        if type(c["budget_bytes"]) is not int or not 0 < c["budget_bytes"] <= MAX_STORAGE_BYTES:
+            raise ValueError("budget must be within the authorized 32 GB")
+        if (type(c["reserve_bytes"]) is not int
+                or not MIN_RESERVE_BYTES <= c["reserve_bytes"] < c["budget_bytes"]):
             raise ValueError("invalid journal/export reserve")
         if not 0 < c["batch_events"] <= 1000 or not 0 < c["memory_bytes"] <= 512 * 1024**2:
             raise ValueError("batch or memory budget exceeds contract")

@@ -15,6 +15,7 @@ from .task import BudgetStop, canonical, digest
 
 CHUNK = 65536
 MAX_COMMIT_MEMBERS = 128
+MAX_TAR_PADDING_BYTES = 1024 * 1024
 ORCID = r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]"
 
 
@@ -133,15 +134,23 @@ class SummaryParser:
 
 
 class HashReader:
-    def __init__(self, raw):
+    def __init__(self, raw, *, max_bytes=None):
+        if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+            raise ValueError('invalid compressed source length bound')
         self.raw, self.size = raw, 0
+        self.max_bytes = max_bytes
         self.sha256, self.md5 = hashlib.sha256(), hashlib.md5(usedforsecurity=False)
 
     def read(self, size):
         if size < 0:
             raise ValueError("unbounded compressed reads forbidden")
-        data = self.raw.read(min(size, CHUNK))
+        limit = min(size, CHUNK)
+        if self.max_bytes is not None:
+            limit = min(limit, self.max_bytes-self.size+1)
+        data = self.raw.read(limit)
         self.size += len(data)
+        if self.max_bytes is not None and self.size > self.max_bytes:
+            raise ValueError('compressed source exceeds frozen length')
         self.sha256.update(data)
         self.md5.update(data)
         return data
@@ -232,7 +241,7 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
     member_pattern=summary_member_pattern(spec)
     store.start(source)
     store.status(source, 'provisional', detail='archive scan active; full verification pending')
-    reader = HashReader(raw)
+    reader = HashReader(raw, max_bytes=spec.get('size_bytes'))
     started, processed, added, replayed = time.monotonic(), 0, 0, 0
     compressed = gzip.GzipFile(fileobj=reader, mode="rb")
     status, detail = "provisional", None
@@ -252,7 +261,17 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                 if exact(compressed, 512) != block:
                     raise ValueError("invalid tar end marker")
                 # Drain padding and require the gzip CRC/trailer. No full reads.
-                while tail := compressed.read(CHUNK):
+                padding_bytes = 1024
+                while True:
+                    store.task.check_memory()
+                    if max_seconds is not None and time.monotonic()-started >= max_seconds:
+                        raise BudgetStop('bounded stream time reached in tar padding; replay required')
+                    tail = compressed.read(CHUNK)
+                    if not tail:
+                        break
+                    padding_bytes += len(tail)
+                    if padding_bytes > MAX_TAR_PADDING_BYTES:
+                        raise ValueError('tar zero padding exceeds bounded expansion limit')
                     if any(tail):
                         raise ValueError("nonzero data after tar end")
                 expected = spec.get("checksum")

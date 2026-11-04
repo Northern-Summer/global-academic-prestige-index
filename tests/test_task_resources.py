@@ -16,8 +16,8 @@ class ResourceTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
-    def test_four_gib_authorization_keeps_memory_and_reserve_limits(self):
-        for cap in (2*1024**3,4*1024**3):
+    def test_storage_authorization_keeps_memory_and_reserve_limits(self):
+        for cap in (2*1024**3,4*1024**3,32_000_000_000):
             with self.subTest(cap=cap):
                 self.config['work_dir']=str(self.root/str(cap))
                 s=self.store(archive([]),budget_bytes=cap)
@@ -26,9 +26,10 @@ class ResourceTests(unittest.TestCase):
                     self.assertEqual(s.task.config['reserve_bytes'],256*1024**2)
                     self.assertEqual(s.task.config['memory_bytes'],512*1024**2)
                 finally:s.close()
-        self.config['budget_bytes']=4*1024**3+1
-        self.path.write_text(json.dumps(self.config))
-        with self.assertRaisesRegex(ValueError,'authorized 4 GiB'):Task(self.path)
+        for invalid in (32_000_000_001,32*1024**3,True,32_000_000_000.0,0,-1):
+            self.config['budget_bytes']=invalid
+            self.path.write_text(json.dumps(self.config))
+            with self.assertRaisesRegex(ValueError,'authorized 32 GB'):Task(self.path)
 
     def test_file_maintenance_reuses_writer_lock_without_database_allowance(self):
         from gapi.career_store import CareerStore,exclusive_writer

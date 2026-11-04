@@ -19,6 +19,24 @@ def excluded_qualification(text):
     return bool(re.search(EXCLUSIONS, normalized(text)))
 
 
+def valid_interval(start, end):
+    """Unknown endpoints remain unknown; known normalized years cannot reverse."""
+    return (all(value is None or (type(value) is int and year(value) == value)
+                for value in (start, end))
+            and (start is None or end is None or start <= end))
+
+
+def training_observation_eligible(kind, role, start, end):
+    """Observed training population, not a claim of a recognized completed degree.
+
+    Unknown labels/dates and people without jobs may enter that population;
+    explicitly unfinished qualifications and impossible intervals cannot.
+    Relations impose their additional stage and completion-date requirements.
+    """
+    return (kind in ('education', 'training') and not excluded_qualification(role)
+            and valid_interval(start, end))
+
+
 def valid_orcid(value):
     """ISO 7064 MOD 11-2 check digit; formatting alone cannot bind identity."""
     if not isinstance(value,str) or not re.fullmatch(r'[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]',value):

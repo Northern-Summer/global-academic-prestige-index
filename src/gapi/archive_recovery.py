@@ -10,7 +10,7 @@ import re
 import time
 
 from .career_rules import valid_orcid
-from .career_store import orcid_archive_sources
+from .career_store import orcid_archive_sources, source_identity
 from .orcid_stream import summary_member_pattern
 from .queue_storage import pack_row
 from .task import digest
@@ -31,7 +31,7 @@ def queue_archive_rejections(store, source, *, after_rowid=0, max_members=10000,
     if store.db.in_transaction:
         raise ValueError('archive follow-up requires a settled transaction')
     spec = store.task.config['sources'][source]
-    identity = digest({'source':spec,'rules':store.task.config['rules_version']})
+    identity = source_identity(store.task, source)
     run = store.db.execute('SELECT identity FROM runs WHERE source=?',(source,)).fetchone()
     if not run or run[0] != identity:
         raise ValueError('archive follow-up source identity is missing or changed')

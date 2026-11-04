@@ -36,8 +36,17 @@ def verified_archive_sql(task):
     sources=orcid_archive_sources(task)
     if not sources:return '1',()
     placeholders=','.join('?' for _ in sources)
+    identities = tuple((source, source_identity(task, source)) for source in sources)
+    matches = ' OR '.join('(r.source=? AND r.identity=?)' for _ in identities)
     return (f"(e.source NOT IN ({placeholders}) OR EXISTS(SELECT 1 FROM runs r "
-            "WHERE r.source=e.source AND r.status='verified'))",sources)
+            f"WHERE r.source=e.source AND r.status='verified' AND ({matches})))",
+            sources + tuple(value for pair in identities for value in pair))
+
+
+def source_identity(task, source):
+    """One identity contract for acquisition, integrity reports and scoring."""
+    return digest({'source': task.config['sources'][source],
+                   'rules': task.config['rules_version']})
 
 
 def bounded_run_detail(detail):
@@ -211,7 +220,7 @@ class CareerStore:
     def start(self, source: str) -> None:
         self.task.require_frozen()
         spec = self.task.config["sources"][source]
-        identity = digest({"source": spec, "rules": self.task.config["rules_version"]})
+        identity = source_identity(self.task, source)
         old = self.db.execute("SELECT identity FROM runs WHERE source=?", (source,)).fetchone()
         if old and old[0] != identity:
             raise ValueError("source identity changed; resume forbidden")
@@ -511,7 +520,7 @@ class CareerStore:
         for source in orcid_archive_sources(self.task):
             spec=self.task.config['sources'][source]
             run=self.db.execute('SELECT identity,status,bytes,sha256,members FROM runs WHERE source=?',(source,)).fetchone()
-            identity=digest({'source':spec,'rules':self.task.config['rules_version']})
+            identity=source_identity(self.task, source)
             matches=bool(run and run[0]==identity)
             verified=bool(matches and run[1]=='verified')
             member_states=dict(self.db.execute(
