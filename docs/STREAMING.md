@@ -219,11 +219,32 @@ is outside the original denominator. Candidate deletion, identity/provenance
 changes or configuration drift invalidate that selection rather than silently
 changing its denominator. Lossless digest maintenance preserves its identity.
 
+After a settled storage-root registration, the former selection still binds its
+old configuration. Use `candidate_selection.rebind_storage_roots` with the
+retained preceding source freeze under the existing writer lock to inherit that
+selection. It verifies the stored predecessor, original rowid boundary, source
+counts and provenance before atomically storing a successor for the new frozen
+configuration. Only additional accounting roots and the nested resource-owner
+pin may differ; roots cannot be removed and allowances, source policy and rules
+must remain identical. It does not perform the multi-file resource transition.
+The preceding record remains intact, retries reuse the successor, and later
+discoveries stay outside the original denominator. Do not use a fresh
+`freeze-candidates` operation to inherit an earlier selection.
+
 Frozen collection disables discovery, filters both fresh work and due retries
 through the same boundary, and verifies the selection before requests and again
 at settlement. `frozen_candidate_processing` reports per-source processed and
 observed fractions with the fixed candidate counts. A rejected member is counted
 as processed but prevents `processing_complete`; pending retries remain pending.
+With a progress callback, collection also emits `frozen-candidate-processing`
+at startup and after a settled batch when at least 900 seconds have passed.
+Each interval update reruns the selection owner, including its provenance checks;
+it does not extrapolate from event or member deltas. There is no background timer,
+second database or live reader snapshot. No interval work is done without a
+callback, after storage contention, or once the collection deadline is reached.
+An admission or integrity failure propagates with existing commits preserved.
+Running processes retain their loaded code; these updates begin on the next
+normal invocation rather than through a collector restart.
 The legacy current-queue report is retained. Neither finite candidate completion
 nor an empty frozen queue establishes full-source enumeration, verified facts,
 annual archive integrity, or global coverage. A rejected-member API redirect
@@ -299,6 +320,28 @@ Both sections commit atomically: failure of the second rolls back the first's
 events and evidence. Earlier whole-record snapshots remain immutable, and are
 not silently refreshed. Older bounded API JSON acquisition is preserved as
 predecessor evidence; it is not evidence of the new XML streaming implementation.
+
+`collect-global --orcid-record` explicitly selects the optional single `/record`
+XML response for new API members. The default remains the two affiliation routes.
+The SAX parser still emits only education/employment fields; other record fields
+are neither retained nor used. This route keeps the same decoded byte/event caps,
+single connection, request interval, rolling-day allowance and atomic member
+transaction. It reserves one request group instead of two, including retries.
+Already committed members are skipped regardless of the selected route; this
+does not refresh a frozen record or create duplicate careers. A refused, malformed,
+oversized or interrupted response never falls back to another endpoint.
+
+Record events declare `incremental-record-xml/v1` and the real `/record` URL and
+locator. One `member_parts` row named `record` hashes the entire decoded response;
+the member digest binds that representation and hash. It is never described as
+two section response hashes. The corroboration reader requires the exact same
+person's record URL, locator and committed member manifest before applying the
+unchanged fact/independent-origin rules. Existing section evidence remains valid.
+Different transport evidence has different evidence digests even for equal facts.
+This option halves nominal requests per new member, not necessarily elapsed time:
+whole-record bodies may be much larger. Production adoption needs a current bounded
+comparison under the ordinary writer exclusion; local equivalence tests alone do
+not establish live throughput or full-source completion.
 
 SQLite owns the ingest log and atomic member transactions: `max_page_count`, small
 transactions, memory-only temporary storage, explicit admission checks and the reserve
