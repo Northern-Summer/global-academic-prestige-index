@@ -178,6 +178,64 @@ class ResourceTests(unittest.TestCase):
             return original(folder)
         with patch('gapi.task.os.scandir',scan),self.assertRaises(PermissionError):task.used()
 
+    def test_complete_checkout_and_deliveries_count_once_with_overlap(self):
+        project=self.root/'accounting-project';project.mkdir()
+        (project/'src').mkdir();(project/'src'/'code.py').write_bytes(b'123')
+        (project/'.git').mkdir();(project/'.git'/'objects').write_bytes(b'4567')
+        delivery=self.root/'delivery';delivery.mkdir();(delivery/'result').write_bytes(b'89')
+        task=Task.__new__(Task);task.root=project/'private';task.root.mkdir()
+        (task.root/'database').write_bytes(b'abcde')
+        task.config={'additional_storage_roots':[str(delivery),str(delivery),str(project/'src'),str(project)]}
+        with patch('gapi.task.project_root',return_value=project):
+            self.assertEqual(task.used(),14)
+            self.assertEqual(task.used(),14)
+            (project/'src'/'code.py').write_bytes(b'123456')
+            self.assertEqual(task.used(),17)
+            task.config['additional_storage_roots']=[str(project/'missing')]
+            self.assertEqual(task.used(),15)
+        for invalid in ('relative', ['relative'], [True], [None], None):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                Task.additional_storage_roots({'additional_storage_roots':invalid})
+
+    @unittest.skipUnless(os.name == 'nt', 'real Windows junction regression')
+    def test_strict_delivery_rejects_junction_ancestor_before_deduplication(self):
+        import subprocess
+        project=self.root/'junction-project';project.mkdir()
+        target=self.root/'junction-target';target.mkdir()
+        nested=target/'nested';nested.mkdir();(nested/'one').write_bytes(b'x'*23)
+        alias=self.root/'junction-alias'
+        subprocess.run(['cmd','/c','mklink','/J',str(alias),str(target)],
+                       check=True,capture_output=True)
+        try:
+            task=Task.__new__(Task);task.root=project/'private';task.root.mkdir()
+            with patch('gapi.task.project_root',return_value=project):
+                for roots in ([str(alias/'nested')], [str(nested),str(alias/'nested')]):
+                    task.config={'additional_storage_roots':roots}
+                    with self.subTest(roots=roots),self.assertRaisesRegex(ValueError,'links are forbidden'):
+                        task.used()
+                task.config={'additional_storage_roots':[str(nested),str(nested)]}
+                self.assertEqual(task.used(),23)
+        finally:
+            os.rmdir(alias)  # Remove only the junction, preserving its target.
+
+    def test_overlap_preserves_strict_reparse_rejection(self):
+        from types import SimpleNamespace
+        import stat
+        project=self.root/'overlap-project';project.mkdir()
+        task=Task.__new__(Task);task.root=project/'private';task.root.mkdir()
+        original=os.scandir
+        class Entry:
+            path=str(task.root/'linked')
+            def stat(self,**kwargs):
+                return SimpleNamespace(st_mode=stat.S_IFREG,st_file_attributes=0x400,st_size=7)
+        @contextmanager
+        def scan(folder):
+            if Path(folder)==task.root:yield iter([Entry()])
+            else:
+                with original(folder) as entries:yield entries
+        with patch('gapi.task.project_root',return_value=project),patch('gapi.task.os.scandir',scan):
+            with self.assertRaisesRegex(ValueError,'links are forbidden'):task.used()
+
     def test_scan_rejects_task_reparse_points_and_counts_output_file_links(self):
         from types import SimpleNamespace
         import stat
@@ -191,8 +249,13 @@ class ResourceTests(unittest.TestCase):
         @contextmanager
         def scan(folder):yield iter([Entry()]) if Path(folder)==task.root else iter([])
         with patch('gapi.task.os.scandir',scan),self.assertRaisesRegex(ValueError,'links are forbidden'):task.used()
+        (project/'outputs').mkdir()
+        original=os.scandir
         @contextmanager
-        def output_scan(folder):yield iter([Entry()]) if Path(folder)==project/'outputs' else iter([])
+        def output_scan(folder):
+            if Path(folder)==project/'outputs':yield iter([Entry()])
+            else:
+                with original(folder) as entries:yield entries
         with patch('gapi.task.os.scandir',output_scan):self.assertEqual(task.used(),7)
 
     def test_http_request_reservation_settles_and_survives_reopen(self):

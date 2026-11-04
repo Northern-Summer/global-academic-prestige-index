@@ -32,6 +32,12 @@ class StreamingTests(unittest.TestCase):
         import os
         self.tmp = tempfile.TemporaryDirectory(prefix="gapi-stream-test-", dir="D:/GAPI/global-academic-prestige-index" if os.name == "nt" else None)
         self.root = Path(self.tmp.name)
+        # Resource fixtures account for their own checkout, never a concurrent
+        # production checkout with dependencies, logs and unrelated artifacts.
+        from unittest.mock import patch
+        project = self.root / 'project'
+        project.mkdir()
+        self.enterContext(patch('gapi.task.project_root', return_value=project))
         self.config = json.loads(Path("configs/streaming.json").read_text())
         self.config["work_dir"] = str(self.root / "store")
         # Unit fixtures may run on any host; use D on this Windows environment.

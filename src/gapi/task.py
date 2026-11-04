@@ -79,9 +79,59 @@ class Task:
                 os.environ[key] = value
         tempfile.tempdir = tempdir
 
+    @staticmethod
+    def additional_storage_roots(config) -> tuple[Path, ...]:
+        """Explicit task-owned deliveries outside the source checkout/resource tree."""
+        values = config.get('additional_storage_roots', [])
+        if not isinstance(values, list) or any(
+                not isinstance(value, str) or not value or not Path(value).is_absolute()
+                for value in values):
+            raise ValueError('additional storage roots must be a list of absolute paths')
+        return tuple(sorted({Path(os.path.abspath(value)) for value in values}, key=str))
+
     def used(self) -> int:
+        # Count full checkout (including dependencies and Git history), shared
+        # source storage and declared deliveries. Overlapping directory roots
+        # are visited once. Strict source/delivery rules survive overlap.
+        strict_roots = (self.resource_root, *self.additional_storage_roots(getattr(self, 'config', {})))
+        strict_roots = tuple(Path(os.path.abspath(root)) for root in strict_roots)
+        # A normal directory can be reached through a linked ancestor. Reject
+        # that route before lexical overlap removal; resolving it would hide
+        # the forbidden link and could count aliases of one tree twice.
+        checked = set()
+        for root in strict_roots:
+            for path in (root, *root.parents):
+                if path in checked:
+                    continue
+                checked.add(path)
+                try:
+                    info = path.lstat()
+                except FileNotFoundError:
+                    continue
+                if stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_file_attributes', 0) & 0x400):
+                    raise ValueError('links are forbidden in the task storage tree')
+        roots = sorted({*strict_roots, Path(os.path.abspath(project_root()))},
+                       key=lambda path: (len(path.parts), str(path)))
+        selected = []
+        for root in roots:
+            if not any(root.is_relative_to(parent) for parent in selected):
+                selected.append(root)
+
+        def is_strict(path):
+            return any(Path(path).is_relative_to(root) for root in strict_roots)
+
         def tree_size(root, *, strict):
             total = 0
+            try:
+                info = root.lstat()
+            except FileNotFoundError:
+                return 0
+            if stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_file_attributes', 0) & 0x400):
+                if strict:
+                    raise ValueError('links are forbidden in the task storage tree')
+                return 0  # Never traverse a linked root directory.
+            if not stat.S_ISDIR(info.st_mode):
+                raise ValueError('storage root must be a directory')
             pending = [root]
             while pending:
                 folder = pending.pop()
@@ -92,7 +142,7 @@ class Task:
                                 info = entry.stat(follow_symlinks=False)
                                 linked = stat.S_ISLNK(info.st_mode) or bool(
                                     getattr(info, "st_file_attributes", 0) & 0x400)
-                                if strict and linked:
+                                if (strict or is_strict(entry.path)) and linked:
                                     raise ValueError("links are forbidden in the task storage tree")
                                 if linked:
                                     # Release file links retain their previous target-size
@@ -110,11 +160,7 @@ class Task:
             return total
         # No cache: every admission still scans the complete owned trees. DirEntry
         # reuses OS enumeration metadata instead of probing each path repeatedly.
-        total = tree_size(self.resource_root, strict=True)
-        # Count new release/build outputs too; existing real input snapshots are not copied.
-        for directory in (project_root() / "outputs", project_root() / "dist", project_root() / "work"):
-            total += tree_size(directory, strict=False)
-        return total
+        return sum(tree_size(root, strict=is_strict(root)) for root in selected)
 
     def check(self, anticipated: int = 0, *, minimum_used: int = 0) -> int:
         self.require_resource_contract()
@@ -144,6 +190,7 @@ class Task:
                 or frozen.get('config_sha256') != digest(owner)
                 or owner.get('resource_root') is not None
                 or Path(owner['work_dir']).resolve() != self.resource_root
+                or self.additional_storage_roots(self.config) != self.additional_storage_roots(owner)
                 or any(self.config[k] != owner[k] for k in ('budget_bytes','reserve_bytes','memory_bytes'))):
             raise ValueError('shared resource contract differs from its frozen owner')
 

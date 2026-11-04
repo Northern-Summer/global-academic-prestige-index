@@ -67,6 +67,8 @@ class SharedSourceResourcesTests(unittest.TestCase):
             self.nested(parent,work_dir=str(self.root/'outside'))
         with self.assertRaisesRegex(ValueError,'not pinned'):
             self.nested(parent,resource_freeze_sha256='0'*64)
+        with self.assertRaisesRegex(ValueError,'differs'):
+            self.nested(parent,additional_storage_roots=[str(self.root/'unshared-delivery')])
         child=self.nested(parent);child.freeze()
         (parent.root/'sources.lock.json').write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError,'changed'):
