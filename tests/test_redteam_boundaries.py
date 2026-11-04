@@ -21,7 +21,12 @@ class RedteamBoundaries(unittest.TestCase):
         import tracemalloc
         from gapi.ood import _Budget, _Fixture
         from gapi.global_analysis import rank_global
-        with _Fixture(_Budget()) as f:
+        # This runs after the full suite in CI; use the authorized task cap.
+        # The isolated OOD runner retains its own 128 MiB contract. Python
+        # population growth below is still measured independently of this cap.
+        budget = _Budget()
+        budget.config['memory_bytes'] = 512*1024**2
+        with _Fixture(budget) as f:
             f.task.config['sources'] = {'wikidata': {'allow_derivatives': True}}
             # Measure population growth, separately from first-use module imports.
             rank_global(f, public=True)
@@ -82,7 +87,9 @@ class RedteamBoundaries(unittest.TestCase):
         from gapi.global_analysis import rank_global
         for source in ('orcid-2026-summary', 'orcid-public-api', 'wikidata'):
             for enriched in (False, True):
-                with self.subTest(source=source, enriched=enriched), _Fixture(_Budget()) as f:
+                budget = _Budget()
+                budget.config['memory_bytes'] = 512*1024**2
+                with self.subTest(source=source, enriched=enriched), _Fixture(budget) as f:
                     f.task.config.update(rules_version='career-rules/1', sources={source: {
                         'kind': 'orcid-summary-tar-gzip' if source.endswith('summary') else source,
                         'version': 'synthetic-fixed'}})
