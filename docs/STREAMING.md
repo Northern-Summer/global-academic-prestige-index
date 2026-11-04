@@ -1,7 +1,9 @@
 # Bounded real-career ingestion
 
-The task contract is `configs/streaming.json`. It limits new data to 4 GiB (including
-the task-local optional DuckDB runtime, journals, release staging and builds), keeps
+The task contract is `configs/streaming.json`. Its authorized total is
+32,000,000,000 bytes (32 GB, not 32 GiB), including source databases, retained
+inputs, the complete checkout, dependencies, Git history, declared external
+deliveries, journals, release staging and builds. It keeps
 a 256 MiB write reserve, limits each transaction to 1,000 events, reads compressed
 data in chunks no larger than 64 KiB, and samples process resident memory against
 512 MiB. Defaults use the D drive on Windows. No cloud accounts or billing are used.
@@ -13,6 +15,28 @@ authorized a conditional increase to 4 GiB. The configured ceiling was raised;
 the 256 MiB reserve, 512 MiB process limit, single writer, no raw-file storage and
 incremental transaction limits remain unchanged. Older sections recording 2 GiB
 describe their original test conditions rather than a second active limit.
+On 2026-11-03 the user authorized the current 32 GB total. This ceiling is an
+admission limit, not an estimate or proof that complete acquisition fits.
+
+`Task.used` owns storage measurement. It scans the complete project directory
+and shared resource tree on each admission, plus optional absolute directory
+paths in `additional_storage_roots`. Overlapping directory roots count once;
+resource and extra delivery trees retain their link/reparse rejection even
+when nested under another counted root. Their registered paths and ancestors
+are checked before overlap removal, so a junction alias cannot bypass this
+restriction or count the same physical tree twice. Project file links retain target-size
+accounting; linked project directories are not traversed and any task-owned
+external content must be explicitly registered. Counts are ordinary logical
+file sizes, not physical disk allocation or an atomic filesystem snapshot.
+Missing files during observation may reflect committed journal removal;
+permission failures stop admission. Separate physical volumes retain their
+own free-space constraints; the total budget does not pool their free space.
+
+Additional roots are part of the frozen configuration. A nested source must
+declare the same roots as its owner. Register a new delivery only at a settled
+writer boundary using the existing source-freeze transition procedure, preserving
+the preceding freeze and the nested source's owner hash. Editing a running
+collector's config does not update its in-memory accounting.
 
 ## Reproduce and resume
 
