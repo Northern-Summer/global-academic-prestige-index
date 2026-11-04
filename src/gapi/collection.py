@@ -18,9 +18,12 @@ from .task import BudgetStop
 from .source_http import SourcePause, StageDeadline, WIKIDATA_BATCH_LIMIT
 
 DISCOVERY_WINDOW_SECONDS = 60
+CANDIDATE_PROGRESS_INTERVAL_SECONDS = 900
 
 
-def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True,candidate_selection=None):
+def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True,candidate_selection=None,orcid_record=False):
+    if type(orcid_record) is not bool:
+        raise ValueError('orcid_record must be boolean')
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
         raise ValueError('invalid collection time/batch budget')
     if not discovery and feed is not None:
@@ -29,10 +32,13 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
     if candidate_selection is not None:
         if discovery or feed is not None:
             raise ValueError('frozen candidate collection requires queued-only acquisition')
-        from .candidate_selection import verify
-        selection,_=verify(store,candidate_selection)
+        from .candidate_selection import processing
+        selection=processing(store,candidate_selection)
         selection_options={'max_candidate_rowid':selection['max_candidate_rowid']}
     deadline=time.monotonic()+max_seconds
+    next_candidate_progress=time.monotonic()+CANDIDATE_PROGRESS_INTERVAL_SECONDS
+    if candidate_selection is not None and progress:
+        progress({'stage':'frozen-candidate-processing','phase':'start','processing':selection})
     suspended=set()
     dump_attempted=False
     discovery_suspended=set()
@@ -129,6 +135,8 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 seconds=min(60,deadline-time.monotonic())
                 with window(seconds):
                     options={'batch_size':WIKIDATA_BATCH_LIMIT} if command=='ingest-wikidata' else {}
+                    if command=='ingest-orcid-api' and orcid_record:
+                        options['whole_record']=True
                     adapter(store,http,ids,max_seconds=seconds,progress=None,report=False,**options)
             except BudgetStop:
                 raise
@@ -170,6 +178,14 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
             stages.append(item)
             if progress:progress(item)
             if storage_contended:break
+            if (candidate_selection is not None and progress
+                    and next_candidate_progress<=time.monotonic()<deadline):
+                # The sole writer has settled this batch. Reuse the full owner
+                # calculation instead of copying a live database or inferring
+                # candidate completion from member/event deltas.
+                progress({'stage':'frozen-candidate-processing','phase':'interval',
+                          'processing':processing(store,candidate_selection)})
+                next_candidate_progress=time.monotonic()+CANDIDATE_PROGRESS_INTERVAL_SECONDS
             # Reconsider service allocation after productive work, rather than
             # forcing exactly one slow and one fast batch into every round.
             if completed>0 or retried>0:break
@@ -200,6 +216,6 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
         'source_service_seconds':{key:round(value,3) for key,value in service_seconds.items()},
         'global_complete':False,'archive_discovery_enabled':feed is not None,'discovery_enabled':discovery}
     if candidate_selection is not None:
-        from .candidate_selection import processing
         result['frozen_candidate_processing']=processing(store,candidate_selection)
+    if orcid_record:result['orcid_api_route']='record'
     return result

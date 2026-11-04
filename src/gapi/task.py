@@ -142,7 +142,7 @@ class Task:
                                 info = entry.stat(follow_symlinks=False)
                                 linked = stat.S_ISLNK(info.st_mode) or bool(
                                     getattr(info, "st_file_attributes", 0) & 0x400)
-                                if (strict or is_strict(entry.path)) and linked:
+                                if linked and (strict or is_strict(entry.path)):
                                     raise ValueError("links are forbidden in the task storage tree")
                                 if linked:
                                     # Release file links retain their previous target-size

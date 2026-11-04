@@ -11,7 +11,7 @@ import re
 from .career_rules import classify, valid_orcid, QUALIFICATION_RULE_VERSION
 from .career_normalization import interpretation, POLICY_SHA256 as NORMALIZATION_POLICY
 from .official_profiles import RULE as PROFILE_RULE, profile_url,supported_profile_url
-from .orcid_stream import private_person
+from .orcid_stream import private_person, API_RECORD_TRANSPORT
 from .career_store import member_evidence_sql
 from .task import BudgetStop, digest
 
@@ -26,6 +26,31 @@ POLICY_SHA256 = digest({'version': VERSION, 'profile_rule': PROFILE_RULE,
 
 def _hash(value):
     return isinstance(value, str) and bool(re.fullmatch('[a-f0-9]{64}', value))
+
+
+def _orcid_response_part(store, event, orcid):
+    """Bind the actual response representation without inventing section hashes.
+
+    Fact matching and independent-origin requirements remain below. The optional
+    record representation additionally binds the member's whole-response manifest;
+    it cannot reuse an affiliation-part hash or another person's response URL.
+    """
+    record=event.get('transport')==API_RECORD_TRANSPORT
+    section='record' if record else (
+        'educations' if event['kind'] in ('education','training') else 'employments')
+    if record and (event.get('url')!=f'https://pub.orcid.org/v3.0/{orcid}/record'
+                   or event.get('locator')!=orcid+'#record'):
+        return None
+    part=store.db.execute('''SELECT url,sha256 FROM member_parts
+        WHERE source='orcid-public-api' AND locator=? AND part=?''',(orcid,section)).fetchone()
+    if not part or part[0]!=event.get('url') or not _hash(part[1]):
+        return None
+    if record:
+        member=store.seen('orcid-public-api',orcid)
+        expected=digest({'transport':API_RECORD_TRANSPORT,'parts':{'record':part[1]}})
+        if not member or member[0]!=expected or member[1]!='observed':
+            return None
+    return part
 
 
 def _fact(event, institution):
@@ -129,10 +154,8 @@ def decisions(store, *, allowed_sources=None):
                 continue
             if fact[optional] is not None and other_fact[optional] is not None and fact[optional]!=other_fact[optional]:
                 continue
-            section = 'educations' if other['kind'] in ('education', 'training') else 'employments'
-            part = store.db.execute('''SELECT url,sha256 FROM member_parts
-                WHERE source='orcid-public-api' AND locator=? AND part=?''', (orcid, section)).fetchone()
-            if not part or part[0] != other.get('url') or not _hash(part[1]):
+            part = _orcid_response_part(store,other,orcid)
+            if part is None:
                 continue
             decision = {'rule_version': VERSION, 'policy_sha256': POLICY_SHA256,
                 'origins': ['official-profile', 'orcid-self'],

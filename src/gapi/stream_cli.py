@@ -111,6 +111,8 @@ def register(sub):
             parser.add_argument('--stage-careers',action='store_true',
                 help='retain normalized careers in isolated landing; replays old prefix, never stores raw entities')
         if name == 'collect-global':
+            parser.add_argument('--orcid-record',action='store_true',
+                help='opt in to one bounded record XML response with truthful whole-response evidence; default uses two affiliation sections')
             parser.add_argument('--candidate-selection',help='verified immutable selection ID; requires --queued-only')
             parser.add_argument('--batch-members',type=int,default=50)
             parser.add_argument('--allow-dump-discovery',action='store_true',
@@ -296,7 +298,8 @@ def execute_task(task, args):
             from .dump_discovery import load_feed
             result=collect(store,http,load_feed(args.feed) if args.allow_dump_discovery else None,max_seconds=args.max_seconds,
                 batch_members=args.batch_members,progress=lambda r:print(json.dumps(r),flush=True),discovery=not args.queued_only,
-                candidate_selection=getattr(args,'candidate_selection',None))
+                candidate_selection=getattr(args,'candidate_selection',None),
+                orcid_record=getattr(args,'orcid_record',False))
             result['transport']={'mode':'single-persistent-https',
                 'opened_connections':http.transport.opened_connections,
                 'reused_connections':http.transport.reused_connections}

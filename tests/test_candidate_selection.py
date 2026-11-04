@@ -141,6 +141,118 @@ class CandidateSelectionTests(unittest.TestCase):
             self.assertFalse(processing(store,identity)['processing_complete'])
         finally:store.close()
 
+    def test_collection_reports_verified_progress_only_at_settled_batch_boundaries(self):
+        store=self.store(fixtures.archive([]));clock=[0.0];messages=[]
+        try:
+            with store.db:
+                store.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-wikidata','Q'+str(i),'a','b') for i in (1,2,3)])
+            identity=freeze(store)['selection_id']
+            def ingest(store,http,ids,**options):
+                store.start('wikidata')
+                with store.member('wikidata','fixture'):
+                    for identifier in ids:store.finish_member('wikidata',identifier+'@1','a'*64)
+                clock[0]+=1
+            def progress(value):
+                self.assertFalse(store.db.in_transaction)
+                messages.append(value)
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('gapi.collection.CANDIDATE_PROGRESS_INTERVAL_SECONDS',2,create=True), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest):
+                result=collect(store,None,max_seconds=5,batch_members=1,discovery=False,
+                               candidate_selection=identity,progress=progress)
+            updates=[m for m in messages if m['stage']=='frozen-candidate-processing']
+            self.assertEqual([m['phase'] for m in updates],['start','interval'])
+            self.assertEqual([m['processing']['sources'][0]['processed'] for m in updates],[0,2])
+            self.assertTrue(all(m['processing']['selection_id']==identity for m in updates))
+            self.assertTrue(all(m['processing']['sources'][0]['candidates']==3 for m in updates))
+            self.assertTrue(result['frozen_candidate_processing']['processing_complete'])
+            self.assertFalse(result['global_complete'])
+        finally:store.close()
+
+    def test_periodic_progress_reverifies_provenance_before_next_batch(self):
+        store=self.store(fixtures.archive([]));clock=[0.0];requested=[]
+        try:
+            with store.db:
+                store.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-wikidata','Q'+str(i),'a','b') for i in (1,2,3)])
+            identity=freeze(store)['selection_id']
+            def ingest(store,http,ids,**options):
+                requested.extend(ids);store.start('wikidata')
+                with store.member('wikidata','fixture'):
+                    for identifier in ids:store.finish_member('wikidata',identifier+'@1','a'*64)
+                clock[0]+=1
+                if len(requested)==2:
+                    with store.db:store.db.execute("UPDATE discovery SET response_sha256='drift' WHERE identifier='Q1'")
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('gapi.collection.CANDIDATE_PROGRESS_INTERVAL_SECONDS',2,create=True), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 self.assertRaisesRegex(ValueError,'provenance changed'):
+                collect(store,None,max_seconds=5,batch_members=1,discovery=False,
+                        candidate_selection=identity,progress=lambda value:None)
+            self.assertEqual(requested,['Q1','Q2'])
+            self.assertFalse(store.db.in_transaction)
+        finally:store.close()
+
+    def test_progress_budget_failure_preserves_commits_and_resumes_remaining_candidates(self):
+        store=self.store(fixtures.archive([]));clock=[0.0];requested=[]
+        try:
+            with store.db:
+                store.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-wikidata','Q'+str(i),'a','b') for i in (1,2,3)])
+            identity=freeze(store)['selection_id'];calls=[0]
+            def checked(*args):
+                calls[0]+=1
+                if calls[0]==2:raise BudgetStop('injected progress memory admission')
+                return processing(*args)
+            def ingest(store,http,ids,**options):
+                requested.extend(ids);store.start('wikidata')
+                with store.member('wikidata','fixture'):
+                    for identifier in ids:store.finish_member('wikidata',identifier+'@1','a'*64)
+                clock[0]+=1
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('gapi.collection.CANDIDATE_PROGRESS_INTERVAL_SECONDS',2), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 patch('gapi.candidate_selection.processing',side_effect=checked), \
+                 self.assertRaisesRegex(BudgetStop,'progress memory'):
+                collect(store,None,max_seconds=5,batch_members=1,discovery=False,
+                        candidate_selection=identity,progress=lambda value:None)
+            self.assertEqual(requested,['Q1','Q2'])
+            self.assertFalse(store.db.in_transaction)
+            store.close();store=CareerStore(Task(self.path),source_compression=False)
+            self.assertEqual(store.pending('ingest-wikidata'),['Q3'])
+            with patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 patch('gapi.candidate_selection.processing',wraps=processing) as reports:
+                result=collect(store,None,max_seconds=5,batch_members=1,discovery=False,
+                               candidate_selection=identity)
+            self.assertEqual(reports.call_count,2)  # Start and settlement, no callback work.
+            self.assertEqual(requested,['Q1','Q2','Q3'])
+            self.assertTrue(result['frozen_candidate_processing']['processing_complete'])
+        finally:store.close()
+
+    def test_collection_deadline_skips_due_interval_report(self):
+        store=self.store(fixtures.archive([]));clock=[0.0];messages=[]
+        try:
+            with store.db:store.db.execute("INSERT INTO discovery VALUES('ingest-wikidata','Q1','a','b')")
+            identity=freeze(store)['selection_id']
+            def ingest(store,http,ids,**options):
+                store.start('wikidata')
+                with store.member('wikidata','fixture'):
+                    store.finish_member('wikidata','Q1@1','a'*64)
+                clock[0]=1
+            with patch('gapi.collection.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('gapi.collection.CANDIDATE_PROGRESS_INTERVAL_SECONDS',0.5), \
+                 patch('gapi.collection.ingest_wikidata',side_effect=ingest), \
+                 patch('gapi.candidate_selection.processing',wraps=processing) as reports:
+                result=collect(store,None,max_seconds=1,batch_members=1,discovery=False,
+                               candidate_selection=identity,progress=messages.append)
+            self.assertEqual(reports.call_count,2)
+            self.assertEqual([m['phase'] for m in messages if m['stage']=='frozen-candidate-processing'],['start'])
+            self.assertEqual(result['status'],'resumable-time-boundary')
+            self.assertTrue(result['frozen_candidate_processing']['processing_complete'])
+            self.assertFalse(result['global_complete'])
+        finally:store.close()
+
     def test_actual_process_exit_before_or_after_commit_has_atomic_selection(self):
         code='''
 import os,sys

@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 from urllib.error import HTTPError
 
 from .career_rules import classify, year, valid_orcid
-from .orcid_stream import private_person, SummaryParser, CHUNK
+from .orcid_stream import private_person, SummaryParser, CHUNK, API_RECORD_TRANSPORT
 from .task import digest, BudgetStop
 from .queue_storage import pack_row
 from .evidence_storage import pack_url
@@ -275,7 +275,7 @@ def queue_orcid_redirect(store, redirect, requested_url):
     Its hash is explicitly a metadata hash, not a raw response-body checksum.
     Old candidates stay pending; only a fresh verified response can add events.
     """
-    pattern = r'https://pub\.orcid\.org/v3\.0/(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/(educations|employments)'
+    pattern = r'https://pub\.orcid\.org/v3\.0/(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/(educations|employments|record)'
     origin = re.fullmatch(pattern, redirect.source_url)
     target = re.fullmatch(pattern, redirect.target_url)
     if (redirect.code not in (301, 308) or redirect.source_url != requested_url
@@ -295,7 +295,11 @@ def queue_orcid_redirect(store, redirect, requested_url):
     return True
 
 
-def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, report=True):
+def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, report=True, whole_record=False):
+    if type(whole_record) is not bool:
+        raise ValueError('whole_record must be boolean')
+    sections=('record',) if whole_record else ('educations','employments')
+    transport=API_RECORD_TRANSPORT if whole_record else 'incremental-affiliation-xml/v1'
     source = "orcid-public-api"
     if not store.source_ready(source):return store.report() if report else None
     store.start(source)
@@ -316,10 +320,10 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, repor
         if store.seen(source, orcid):
             continue
         try:
-            with store.request_budget(source,2*(store.task.config['max_retries']+1),ORCID_ANONYMOUS_DAILY_READS,http),store.member(source, orcid):
+            with store.request_budget(source,len(sections)*(store.task.config['max_retries']+1),ORCID_ANONYMOUS_DAILY_READS,http),store.member(source, orcid):
                 parts={}
                 event_count=member_bytes=0
-                for section in ('educations','employments'):
+                for section in sections:
                     checksum = __import__('hashlib').sha256()
                     retrieved = datetime.now(timezone.utc).isoformat()
                     url=f"https://pub.orcid.org/v3.0/{orcid}/{section}"
@@ -328,11 +332,11 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, repor
                         event_count+=1
                         if event_count>min(store.task.config['max_events_per_member'],store.task.config['batch_events']):
                             raise ValueError('affiliation pair exceeds bounded event transaction')
-                        event.update(retrieved_at=retrieved,transport='incremental-affiliation-xml/v1',
+                        event.update(retrieved_at=retrieved,transport=transport,
                                      locator=orcid+'#'+section,url=url)
                         store.event(event)
                     parser = SummaryParser(private_person(orcid), source, orcid, emit,
-                        store.task.config['batch_events'],section=section)
+                        store.task.config['batch_events'],section=None if whole_record else section)
                     section_bytes=0
                     with http.open(url, "application/vnd.orcid+xml") as response:
                         if "xml" not in response.headers.get("Content-Type", ""):
@@ -352,7 +356,7 @@ def ingest_orcid_api(store, http, ids, *, max_seconds=None, progress=None, repor
                     parts[section]=checksum.hexdigest()
                     store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
                         (source,orcid,section,pack_url(url),parts[section],section_bytes,retrieved))
-                store.finish_member(source, orcid, digest({'transport':'incremental-affiliation-xml/v1','parts':parts}))
+                store.finish_member(source, orcid, digest({'transport':transport,'parts':parts}))
             if progress:
                 progress({"source":source,"committed_members":store.db.execute("SELECT count(*) FROM members WHERE source=?",(source,)).fetchone()[0]})
         except StageDeadline:

@@ -17,6 +17,7 @@ CHUNK = 65536
 MAX_COMMIT_MEMBERS = 128
 MAX_TAR_PADDING_BYTES = 1024 * 1024
 ORCID = r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]"
+API_RECORD_TRANSPORT = 'incremental-record-xml/v1'
 
 
 def validate_commit_members(value):
