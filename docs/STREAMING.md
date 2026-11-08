@@ -40,6 +40,26 @@ collector's config does not update its in-memory accounting.
 
 ## Reproduce and resume
 
+`acquisition-status --settled --max-seconds 120 --candidate-selection ID`
+reads the existing report calculation directly from a read-only database while
+holding the ordinary writer exclusion. It refuses an active collector and
+releases the lock on timeout or query failure. Use it at a settled boundary
+when the large-database monitoring projection cannot meet its two-second live
+read-lock limit. It creates no database copy and does not change source,
+candidate or completion semantics. Without `--settled`, monitoring retains its
+existing concurrent snapshot behavior.
+
+The annual `ingest-orcid` command returns a
+`report_scope=committed-archive-run-only` receipt from the selected `runs` row.
+It does not compute whole-database distinct people/countries, event counts,
+member status groups or candidate progress at stream settlement or on failure.
+Those omitted metrics are unknown in this receipt, not zero. Source status,
+committed member counter, compressed byte count and failure detail are preserved;
+the counter alone is not an independent ledger reconciliation. Full quality
+checks remain a separate settled-writer operation. Python callers requesting
+the legacy full report retain that interface; production CLI ingestion uses
+the bounded receipt to avoid report-time sorting exhausting SQLite's heap.
+
 ### Separate annual-source freezes within one resource allowance
 
 A task may set `resource_root` to its existing frozen parent's external work
@@ -55,12 +75,94 @@ mutating the previous source freeze. It does not increase capacity or verify
 the archive. The annual stream must still reach EOF and pass the upstream
 checksum before it contributes relationships or denominators. Separate-source
 records are not automatically merged into the older production database or
-published scoring snapshot. A stopped gzip stream must replay from the start.
+published scoring snapshot. A process that exits still loses its gzip decoder
+state and must replay from the start; a database checkpoint does not imply a
+compressed byte seek.
+
+`gapi.archive_hash.ArchiveHash` is an optional, currently unconnected recovery
+primitive for the interpreter-local Windows OpenSSL 3 library. It exports named
+MD5/SHA-256 context fields, byte count, exact native version and a state checksum;
+restore rejects malformed fields, count mismatch, corruption and version drift.
+The archive still uses `HashReader`/hashlib in production. These checksum states
+do not by themselves constitute a source, decoder or member checkpoint. A future
+integration must atomically bind source identity, compressed hash position,
+gzip index and committed tar-member position before permitting a nonzero start.
+Native reference-vector checks must run before enabling that optional backend.
+The state checksum detects accidental corruption; it is not authentication of
+an untrusted checkpoint. No pickle or opaque Python/provider memory is loaded.
+
+The explicitly authorized temporary local-download route is
+`python -m gapi.archive_download --task configs/orcid-2026-production.json`.
+Only the configured official summaries compressed file is excepted from the
+unchanged 32 GB task budget. It resides in the sibling `archive-download`
+directory on D, with a partial-file suffix until official MD5 verification.
+The download receipt reports its bytes separately and combines them with normal
+task storage, so the physical allocation remains visible. No full XML extraction
+is performed. This file must be deleted immediately after full task acceptance;
+download completion alone does not satisfy that condition.
+
+The existing HTTP owner validates resumed ranges and source validators. File
+length owns the transfer offset after interruption; the complete file is hashed
+before final rename. A per-directory instance of the existing writer lock
+excludes concurrent downloads of this object without taking the career database
+writer lock. Refused ranges, identity drift, checksum errors and insufficient
+physical capacity stop the download and retain diagnostic state. This command
+does not resume a decoder, ingest members or authorize replay of prior input.
+
+For the exact frozen official ORCID summary URL, length and MD5 contract,
+`PublicHTTP.open_archive` reuses the existing `FeedReader` to reconnect a failed
+socket within the same process. It requests the remaining compressed bytes with
+HTTP Range while keeping the gzip decoder and complete-stream hashes alive.
+The initial length and representation, exact 206 Content-Range and remaining
+length are checked; an available ETag or Last-Modified must also remain unchanged.
+Full gzip, tar, length and upstream checksum verification is still required.
+An ignored range, refusal, identity drift or exhausted retry bound stops the
+stream. The existing reader limits total reconnects to 256 and consecutive
+stalled reconnects to eight. The command time bound also covers reconnects.
+No raw cache or persistent gzip index is created. Use a continuous window sized
+for the whole archive rather than repeatedly restarting short gzip windows.
+
+Figshare's [public file API](https://docs.figshare.com/old_docs/api/articles/#download-public-files)
+documents GET of a public file's `download_url` as the bulk download interface.
+For an exactly registered, frozen official ORCID archive URL with its declared
+length and MD5, a 403 on `/robots.txt` is treated as an unavailable robots file
+under [RFC 9309 section 2.3.1.3](https://www.rfc-editor.org/rfc/rfc9309.html#section-2.3.1.3).
+This exception is not cached for the host or applied to other URLs. Valid robots
+disallow rules, robots authentication/rate/server failures, and a file's own
+401/403 still stop access. It does not change source identity, request pacing,
+range validation, raw-storage policy or whole-archive verification.
 
 `configs/orcid-2026-production.json` pins the 2026 summary filename, official
 download URL, advertised length and MD5 from the recorded metadata, while
-retaining the original task freeze. Start its single stream with
-`python -B -m gapi ingest-orcid --task configs/orcid-2026-production.json --source orcid-2026-summary --resume --max-seconds 7200`.
+retaining the original task freeze. The former 7,200-second example is not a
+production continuation recipe: every process restart replays the compressed
+prefix. Before starting its single stream, verify source access and Range
+support, then choose one finite `--max-seconds` window from measured full-source
+throughput and the remaining task deadline. Include prefix replay, final
+integrity checks and rejection settlement in that estimate. If these inputs are
+unverified, do not repeat short runs or claim a completion time. The database's
+`--resume` option preserves committed members; it does not restore a gzip
+decoder after process exit.
+
+The CLI refuses `ingest-orcid`, with or without `--resume`, before opening the archive when
+either the member ledger or the run counter contains committed members.
+The current production adapter has no verified decoder checkpoint, so this
+option cannot promise continuation without replay. The refusal preserves the
+existing run status and counters. It does not implement seek recovery; omitting
+the flag cannot bypass this refusal.
+
+The optional index experiments remain isolated from `ingest-orcid`. On Windows,
+indexed_gzip 1.10.3's Python-file `ftell` conversion uses a 32-bit C `long` and
+cannot initialise the 57,290,954,546-byte source. The scoped build helper
+[`scripts/build-archive-index-runtime.py`](../scripts/build-archive-index-runtime.py)
+changes that conversion to `PyLong_AsLongLong`, builds under `work/`, and records
+source and binary hashes. It requires the existing local build dependencies and
+a local zlib source tree; it does not install globally or switch the collector.
+`test_archive_seek.py` exercises official-length initialisation in a new process.
+Passing that check or a bounded official Range comparison does not establish
+production recovery: imported indexes disable the library's gzip CRC check,
+and the full-length index and replay-window bounds still need validation.
+
 The first official tar header uses PAX `mtime` metadata. `read_mtime_pax` accepts
 only one length-checked timestamp record of at most 128 bytes, with zero padding;
 path, link, size, encoding, sparse and global PAX overrides remain rejected.
@@ -210,6 +312,16 @@ python -m gapi freeze-candidates --task configs/streaming.json
 python -m gapi acquisition-status --task configs/streaming.json --candidate-selection SELECTION_ID
 python -m gapi collect-global --task configs/streaming.json --queued-only --candidate-selection SELECTION_ID --max-seconds 900
 ```
+
+For a frozen ORCID candidate scope that has already been reconciled against a
+verified annual archive, add `--reuse-verified-annual`. This explicit route reuses
+normal annual records and retains XML `<error>` documents as source failures.
+It checks the exact frozen annual source identity and indexed member locator;
+partial or changed annual sources do not qualify. Size limits, field limits,
+unknown errors and absent members remain eligible for API recovery. The option
+requires `--queued-only --candidate-selection ID`; it does not change the
+selection, create API members, or count retained failures as successful reads.
+Without this option the existing API selection behavior is unchanged.
 
 The returned selection ID binds the frozen task configuration, a discovery
 rowid upper boundary, and each source's candidate count and provenance hash.
@@ -476,7 +588,13 @@ cursor without fabricating evidence. A failed discovery route is paused for the
 invocation while other routes and existing queues continue.
 
 Failed individuals receive persistent retry delays (60 seconds doubling to six
-hours). One quarter of normal batch capacity is reserved for due retries; the
+hours), with the finite candidate-attempt cap owned by
+`gapi.career_store.MAX_CANDIDATE_ATTEMPTS`. This is separate from HTTP retries
+within one attempt. ORCID GET 409 responses, verified permanent redirects and
+invalid ORCID identifiers remain recorded but are excluded from automatic
+candidate retries. Exhausted and excluded candidates remain pending failures;
+they do not count as successfully acquired or settle annual rejections.
+One quarter of normal batch capacity is reserved for eligible due retries; the
 rest accepts fresh candidates, preventing starvation on either side. They remain pending/deferred, not
 deleted or promoted to verified members. A 401/403 or exhausted 429 pauses that
 source for the invocation; another person is never tried to work around an access
@@ -1414,6 +1532,45 @@ assets. The command preserves all URLs and evidence fields. Its reported payload
 reduction is not filesystem deletion, and page reuse must be measured separately
 from the change in field bytes. Do not migrate beside an active collector.
 
+### Continue a verified local annual archive
+
+The temporary compressed-file exception does not raise the normal task storage
+budget. Keep its download receipt with the file; the official length and MD5
+must pass before indexing. An interrupted download resumes bytes through the
+existing archive downloader, without restarting annual ingestion.
+
+```text
+python -m gapi index-orcid-local --task configs/orcid-2026-production.json
+python -m gapi ingest-orcid-local --task configs/orcid-2026-production.json --commit-members 1024 --max-seconds 21600
+```
+
+Index construction holds the existing writer exclusion and makes one sequential
+decompression pass. During that pass, a bounded tar observer compares committed
+member names and digests against their durable insertion order. It records the
+first unprocessed tar boundary without XML parsing, extraction or business
+writes. The native build, input file and index remain hash-bound; a failed index
+attempt requires reconciliation and never starts another pass automatically.
+
+Local ingestion imports the completed index with automatic index expansion
+disabled, seeks to the verified tar boundary and reuses the existing summary
+parser and batch transaction. Its local member bound is 1,024; the existing
+1,000-event buffer bound can settle a transaction earlier. Progress settles and
+reports each 1,000 processed members, avoiding a forced 100-member transaction.
+Storage admission remains at both transaction boundaries. The HTTP archive
+adapter retains its independent 128-member maximum. Each batch commits its members, events and local
+tar cursor together. A transaction failure rolls all three back. Later calls
+use that cursor; inconsistent source identity, ledger counts, member digest,
+index checksum or file metadata stop continuation rather than replaying the
+committed prefix. Native decoding may read from the preceding compression
+checkpoint to reach a tar boundary; those bytes never re-enter XML parsing or
+business writes. File and index validation do not establish global coverage or
+independent career verification.
+
+The index and cursor are private recovery artifacts charged to the normal task
+budget. Preserve them until the task's acceptance and retention requirements
+are settled. Remove the exceptional compressed file immediately after full task
+acceptance, as authorized; download completion alone does not trigger removal.
+
 ### Reuse historical institution candidates
 
 The online identifier bridge normally selects Ringgold identifiers from current
@@ -1452,3 +1609,13 @@ and missing/unexpected response keys do not trigger alternate-route attempts.
 Current source backoff and the sole-writer boundary still apply. Local transport
 fixtures establish request-count reduction and content consistency; actual
 network throughput must be measured during a later exclusive identity batch.
+
+For API follow-up against a large annual archive database, `collect-global
+--bounded-report` counts stage members and events only for the adapter's source
+using the existing source-leading indexes. Stage output declares
+`events_scope=adapter-source-only`; `new_members` and `new_events` retain their
+committed batch meaning. Settlement returns `committed-source-runs-only`, without
+full-database people, country or event aggregates. Frozen candidate statistics
+remain separate. This reporting option does not alter candidate selection,
+source limits, parsing, evidence requirements or transaction boundaries. The
+default report remains unchanged.
