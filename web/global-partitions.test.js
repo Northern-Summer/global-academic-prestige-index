@@ -93,6 +93,36 @@ test('a mid-stream fetch failure returns no partially accepted dataset',async()=
   assert.ok(n>=3&&n<=6,'failure stops the bounded prefetch window');
 });
 
+test('completed prefetches release request slots without exceeding queued byte bound',async()=>{
+  const f=fixture(),first=f.manifest.fields[0].asset.file;
+  // Enough valid scalar fields to make the 8 MiB queue cap observable while
+  // the first response is stalled. Small completed jobs must not occupy all
+  // request slots, and no partially assembled dataset may be returned.
+  for(let i=0;i<12;i++){
+    const value='x'.repeat(1024*1024),raw=Buffer.from(JSON.stringify(value)),packed=gzipSync(raw),sha=hash(raw),file=`${sha}.json.gz`;
+    f.files.set(file,packed);
+    f.manifest.fields.push({field:`z${i.toString().padStart(2,'0')}`,kind:'value',asset:{file,sha256:sha,stored_sha256:hash(packed),bytes:raw.length,stored_bytes:packed.length,encoding:'gzip'}});
+    f.data[`z${i.toString().padStart(2,'0')}`]=value;
+  }
+  const plan=f.manifest.fields.flatMap(x=>x.kind==='rows'?x.assets:x.kind==='object'?x.entries.map(e=>e.asset):[x.asset]);
+  f.manifest.asset_count=plan.length;f.manifest.stored_bytes=plan.reduce((n,a)=>n+a.stored_bytes,0);
+  let release;const gate=new Promise(resolve=>{release=resolve;});let active=0,peak=0,started=0,queued=0;const progress=[];
+  const fetcher=async(url,options)=>{
+    const file=new URL(url).pathname.split('/').at(-1);const a=plan[started++];queued+=a.bytes;
+    active++;peak=Math.max(peak,active);
+    try{if(file===first)await gate;return await f.fetcher(url,options);}finally{active--;}
+  };
+  const run=loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher,onProgress:p=>progress.push(p)});
+  try{
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.ok(started>6,'completed requests must release network slots behind a stalled first response');
+    assert.ok(queued<=8*1024*1024,'declared decoded queue stays within its existing budget');
+    assert.equal(progress.length,0,'canonical consumption cannot advance past the stalled first response');
+    assert.ok(peak<=6);
+  }finally{release();await run;}
+  assert.deepEqual(await run,f.data);assert.equal(active,0);
+});
+
 test('bounded prefetch preserves sequential output and cancellation',async()=>{
   const f=fixture();let active=0,peak=0,order=0;const signals=[];
   const delayed=async(url,options)=>{

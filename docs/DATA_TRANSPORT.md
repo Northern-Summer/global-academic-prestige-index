@@ -336,6 +336,25 @@ members do not increase the distinct people represented by affiliation events.
 over the retained compact graph. Scenario calculation shares the full-analysis
 owner. The new generation stays local until the separate publication gate passes.
 
+`global_analysis.complete_unresolved_additions` covers the narrower case of new
+people whose appended API events are all unresolved, training-ineligible and
+produce no qualifying relation. It checks the exact committed row suffix,
+absence of earlier person events, member-count conservation and unchanged
+ranking configuration. Existing raw-label conflicts require predecessor
+evidence through the ordinary route. Graph rows, scores and sensitivity results
+are reused; new directory-only nodes follow the shared institution-row owner.
+The complete exported result still requires independent graph replay and the
+normal source/policy publication gate. `read_field` accepts a bounded asset
+reader for verified in-memory inputs without relaxing any content hash checks.
+
+Browser prefetch separates active network requests from completed values queued
+for canonical consumption. At most six requests run at once, and all queued
+decoded values retain the existing 8 MiB reservation. Completing a request frees
+its network slot even when an earlier response is slow; it does not release its
+queued-byte reservation. Corruption or cancellation aborts the owned window and
+no partial result is accepted. This scheduling change does not establish a
+public-network completion-time guarantee.
+
 The local preview reads `global-local-partitions-current.json` from the configured
 task directory when present. This small selector pins one sibling directory and
 manifest hash; absent selectors retain the original directory. Selection changes

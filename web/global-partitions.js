@@ -123,15 +123,23 @@ export async function loadPartitionedGlobal(manifest,base,{signal,fetcher=fetch,
   const stop=new AbortController(),requestSignal=signal?AbortSignal.any([signal,stop.signal]):stop.signal;
   const plan=m.fields.flatMap(f=>f.kind==='rows'?f.assets.map(a=>({a,rows:true})):
     f.kind==='object'?f.entries.map(v=>({a:v.asset,rows:false})):[{a:f.asset,rows:false}]);
-  const pending=new Map();let next=0,consumed=0,pendingBytes=0;
+  const pending=new Map();let next=0,consumed=0,pendingBytes=0,active=0;
   function fill(){
     requestSignal.throwIfAborted();
-    while(next<plan.length&&pending.size<concurrency){
+    while(next<plan.length&&active<concurrency){
       const item=plan[next];
       // Large scalar values run alone; ordinary row partitions can overlap.
       if(pending.size&&pendingBytes+item.a.bytes>8*1024*1024)break;
+      active++;
       const promise=fetchPartitionAsset(base,item.a,{signal:requestSignal,fetcher,rows:item.rows})
-        .then(value=>({value}),error=>{stop.abort(error);return {error};});
+        .then(value=>({value}),error=>{stop.abort(error);return {error};})
+        .then(result=>{
+          active--;
+          // Completed decoded values still reserve their queue bytes, but
+          // no longer occupy a network slot behind a slow earlier request.
+          if(!requestSignal.aborted)fill();
+          return result;
+        });
       pending.set(next++,{promise,bytes:item.a.bytes});pendingBytes+=item.a.bytes;
     }
   }

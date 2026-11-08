@@ -94,6 +94,20 @@ class AggregatePartitionTests(unittest.TestCase):
             self.assertEqual(list(read_field(target,'edges',manifest_sha256=sha)),data['edges'])
             self.assertEqual(read_field(target,'sensitivity',manifest_sha256=sha),data['sensitivity'])
             self.assertEqual(read_field(target,'algorithm',manifest_sha256=sha),data['algorithm'])
+            memory={p.name:p.read_bytes() for p in target.iterdir() if p.is_file()}
+            reader=lambda p:memory[p.name]
+            self.assertEqual(list(read_field(target,'nodes',manifest_sha256=sha,asset_reader=reader)),data['nodes'])
+            self.assertEqual(list(read_field(target,'edges',manifest_sha256=sha,asset_reader=reader)),data['edges'])
+            original_read=Path.read_bytes
+            def no_asset_files(path):
+                if path.name.endswith('.json.gz'):raise AssertionError('unexpected filesystem asset read')
+                return original_read(path)
+            with patch.object(Path,'read_bytes',no_asset_files):
+                self.assertEqual(list(read_field(target,'edges',manifest_sha256=sha,asset_reader=reader)),data['edges'])
+            with self.assertRaisesRegex(ValueError,'stored length'):
+                list(read_field(target,'nodes',manifest_sha256=sha,asset_reader=lambda p:reader(p)+b'bad'))
+            with self.assertRaisesRegex(ValueError,'stored hash'):
+                list(read_field(target,'nodes',manifest_sha256=sha,asset_reader=lambda p:b'0'*len(reader(p))))
             with self.assertRaises(ValueError):read_field(target,'nodes',manifest_sha256='0'*64)
             with self.assertRaises(ValueError):read_field(target,'missing',manifest_sha256=sha)
             a=next(f for f in m['fields'] if f['field']=='nodes')['assets'][0]

@@ -20,7 +20,7 @@ VALUE_BYTES = 32*1024**2
 MAX_ASSETS = 10000
 
 
-def read_field(directory, name, *, manifest_sha256):
+def read_field(directory, name, *, manifest_sha256, asset_reader=None):
     """Read one pinned field; row fields yield bounded decoded dictionaries.
     Callers exhaust row iterators before accepting the result. This is an
     aggregate reader, never a source-record or publication decision.
@@ -38,8 +38,9 @@ def read_field(directory, name, *, manifest_sha256):
     def load(a):
         if not re.fullmatch(r'[a-f0-9]{64}\.json\.gz',str(a.get('file',''))):raise ValueError('unsafe partition asset')
         path=directory/a['file']
-        if path.is_symlink() or path.stat().st_size!=a['stored_bytes']:raise ValueError('partition stored length')
-        packed=path.read_bytes()
+        if path.is_symlink():raise ValueError('partition stored length')
+        packed=path.read_bytes() if asset_reader is None else asset_reader(path)
+        if not isinstance(packed,bytes) or len(packed)!=a['stored_bytes']:raise ValueError('partition stored length')
         if hashlib.sha256(packed).hexdigest()!=a['stored_sha256']:raise ValueError('partition stored hash')
         import io
         with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:decoded=stream.read(min(a['bytes'],VALUE_BYTES)+1)
@@ -55,7 +56,7 @@ def read_field(directory, name, *, manifest_sha256):
             if v.get('schema_version')!=ROWS or len(values)!=a['rows'] or columns!=sorted(set(columns)):raise ValueError('partition row contract')
             if references:
                 if references!={'source':'algorithm.network_universe','target':'algorithm.network_universe'} or name!='edges':raise ValueError('partition references')
-                if universe is None:universe=read_field(directory,'algorithm',manifest_sha256=manifest_sha256)['network_universe']
+                if universe is None:universe=read_field(directory,'algorithm',manifest_sha256=manifest_sha256,asset_reader=asset_reader)['network_universe']
             for row in values:
                 if len(row)!=len(columns):raise ValueError('partition row width')
                 item=dict(zip(columns,row))

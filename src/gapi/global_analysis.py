@@ -487,6 +487,116 @@ def _institution_node_row(node, directory, network, order, intensity, denominato
                           max(s['ranks'][node] for s in scenarios.values() if not s['prior_only'])] if node in network else None}
 
 
+def _verify_prior_label_witness(store, witness, node, label, events):
+    changed=[e for e in events if e['payload'].get('institution')==node
+             and e['payload'].get('institution_name')
+             and [e['payload']['institution_name'],e['payload'].get('country')]!=list(label)]
+    if not changed:return
+    if (not witness or not witness.get('prior_nonempty_label_before_all_delta_ids')
+            or not witness['witness_event_id']<min(e['id'] for e in changed)):
+        raise ValueError('directory label winner needs bounded evidence')
+    previous=store.db.execute('SELECT institution,payload FROM events WHERE id=?',(witness['witness_event_id'],)).fetchone()
+    value=json.loads(previous[1]) if previous else {}
+    if (not previous or previous[0]!=node or not value.get('institution_name')
+            or [value.get('institution_name'),value.get('country')]!=list(label)
+            or witness['witness_event_id'] in {e['id'] for e in events}):
+        raise ValueError('directory label witness does not match retained event')
+
+
+def _verify_new_label_witness(store, witness, node, label, events, manifest_sha256):
+    candidates=[e for e in events if e['payload'].get('institution')==node and e['payload'].get('institution_name')]
+    first=min(candidates,key=lambda e:e['id']) if candidates else None
+    info=(store.task.root/'careers.sqlite').stat()
+    if (not first or witness.get('witness_event_id')!=first['id']
+            or witness.get('predecessor_manifest_sha256')!=manifest_sha256
+            or witness.get('prior_label')!=list(label)
+            or witness.get('database_identity')!={'bytes':info.st_size,'mtime_ns':info.st_mtime_ns}
+            or witness.get('scanned_through_rowid')!=store.db.execute('SELECT max(rowid) FROM events').fetchone()[0]
+            or witness.get('minimum_delta_id')!=first['id']
+            or witness.get('prior_label_absent_below_delta') is not True):
+        raise ValueError('directory new label winner lacks complete predecessor evidence')
+    return first['payload']['institution_name'],first['payload'].get('country')
+
+
+def complete_unresolved_additions(store, *, events, after_rowid, previous_directory,
+                                  previous_manifest_sha256, asset_reader=None,label_witnesses=()):
+    """Append only new unresolved, non-training people to a pinned full result.
+
+    This narrow path preserves every graph, score and scenario byte value.
+    The caller holds writer exclusion and binds input before/after export.
+    Conflicting existing raw labels require the ordinary evidence route.
+    """
+    from .aggregate_partitions import read_field
+    from .aggregate_chunks import AggregateRows
+    if type(after_rowid) is not int or after_rowid<0 or not 1<=len(events)<=1000:
+        raise ValueError('invalid unresolved addition boundary')
+    rows=list(store.db.execute('SELECT rowid,id,payload FROM events WHERE rowid>? ORDER BY rowid LIMIT 1001',(after_rowid,)))
+    actual=[{'id':eid,'payload':json.loads(text)} for _,eid,text in rows]
+    if (actual!=events or [r[0] for r in rows]!=list(range(after_rowid+1,after_rowid+1+len(events)))
+            or len({e['id'] for e in events})!=len(events)):
+        raise ValueError('unresolved additions differ from committed append')
+    if any(e['payload'].get('source')!='orcid-public-api' or e['payload'].get('status')!='unresolved'
+           or training_observation_eligible(e['payload'].get('kind'),e['payload'].get('role'),
+                 e['payload'].get('year_start'),e['payload'].get('year_end')) for e in events):
+        raise ValueError('unresolved additions could change graph or denominator')
+    people=sorted({e['payload']['person'] for e in events})
+    for person in people:
+        if store.db.execute('SELECT 1 FROM events WHERE person=? AND rowid<=? LIMIT 1',(person,after_rowid)).fetchone():
+            raise ValueError('unresolved addition person overlaps predecessor')
+    if list(relation_rows(store,persons=people,allowed_sources={'orcid-public-api'})):
+        raise ValueError('unresolved additions produced a qualifying relation')
+    load=lambda name:read_field(previous_directory,name,manifest_sha256=previous_manifest_sha256,asset_reader=asset_reader)
+    manifest=json.loads((Path(previous_directory)/'manifest.json').read_bytes())
+    metadata={f['field']:load(f['field']) for f in manifest['fields'] if f['kind']!='rows'}
+    if metadata['coverage']['events']!=after_rowid or metadata['algorithm']['config']!=DEFAULT_CONFIG:
+        raise ValueError('unresolved predecessor coverage or method mismatch')
+    total_members=store.db.execute('SELECT COALESCE(sum(members),0) FROM runs').fetchone()[0]
+    if total_members!=sum(metadata['coverage']['member_status'].values())+len(people):
+        raise ValueError('unresolved additions do not bind new member counts')
+    affected={e['payload']['institution'] for e in events if e['payload'].get('institution')}
+    new_directory={}
+    for node in affected:
+        alias=store.db.execute('SELECT institution FROM active_institution_aliases WHERE alias=?',(node,)).fetchone()
+        if alias and alias[0]!=node:raise ValueError('unresolved alias requires ordinary incremental route')
+        entity=store.db.execute('SELECT name,country,payload FROM entities WHERE id=?',(node,)).fetchone()
+        if entity:new_directory[node]=(entity[0],entity[1],json.loads(entity[2]))
+        else:
+            candidates=[e for e in events if e['payload'].get('institution')==node and e['payload'].get('institution_name')]
+            if candidates:
+                first=min(candidates,key=lambda e:e['id'])['payload']
+                new_directory[node]=(first['institution_name'],first.get('country'),{'identity_status':'reported-label-unresolved'})
+    seen=set();label_updates={}
+    for row in load('nodes'):
+        node=row['institution_id']
+        if node not in affected:continue
+        seen.add(node)
+        if not store.db.execute('SELECT 1 FROM entities WHERE id=?',(node,)).fetchone():
+            witness=next((w for w in label_witnesses if w['institution']==node),None)
+            if witness and witness.get('delta_label_precedes_prior_winner'):
+                label_updates[node]=_verify_new_label_witness(store,witness,node,[row['name'],row.get('country')],events,previous_manifest_sha256)
+            else:_verify_prior_label_witness(store,witness,node,[row['name'],row.get('country')],events)
+    new_ids=sorted(affected-seen)
+    def nodes():
+        missing=iter(new_ids);n=next(missing,None)
+        def fresh(node):
+            return _institution_node_row(node,new_directory,{}, {}, {},Counter(),Counter(),{},Counter(),{},metadata['sensitivity'])
+        for row in load('nodes'):
+            while n is not None and n<row['institution_id']:
+                yield fresh(n);n=next(missing,None)
+            if row['institution_id'] in label_updates:row['name'],row['country']=label_updates[row['institution_id']]
+            yield row
+        while n is not None:
+            yield fresh(n);n=next(missing,None)
+    coverage=metadata['coverage'];coverage['people']+=len(people);coverage['events']+=len(events)
+    coverage['event_status']['unresolved']=coverage['event_status'].get('unresolved',0)+len(events)
+    coverage['member_status']['observed']+=len(people)
+    coverage['countries']=sorted(set(coverage['countries'])|{e['payload']['country'] for e in events if e['payload'].get('country') is not None})
+    metadata.update(publication_status='local-only-source-license-review',
+        nodes=AggregateRows(manifest['nodes']+len(new_ids),nodes),
+        edges=AggregateRows(manifest['edges'],lambda:load('edges')),acquisition_progress=store.candidate_progress())
+    return metadata
+
+
 def complete_additive_result(store, *, delta, base_scores, previous_directory, previous_manifest_sha256,
                              label_witnesses=(), progress=None):
     """Complete the narrow append-only recovery contract without a population
@@ -571,36 +681,13 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
         seen.add(node);canonical_entity=store.db.execute('SELECT 1 FROM entities WHERE id=?',(node,)).fetchone()
         w=witness.get(node)
         if not canonical_entity and w and w.get('delta_label_precedes_prior_winner'):
-            candidates=[e for e in current if e['payload'].get('institution')==node and e['payload'].get('institution_name')]
-            first=min(candidates,key=lambda e:e['id']) if candidates else None
-            db=store.task.root/'careers.sqlite';info=db.stat()
-            if (not first or w.get('witness_event_id')!=first['id']
-                    or w.get('predecessor_manifest_sha256')!=previous_manifest_sha256
-                    or w.get('prior_label')!=[row['name'],row.get('country')]
-                    or w.get('database_identity')!={'bytes':info.st_size,'mtime_ns':info.st_mtime_ns}
-                    or w.get('scanned_through_rowid')!=store.db.execute('SELECT max(rowid) FROM events').fetchone()[0]
-                    or w.get('minimum_delta_id')!=first['id']
-                    or w.get('prior_label_absent_below_delta') is not True):
-                raise ValueError('directory new label winner lacks complete predecessor evidence')
             # The frozen predecessor already binds its own minimum-ID label.
             # A complete search found no event backing that label before the
             # new minimum, so this exact committed new event now wins.
-            label_updates[node]=(first['payload']['institution_name'],first['payload'].get('country'))
+            label_updates[node]=_verify_new_label_witness(store,w,node,[row['name'],row.get('country')],current,previous_manifest_sha256)
             continue
-        for e in current:
-            value=e['payload']
-            if value.get('institution')!=node or not value.get('institution_name') or canonical_entity:continue
-            if [value['institution_name'],value.get('country')]==[row['name'],row.get('country')]:continue
-            w=witness.get(node)
-            if not w or not w['prior_nonempty_label_before_all_delta_ids'] or not w['witness_event_id']<e['id']:
-                raise ValueError('directory label winner needs bounded evidence')
-            previous=store.db.execute('SELECT institution,payload FROM events WHERE id=?',(w['witness_event_id'],)).fetchone()
-            prior_value=json.loads(previous[1]) if previous else {}
-            if (not previous or previous[0]!=node
-                    or [prior_value.get('institution_name'),prior_value.get('country')]!=[row['name'],row.get('country')]
-                    or not prior_value.get('institution_name')
-                    or w['witness_event_id'] in {item['id'] for item in current}):
-                raise ValueError('directory label witness does not match retained event')
+        if not canonical_entity:
+            _verify_prior_label_witness(store,witness.get(node),node,[row['name'],row.get('country')],current)
     new_directory={}
     for node in sorted(affected-seen):
         # The verified predecessor includes every prior event institution.

@@ -17,6 +17,65 @@ class AnalysisTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_unresolved_append_label_witness_matches_full_analysis(self):
+        self.test_unresolved_append_reuses_graph_and_matches_full_analysis(existing=True)
+
+    def test_unresolved_append_refuses_training_denominator_change(self):
+        self.test_unresolved_append_reuses_graph_and_matches_full_analysis(training=True)
+
+    def test_unresolved_append_reuses_graph_and_matches_full_analysis(self,existing=False,training=False):
+        import copy,hashlib
+        from gapi.global_analysis import complete_unresolved_additions
+        from gapi.aggregate_partitions import write_result
+        from test_orcid_record_route import bodies
+        from gapi.orcid_stream import stream_archive
+        body=bodies()['record'].replace(b'https://ror.org/03vek6s52',b'1234').replace(b'>ROR<',b'>RINGGOLD<')
+        data=archive([('summaries/097/'+PERSON+'.xml',body)])
+        s=self.store(data)
+        try:
+            stream_archive(s,'orcid-2026-summary',io.BytesIO(data))
+            baseline=rank_global(s);previous=s.task.root/'previous-unresolved'
+            write_result(s.task,baseline,previous)
+            pinned=hashlib.sha256((previous/'manifest.json').read_bytes()).hexdigest()
+            boundary=s.db.execute('SELECT max(rowid) FROM events').fetchone()[0]
+            api='orcid-public-api';s.start(api)
+            with s.member(api,'new-api'):
+                s.event(dict(source=api,person='new-person',institution='ringgold:1234' if existing else 'ringgold:new',
+                    institution_name='New University',country='GB',kind='education' if training else 'employment',stage=None,
+                    year_start=None,year_end=None,role='Unknown',status='unresolved',locator='new-api'))
+                s.finish_member(api,'new-api','c'*64)
+            events=[{'id':i,'payload':json.loads(p)} for i,p in s.db.execute('SELECT id,payload FROM events WHERE rowid>? ORDER BY rowid',(boundary,))]
+            witnesses=[]
+            if existing:
+                old=min(r[0] for r in s.db.execute('SELECT id FROM events WHERE rowid<=?',(boundary,)))
+                new=events[0]['id'];node='ringgold:1234'
+                if old<new:witnesses=[{'institution':node,'prior_nonempty_label_before_all_delta_ids':True,'witness_event_id':old}]
+                else:
+                    info=(s.task.root/'careers.sqlite').stat()
+                    witnesses=[{'institution':node,'delta_label_precedes_prior_winner':True,'witness_event_id':new,
+                        'predecessor_manifest_sha256':pinned,'prior_label':['University A','CN'],
+                        'database_identity':{'bytes':info.st_size,'mtime_ns':info.st_mtime_ns},
+                        'scanned_through_rowid':boundary+1,'minimum_delta_id':new,'prior_label_absent_below_delta':True}]
+            def complete(values=events):
+                return complete_unresolved_additions(s,events=values,after_rowid=boundary,
+                    previous_directory=previous,previous_manifest_sha256=pinned,label_witnesses=witnesses)
+            if training:
+                with self.assertRaisesRegex(ValueError,'graph or denominator'):complete()
+                return
+            before=s.db.total_changes;result=complete();result['nodes']=list(result['nodes']);result['edges']=list(result['edges'])
+            full=rank_global(s)
+            self.assertEqual(result['nodes'],full['nodes']);self.assertEqual(result['edges'],full['edges'])
+            self.assertEqual(result['coverage'],full['coverage']);self.assertEqual(result['sensitivity'],baseline['sensitivity'])
+            self.assertEqual(s.db.total_changes,before)
+            for change in ({'status':'observed'},{'source':'wikidata'}):
+                bad=copy.deepcopy(events);bad[0]['payload'].update(change)
+                with self.assertRaises(ValueError):complete(bad)
+            with self.assertRaisesRegex(ValueError,'committed append'):complete(events+events)
+            with s.db:s.db.execute('UPDATE runs SET members=members+1 WHERE source=?',(api,))
+            with self.assertRaisesRegex(ValueError,'member counts'):complete()
+            self.assertEqual(hashlib.sha256((previous/'manifest.json').read_bytes()).hexdigest(),pinned)
+        finally:s.close()
+
     def test_partition_publication_preflight_binds_verifier_policy_and_source_generation(self):
         import copy
         from pathlib import Path

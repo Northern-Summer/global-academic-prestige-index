@@ -52,6 +52,57 @@ class RecordRouteTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_unused_long_fields_do_not_reject_identical_affiliation(self):
+        from gapi.orcid_stream import SummaryParser
+        def parse(body,width):
+            rows=[];parser=SummaryParser('p','source','fixture.xml',rows.append)
+            for i in range(0,len(body),width):parser.feed(body[i:i+width])
+            parser.feed(b'',final=True)
+            return rows
+        expected=parse(fixtures.XML,7)
+        extra=(b'<department-name>'+b'x'*32000+b'</department-name>'
+               b'<city>'+b'y'*32000+b'</city><credit-name>'+b'z'*32000+b'</credit-name>')
+        body=fixtures.XML.replace(b'<role-title>',extra+b'<role-title>')
+        for width in (1,113,65536):self.assertEqual(parse(body,width),expected)
+
+    def test_long_used_field_is_lossless_and_normalized_byte_cap_remains(self):
+        from gapi.orcid_stream import SummaryParser
+        from gapi.task import canonical
+        from gapi.event_storage import MAX_BYTES
+        role='PhD '+('x'*7654)
+        for width in (1,97,65536):
+            rows=[];parser=SummaryParser('p','source','fixture.xml',rows.append)
+            raw=fixtures.XML.replace(b'PhD',role.encode())
+            for i in range(0,len(raw),width):parser.feed(raw[i:i+width])
+            parser.feed(b'',final=True)
+            self.assertEqual(rows[0]['role'],role)
+            self.assertEqual(rows[0]['stage'],'doctorate')
+            self.assertLessEqual(len(canonical(rows[0])),MAX_BYTES)
+        # UTF-8 input fits the text buffer, but canonical JSON escaping would
+        # exceed the existing stored-event cap. No partial record may escape.
+        rows=[];parser=SummaryParser('p','source','fixture.xml',rows.append)
+        with self.assertRaisesRegex(ValueError,'normalized event exceeds 16 KiB'):
+            parser.feed(fixtures.XML.replace(b'PhD',('中'*3000).encode()),final=True)
+        self.assertEqual(rows,[])
+        rows=[];parser=SummaryParser('p','source','fixture.xml',rows.append)
+        with self.assertRaisesRegex(ValueError,'affiliation field exceeds bound'):
+            parser.feed(fixtures.XML.replace(b'PhD',b'x'*(MAX_BYTES+1)),final=True)
+        self.assertLessEqual(parser.current['text_bytes'],MAX_BYTES)
+        self.assertEqual(rows,[])
+
+    def test_oversized_second_section_rolls_back_first_and_preserves_retry(self):
+        store=self.store(fixtures.archive([]))
+        try:
+            values=bodies();values['employments']=values['employments'].replace(b'Professor',('中'*3000).encode())
+            http=HTTP(values);ingest_orcid_api(store,http,[fixtures.PERSON],report=False)
+            self.assertEqual(store.db.execute('SELECT count(*) FROM events').fetchone()[0],0)
+            self.assertEqual(store.db.execute('SELECT count(*) FROM members').fetchone()[0],0)
+            reason=store.db.execute('SELECT reason FROM discovery_retries').fetchone()[0]
+            self.assertIn('normalized event exceeds 16 KiB',reason)
+            self.assertEqual(len(http.calls),2)
+            self.assertEqual(store.db.execute('SELECT sum(requests) FROM request_reservations').fetchone()[0],2)
+        finally:store.close()
+
     def test_collector_opt_in_reaches_adapter_and_cli_default_stays_sections(self):
         import argparse
         from gapi.stream_cli import register

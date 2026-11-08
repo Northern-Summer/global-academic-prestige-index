@@ -105,18 +105,22 @@ class SummaryParser:
                 raise ValueError('affiliation appears in the wrong section')
             if self.current is not None:
                 raise ValueError("nested affiliation")
-            self.current = {"kind": local.split("-", 1)[0], "put_code": attrs.get("put-code", "")[:128], "fields": {}}
+            self.current = {"kind": local.split("-", 1)[0], "put_code": attrs.get("put-code", "")[:128], "fields": {}, "text_bytes": 0}
 
     def characters(self, text):
         if self.current is None:
             return
         path = "/".join(self.path[-3:])
         leaf = self.path[-1]
-        if leaf not in {"role-title", "department-name", "name", "city", "country", "year", "disambiguated-organization-identifier", "disambiguation-source", "path", "credit-name"}:
+        # Only fields consumed by end() belong in the bounded affiliation
+        # buffer. Department/city/credit-name never enter normalized events.
+        if leaf not in {"role-title", "name", "country", "year", "disambiguated-organization-identifier", "disambiguation-source", "path"}:
             return
         fields = self.current["fields"]
-        if len(fields.get(path, "")) + len(text) > 2048:
+        size = len(text.encode('utf-8'))
+        if self.current["text_bytes"] + size > MAX_BYTES:
             raise ValueError("affiliation field exceeds bound")
+        self.current["text_bytes"] += size
         fields[path] = fields.get(path, "") + text
 
     def end(self, tag):
@@ -141,6 +145,8 @@ class SummaryParser:
             self.count += 1
             if self.count > self.max_events:
                 raise ValueError("too many affiliations in member")
+            if len(canonical(record)) > MAX_BYTES:
+                raise ValueError("normalized event exceeds 16 KiB")
             self.emit(record)
             self.current = None
         self.path.pop()
