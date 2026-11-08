@@ -18,6 +18,10 @@ from .queue_storage import pack_row, pack_digest
 from .candidate_selection import candidate_rowid_filter
 
 CANDIDATE_SOURCES={'ingest-wikidata':'wikidata','ingest-orcid-api':'orcid-public-api'}
+# Candidate attempts are separate from per-request HTTP retries. Keep exhausted
+# candidates and their evidence pending for explicit disposition, without an
+# automatic six-hour retry cycle that can continue indefinitely.
+MAX_CANDIDATE_ATTEMPTS = 4
 
 
 def orcid_archive_sources(task):
@@ -257,6 +261,12 @@ class CareerStore:
                 THEN lower(substr(locator,1,instr(locator,'@')-1)) END AS prefix
             FROM members WHERE source=?) '''
         eligible=''' WHERE d.source=? AND COALESCE(r.next_attempt_at,0)<=?
+            AND COALESCE(r.attempts,0)<?
+            AND NOT (d.source='ingest-orcid-api' AND (
+                COALESCE(r.reason,'') GLOB 'HTTP Error 409:*'
+                OR COALESCE(r.reason,'') IN (
+                    'permanent official redirect; target queued separately; original identity unresolved',
+                    'invalid ORCID format/checksum; not requested')))
             AND CASE WHEN d.identifier<>'' AND instr(d.identifier,char(0))=0
                 AND d.identifier NOT GLOB '*[^A-Za-z0-9-]*'
                 THEN d.identifier NOT IN (SELECT locator FROM member_keys)
@@ -274,7 +284,8 @@ class CareerStore:
         # IN builds each membership set once. LEFT JOINs on materialized keys
         # can make SQLite choose repeated scans of either exact or prefix keys.
         # Both sets exclude NULL, preserving the original NOT EXISTS predicate.
-        parameters=(sources[command],command,time.time() if now is None else now,sources[command])
+        parameters=(sources[command],command,time.time() if now is None else now,
+                    MAX_CANDIDATE_ATTEMPTS,sources[command])
         bound,bound_parameters=candidate_rowid_filter(max_candidate_rowid)
         query+=bound
         retry_query+=bound

@@ -63,7 +63,9 @@ class _Budget:
         self.check_memory()
 
     def check_memory(self):
-        self.max_sampled_rss = max(self.max_sampled_rss, Task.check_memory(self))
+        current = Task.check_memory(self)
+        self.max_sampled_rss = max(self.max_sampled_rss, current)
+        return current
 
 
 class _Fixture:

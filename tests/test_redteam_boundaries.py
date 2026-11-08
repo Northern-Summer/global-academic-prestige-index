@@ -17,6 +17,16 @@ class RedteamBoundaries(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_ood_memory_adapter_returns_current_rss_and_preserves_failure(self):
+        from gapi.ood import _Budget
+        budget = _Budget()
+        with patch('gapi.task.Task.check_memory', side_effect=[100, 90, BudgetStop('memory boundary')]):
+            self.assertEqual(budget.check_memory(), 100)
+            self.assertEqual(budget.check_memory(), 90)
+            self.assertEqual(budget.max_sampled_rss, 100)
+            with self.assertRaisesRegex(BudgetStop, 'memory boundary'):
+                budget.check_memory()
+
     def test_public_coverage_is_exact_without_python_population_retention(self):
         import tracemalloc
         from gapi.ood import _Budget, _Fixture
