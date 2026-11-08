@@ -196,9 +196,9 @@ def _successor_chunks(directory, manifest, *, check=None, selection=None):
         pending.extend(piece)
         while index<len(manifest['chunks']) and len(pending)>=manifest['chunks'][index]['decoded_bytes']:
             entry=manifest['chunks'][index];_descriptor(entry);length=entry['decoded_bytes'];block=bytes(pending[:length]);del pending[:length]
-            body=gzip.compress(block,compresslevel=6,mtime=0)
-            if (hashlib.sha256(block).hexdigest()!=entry.get('decoded_sha256') or len(body)!=entry['bytes']
-                    or hashlib.sha256(body).hexdigest()!=entry['sha256']):raise ValueError('successor cannot recreate original gzip bytes')
+            if hashlib.sha256(block).hexdigest()!=entry.get('decoded_sha256'):
+                raise ValueError('successor cannot recreate original gzip bytes')
+            original_gzip(block,entry)
             sha.update(block);total+=len(block);index+=1
             yield block
     if (pending or index!=len(manifest['chunks']) or total!=manifest['decoded_bytes']
@@ -228,6 +228,20 @@ def select_successor(task, directory, successor):
     return {**selection,'original_chunks_reconstructed':count,'original_decoded_bytes':total,'source_files_deleted':0}
 
 
+def original_gzip(block, entry):
+    """Select exact frozen gzip bytes despite Python's platform OS byte.
+
+    The standalone public verifier intentionally implements this independently.
+    No candidate is accepted without the full original compressed identity.
+    """
+    body=gzip.compress(block,compresslevel=6,mtime=0)
+    if len(body)==entry['bytes']:
+        for os_byte in dict.fromkeys((body[9],3,10,255)):
+            candidate=body[:9]+bytes([os_byte])+body[10:]
+            if hashlib.sha256(candidate).hexdigest()==entry['sha256']:return candidate
+    raise ValueError('successor cannot recreate original gzip bytes')
+
+
 def materialize_original(task, directory):
     """Restore exact legacy gzip files only when their actual storage fits."""
     directory=Path(directory).absolute()
@@ -235,8 +249,7 @@ def materialize_original(task, directory):
     manifest=json.loads((directory/'manifest.json').read_bytes());created=0
     from .global_analysis import _write_aggregate
     for entry,block in zip(manifest['chunks'],chunks(directory,check=task.check_memory),strict=True):
-        name,_=_descriptor(entry);body=gzip.compress(block,compresslevel=6,mtime=0)
-        if hashlib.sha256(body).hexdigest()!=entry['sha256']:raise ValueError('legacy materialization identity mismatch')
+        name,_=_descriptor(entry);body=original_gzip(block,entry)
         path=directory/name
         if path.exists():
             if path.is_symlink() or path.read_bytes()!=body:raise ValueError('legacy file content drift')

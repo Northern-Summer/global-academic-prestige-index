@@ -225,6 +225,12 @@ class AggregatePartitionTests(unittest.TestCase):
             source=s.task.root/'source';target=s.task.root/'target';write(s.task,data,source);repartition(s.task,source,target)
             result=independent.verify_local_partitions(target,source)
             self.assertEqual(result['status'],'passed')
+            compress=gzip.compress
+            def unix_compress(*args,**kwargs):
+                packed=compress(*args,**kwargs)
+                return packed[:9]+b'\x03'+packed[10:]
+            with patch.object(independent.gzip,'compress',side_effect=unix_compress):
+                self.assertEqual(independent.verify_local_partitions(target,source)['status'],'passed')
             self.assertEqual(result['logical_sha256'],hashlib.sha256(canonical(data)).hexdigest())
             self.assertEqual((result['nodes'],result['edges']),(3,1))
             source_pointer=source/'manifest.json';source_raw=source_pointer.read_bytes();read=independent.bounded;changed=[False]

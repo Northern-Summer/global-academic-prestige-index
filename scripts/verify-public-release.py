@@ -15,6 +15,21 @@ import os
 from array import array
 
 
+def original_gzip(block, entry):
+    """Reconstruct exact frozen bytes across Python gzip OS-header variants.
+
+    Kept independent of the production reader. Every candidate still has to
+    match the original complete compressed SHA-256 and length; deflate, CRC,
+    timestamp and input differences are never accepted.
+    """
+    body=gzip.compress(block,compresslevel=6,mtime=0)
+    if len(body)==entry['bytes']:
+        for os_byte in dict.fromkeys((body[9],3,10,255)):
+            candidate=body[:9]+bytes([os_byte])+body[10:]
+            if hashlib.sha256(candidate).hexdigest()==entry['sha256']:return candidate
+    raise ValueError('partition cannot reconstruct original compressed source bytes')
+
+
 def bounded(path, maximum=32*1024**2):
     with path.open('rb') as stream:body=stream.read(maximum+1)
     if len(body)>maximum:raise ValueError('public input exceeds byte cap')
@@ -379,9 +394,9 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
                     or entry.get('file')!=entry['sha256']+'.json.part.gz'):raise ValueError('invalid reconstructed source descriptor')
             if len(pending)<entry['decoded_bytes']:break
             block=bytes(pending[:entry['decoded_bytes']]);del pending[:entry['decoded_bytes']]
-            body=gzip.compress(block,compresslevel=6,mtime=0)
-            if (hashlib.sha256(block).hexdigest()!=entry.get('decoded_sha256') or len(body)!=entry['bytes']
-                    or hashlib.sha256(body).hexdigest()!=entry['sha256']):raise ValueError('partition cannot reconstruct original compressed source bytes')
+            if hashlib.sha256(block).hexdigest()!=entry.get('decoded_sha256'):
+                raise ValueError('partition cannot reconstruct original compressed source bytes')
+            original_gzip(block,entry)
             legacy_index+=1
     def load(entry,maximum):
         nonlocal assets,packed

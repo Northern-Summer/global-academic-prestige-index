@@ -246,6 +246,7 @@ class LocalArchiveIndexTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'prior index attempt'):
             build_local_index(self.task,'s',self.archive,self.output,local_decoder)
 
+@unittest.skipUnless(sys.platform=='win32','requires the hash-bound optional Windows index runtime')
 class LocalArchiveResumeTests(unittest.TestCase):
     import test_streaming as fixtures
     setUp=fixtures.StreamingTests.setUp

@@ -10,6 +10,28 @@ import test_streaming as fixtures
 
 
 class AggregateChunkTests(unittest.TestCase):
+    def test_original_gzip_platform_headers_keep_exact_identity(self):
+        import importlib.util
+        from gapi.aggregate_chunks import original_gzip
+        spec=importlib.util.spec_from_file_location('independent_gzip','scripts/verify-public-release.py')
+        independent=importlib.util.module_from_spec(spec);spec.loader.exec_module(independent)
+        block=b'bounded reconstruction input'*200
+        compressed=gzip.compress(block,compresslevel=6,mtime=0)
+        for source_os in (3,10,255):
+            frozen=compressed[:9]+bytes([source_os])+compressed[10:]
+            entry={'bytes':len(frozen),'sha256':hashlib.sha256(frozen).hexdigest()}
+            for runtime_os in (3,10,255):
+                runtime=compressed[:9]+bytes([runtime_os])+compressed[10:]
+                with self.subTest(source=source_os,runtime=runtime_os),patch.object(gzip,'compress',return_value=runtime):
+                    self.assertEqual(original_gzip(block,entry),frozen)
+                    self.assertEqual(independent.original_gzip(block,entry),frozen)
+            for damaged in (frozen[:4]+b'\x01'+frozen[5:],frozen[:-1]+bytes([frozen[-1]^1])):
+                bad={'bytes':len(damaged),'sha256':hashlib.sha256(damaged).hexdigest()}
+                for reconstruct in (original_gzip,independent.original_gzip):
+                    with self.assertRaises(ValueError):reconstruct(block,bad)
+        for reconstruct in (original_gzip,independent.original_gzip):
+            with self.assertRaises(ValueError):reconstruct(block+b'drift',entry)
+
     setUp=fixtures.StreamingTests.setUp
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
