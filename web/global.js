@@ -102,7 +102,7 @@ async function load(){
     if(manifest.schema_version==='gapi-aggregate-partitions/1'){
       const partitionBase=new URL(`${base}data/global/`,location.href);
       data=validateGlobal(await loadPartitionedGlobal(manifest,partitionBase,{
-        signal:AbortSignal.timeout(120000),
+        signal:AbortSignal.timeout(600000),
         onProgress:({loadedAssets,totalAssets})=>{$('#global-status').textContent=`正在校验年度结果分片 ${loadedAssets} / ${totalAssets}…`;},
       }),{partitionManifest:manifest});
     }else{

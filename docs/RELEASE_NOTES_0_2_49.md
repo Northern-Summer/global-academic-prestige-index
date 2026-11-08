@@ -2,7 +2,11 @@ Annual observation partitions now use bounded concurrent prefetch while retainin
 the original field and row order. The previous sequential reader exceeded its
 120-second loading deadline on a direct public-site check, despite passing the
 hosted local browser tests. A failed or cancelled request aborts the owned
-prefetch window; no partial dataset is accepted.
+prefetch window; no partial dataset is accepted. On the same public connection,
+prefetch advanced to 73 of 131 partitions before the original deadline. The
+full-data loading deadline is now bounded at ten minutes, with visible partition
+progress. Slow public connections can still take several minutes; the hosted
+local browser measurement is not a public-network speed guarantee.
 
 The reader keeps the same compressed and decoded hash checks, HTTP gzip handling,
 publication rules, scores and missing values. Queued decoded input is bounded;
