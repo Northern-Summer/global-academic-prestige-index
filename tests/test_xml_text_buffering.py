@@ -37,13 +37,23 @@ class XMLTextBufferingTests(unittest.TestCase):
                     self.assertEqual(parse(body,chunk,True),baseline)
 
     def test_overlong_field_and_wrong_identity_keep_rejection(self):
-        for body in (XML.replace(b'University A',b'A'*2049),
+        for body in (XML.replace(b'University A',b'A'*16385),
                      XML.replace(PERSON.encode(),b'0000-0001-0000-0000')):
             for chunk in (1,7,65536):
                 with self.subTest(chunk=chunk):
                     baseline=parse(body,chunk,False)
                     self.assertIsNotNone(baseline[1])
                     self.assertEqual(parse(body,chunk,True),baseline)
+
+    def test_retained_names_above_legacy_limit_preserve_text(self):
+        name=b'A'*2049
+        body=XML.replace(b'University A',name)
+        for chunk in (1,7,65536):
+            with self.subTest(chunk=chunk):
+                baseline=parse(body,chunk,False)
+                self.assertIsNone(baseline[1])
+                self.assertTrue(any(row['institution_name']==name.decode() for row in baseline[0]))
+                self.assertEqual(parse(body,chunk,True),baseline)
 
     def test_dtd_entities_truncated_and_malformed_xml_keep_rejection(self):
         variants=(b'<!DOCTYPE record [<!ENTITY x "unsafe">]>'+XML,
