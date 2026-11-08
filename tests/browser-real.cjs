@@ -36,7 +36,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       const {loadPartitionedGlobal}=await import('../web/global-partitions.js');
       results.version.wire=await loadPartitionedGlobal(results.version.partition_manifest,results.version.partition_base);
       results.version.actual=results.version.expected;
-      results.version.integrity='all compressed and decoded asset hashes verified; full logical graph independently checked by release verifier';
+      results.version.integrity='all decoded asset hashes verified; compressed identities and full logical graph checked by build and independent release verifier';
       delete results.version.partition_manifest;delete results.version.partition_base;
     }
     const publicWire=results.version.wire;
@@ -211,10 +211,19 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     // A valid SHA binds hostile bytes as well as safe bytes. Verify the schema
     // gate and escaped labels in a real browser, without publishing fixtures.
     for(const unsafeNumber of [true,false]){
-      // Mutate the actual transport, preserving its compact representation.
-      // Expanding directory defaults can exceed the 32 MiB ingress guard as
-      // real coverage grows, masking the XSS assertion behind a size refusal.
-      const fixture=structuredClone(publicWire);
+      // Hostile labels exercise rendering, not full-archive capacity. Reuse one
+      // actual unscored row for partition releases so this isolated fixture
+      // remains within the single-file ingress contract without changing any
+      // real scores. Full production partitions are tested above unchanged.
+      let fixture;
+      if(publicData.nodes.length>131072){
+        const unscored=publicData.nodes.find(n=>n.network_score===null);
+        assert.ok(unscored,'bounded hostile fixture needs an actual unscored row');
+        fixture={schema_version:publicData.schema_version,dataset_kind:publicData.dataset_kind,
+          publication_status:publicData.publication_status,coverage:publicData.coverage,
+          algorithm:{...publicData.algorithm,network_universe:[unscored.institution_id]},
+          nodes:[structuredClone(unscored)],edges:[],sensitivity:{}};
+      }else fixture=structuredClone(publicWire);
       const firstNode=Array.isArray(fixture.node_rows)?fixture.node_rows[0]:fixture.nodes[0];
       firstNode[unsafeNumber?'relations':'name']='<img src=x onerror="window.__gapiInjected=1">';
       const bytes=Buffer.from(JSON.stringify(fixture)),sha=createHash('sha256').update(bytes).digest('hex');

@@ -69,6 +69,15 @@ export async function fetchPartitionAsset(base,a,{signal,fetcher=fetch,rows=fals
   descriptor(a,rows);
   const response=await fetcher(new URL(a.file,base),{signal});
   if(!response.ok){await response.body?.cancel();throw new Error(`Partition HTTP ${response.status}`);}
+  // Fetch removes HTTP gzip Content-Encoding before exposing response.body.
+  // The original compressed identity remains checked by build/public replay;
+  // this branch binds the exact decoded bytes, without trying to unzip twice.
+  if(response.headers.get('Content-Encoding')?.trim().toLowerCase()==='gzip'){
+    const raw=await bytes(response.body,a.bytes);
+    if(raw.length!==a.bytes)throw new Error('Partition decoded length mismatch');
+    await verifySnapshotBytes(raw,{output_sha256:a.sha256});
+    return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));
+  }
   const packed=await bytes(response.body,a.stored_bytes);
   if(packed.length!==a.stored_bytes)throw new Error('Partition compressed length mismatch');
   await verifySnapshotBytes(packed,{output_sha256:a.stored_sha256});

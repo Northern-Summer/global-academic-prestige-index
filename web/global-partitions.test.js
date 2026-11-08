@@ -92,3 +92,35 @@ test('a mid-stream fetch failure returns no partially accepted dataset',async()=
   await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher:async(...args)=>{if(++n===3)throw new Error('connection interrupted');return f.fetcher(...args);}}),/interrupted/);
   assert.equal(n,3);
 });
+
+test('HTTP-decoded gzip binds full decoded identity without double decompression',async()=>{
+  const f=fixture(),a=f.manifest.fields[0].asset;
+  const {gunzipSync}=await import('node:zlib');
+  const raw=gunzipSync(f.files.get(a.file));
+  const decoded=body=>new Response(body,{headers:{'Content-Encoding':'gzip'}});
+  assert.deepEqual(await fetchPartitionAsset('https://example.test/',a,{fetcher:async()=>decoded(raw)}),JSON.parse(raw));
+  for(const bad of [raw.subarray(1),Buffer.concat([raw,Buffer.from(' ')]),Buffer.alloc(raw.length),f.files.get(a.file)]){
+    await assert.rejects(fetchPartitionAsset('https://example.test/',a,{fetcher:async()=>decoded(bad)}));
+  }
+  const dataset=await loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher:async url=>{
+    const file=new URL(url).pathname.split('/').at(-1);
+    return decoded(gunzipSync(f.files.get(file)));
+  }});
+  assert.deepEqual(dataset,f.data);
+});
+
+test('real HTTP gzip content encoding is decoded once by fetch',async()=>{
+  const {createServer}=await import('node:http');
+  const f=fixture(),a=f.manifest.fields[0].asset,packed=f.files.get(a.file);
+  const server=createServer((request,response)=>{
+    response.writeHead(200,{'Content-Encoding':'gzip','Content-Type':'application/json','Content-Length':packed.length});
+    response.end(packed);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const value=await fetchPartitionAsset(`http://127.0.0.1:${server.address().port}/`,a);
+    assert.deepEqual(value,f.data.algorithm);
+  }finally{
+    server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
+  }
+});
