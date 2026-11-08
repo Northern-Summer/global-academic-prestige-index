@@ -32,6 +32,16 @@ an atomic remote compare-and-swap API. Git non-force checks and remote readback
 remain mandatory. Releases, tags, CI, Pages deployment and public data/hash
 readback use their existing settlement steps after this code operation.
 
+For already verified aggregate assets held in memory, `external_bytes` accepts
+only content-addressed public gzip paths, with at most 24 MiB retained bytes.
+This route requires `prepare_only=True`: it prepares the exact reviewed tree
+without writing duplicate local asset blobs or attempting a Git push. The
+existing immutable-object transport must settle those blob identities before
+publishing the tree, commit and non-force branch update. Preserve the prepared
+receipt and confirmed object identities on interruption; inspect remote object
+and ref identities before retrying an uncertain write. Private acquisition
+records and unqualified aggregates remain outside this interface.
+
 Historical task wrappers retain their original parameters and receipts. New
 code operations reuse this owner rather than copying its implementation. Run
 `python -B -m unittest discover -s tests -p test_code_publication.py` for the Git

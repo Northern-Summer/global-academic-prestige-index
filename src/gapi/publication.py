@@ -76,7 +76,7 @@ def partition_release_preflight(task,manifest,policy,source_runs,independent):
             'formal_ranking_qualified':False,'independent_personal_facts_verified':False}
 
 
-def prepare_partition_release(task,directory,out,policy,source_runs,independent):
+def prepare_partition_release(task,directory,out,policy,source_runs,independent, *, asset_reader=None):
     """Prepare a reviewed institution-observation candidate, leaving the current
     release manifest untouched. Reuse frozen assets; only the status asset and
     explicit source/policy bindings are new. No Git or network effects.
@@ -98,7 +98,7 @@ def prepare_partition_release(task,directory,out,policy,source_runs,independent)
     asset={'file':sha+'.json.gz','encoding':'gzip','bytes':len(raw),'sha256':sha,
            'stored_bytes':len(packed),'stored_sha256':hashlib.sha256(packed).hexdigest()}
     changed=0;size=0;checksum=hashlib.sha256();expect_status=False
-    for block in logical_chunks(directory,check=task.check_memory):
+    for block in logical_chunks(directory,check=task.check_memory,asset_reader=asset_reader):
         if expect_status:
             if block!=canonical(old):raise ValueError('unexpected logical publication status')
             block=raw;expect_status=False;changed+=1
@@ -125,6 +125,7 @@ def prepare_partition_release(task,directory,out,policy,source_runs,independent)
     descriptors=[a for f in m['fields'] for a in (f['assets'] if f['kind']=='rows' else [v['asset'] for v in f['entries']] if f['kind']=='object' else [f['asset']])]
     return {'state':'prepared-public-observation-candidate','manifest':str(out/'manifest.partitions-candidate.json'),
             'manifest_sha256':digest(candidate),'logical_sha256':candidate['logical_sha256'],
-            'external_root':str(directory),'external_inputs':{'outputs/global/'+a['file']:str(directory/a['file']) for a in descriptors},
+            'external_root':str(directory),'external_inputs':({'outputs/global/'+a['file']:str(directory/a['file']) for a in descriptors} if asset_reader is None else {}),
+            'asset_backend':'filesystem' if asset_reader is None else 'provided-reader',
             'new_status_asset':'outputs/global/'+asset['file'],'qualification':qualification,
             'current_release_manifest_replaced':False,'public_release_created':False}

@@ -46,7 +46,19 @@ class AnalysisTests(unittest.TestCase):
             with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,bad,runs,independent)
         finally:s.close()
 
-    def test_complete_additive_result_equals_full_analysis_and_refuses_drift(self):
+    def test_additive_new_reference_endpoint_equals_full_analysis(self):
+        self.test_complete_additive_result_equals_full_analysis_and_refuses_drift(new_endpoint=True)
+
+    def test_additive_new_named_and_unscored_directory_rows_equal_full_analysis(self):
+        self.test_complete_additive_result_equals_full_analysis_and_refuses_drift(new_endpoint=True,new_directory=True)
+
+    def test_additive_prior_label_witness_preserves_full_label_winner(self):
+        self.test_complete_additive_result_equals_full_analysis_and_refuses_drift(label_mode='prior')
+
+    def test_additive_earlier_new_label_matches_full_label_winner(self):
+        self.test_complete_additive_result_equals_full_analysis_and_refuses_drift(label_mode='delta')
+
+    def test_complete_additive_result_equals_full_analysis_and_refuses_drift(self,new_endpoint=False,new_directory=False,label_mode=None):
         import gzip,hashlib,copy
         from gapi.analysis_checkpoint import GraphCheckpoint,AdditiveGraph
         from gapi.aggregate_chunks import write
@@ -60,11 +72,17 @@ class AnalysisTests(unittest.TestCase):
                 return dict(source=source,person=person,institution=inst,kind=kind,stage=stage,
                             year_start=start,year_end=end,role=role,locator='fixture',status='observed',country='CN')
             with s.member(annual,'fixture'):
-                s.event(fact(annual,'baseline','A','education','doctorate',1990,1995,'PhD'))
+                training=fact(annual,'baseline','A','education','doctorate',1990,1995,'PhD')
+                if label_mode:training['institution_name']='Prior A'
+                s.event(training)
                 s.event(fact(annual,'baseline','B','employment','academic',2000,None,'Professor'))
+                if new_endpoint and not new_directory:
+                    s.event(dict(fact(annual,'baseline','C','employment',None,None,None,None),status='unresolved'))
                 s.finish_member(annual,'fixture','a'*64)
             s.status(annual,'verified')
             with s.db:s.db.execute("INSERT INTO institution_aliases VALUES('alias:A','A','fixture')")
+            if new_endpoint and not new_directory:
+                with s.db:s.db.execute("INSERT INTO entities VALUES('C','Institution C','CN',1,'{}')")
             baseline=rank_global(s,checkpoint=True)
             cp=GraphCheckpoint(s,None);state=cp.load();cp.write_compact(state)
             legacy=s.task.root/'legacy';previous=s.task.root/'partitions';write(s.task,baseline,legacy);repartition(s.task,legacy,previous)
@@ -73,8 +91,15 @@ class AnalysisTests(unittest.TestCase):
                 cp.path.with_suffix('.compact'),s.task.root/'analysis-training-denominators-74234e98afe7498f.json.gz')}
             api='orcid-public-api';s.start(api);person=private_person(PERSON)
             with s.member(api,PERSON):
-                s.event(dict(fact(api,person,'alias:A','education','doctorate',1991,1996,'PhD'),locator=PERSON))
+                training=fact(api,person,'A' if label_mode else ('C' if new_endpoint else 'alias:A'),'education','doctorate',1991,1996,'PhD')
+                if new_directory:training['institution_name']='Reported C'
+                if label_mode:training['institution_name']='New A'
+                if label_mode=='delta':training['put_code']=3
+                s.event(dict(training,locator=PERSON))
                 s.event(dict(fact(api,person,'B','employment','academic',2001,None,'Professor'),locator=PERSON))
+                if new_directory:
+                    s.event(dict(fact(api,person,'D','employment',None,None,None,None),locator=PERSON,
+                                 status='unresolved',institution_name='Reported D'))
                 s.finish_member(api,PERSON,'b'*64)
             events=[{'id':i,'payload':json.loads(text)} for i,text in s.db.execute('SELECT id,payload FROM events WHERE person=? ORDER BY id',(person,))]
             rel=list(relation_rows(s,persons=(person,)))
@@ -82,20 +107,69 @@ class AnalysisTests(unittest.TestCase):
                    'predecessor_files':predecessor,'people':[person],'events':events,
                    'recovered_member_ledger':[list(s.db.execute('SELECT locator,sha256,status,reason FROM members WHERE source=? AND locator=?',(api,PERSON)).fetchone())],
                    'relations':[{'key':list(k),'training':train,'job':job} for k,train,job in rel],
-                   'training_person_institution_pairs':[[person,'A']],'event_delta':2,'people_delta':1,'member_delta':1,'observed_event_delta':{'observed':2}}
-            graph=AdditiveGraph(GraphCheckpoint(s,None)._load_compact(cp.path.with_suffix('.compact'),expected_binding=binding)['edges'],{('B','A'):1.})
-            nodes=['A','B'];scores,conv=_rank_graph(s,nodes,graph,.85,1e-12,200)
-            base={'delta_sha256':digest(delta),'complete_aggregate':False,'nodes':nodes,'edges':1,'scores':scores,
+                   'training_person_institution_pairs':[[person,'C' if new_endpoint else 'A']],'event_delta':len(events),'people_delta':1,'member_delta':1,
+                   'observed_event_delta':{'observed':2,**({'unresolved':1} if new_directory else {})}}
+            graph=AdditiveGraph(GraphCheckpoint(s,None)._load_compact(cp.path.with_suffix('.compact'),expected_binding=binding)['edges'],{('B','C' if new_endpoint else 'A'):1.})
+            nodes=['A','B','C'] if new_endpoint else ['A','B'];scores,conv=_rank_graph(s,nodes,graph,.85,1e-12,200)
+            base={'delta_sha256':digest(delta),'complete_aggregate':False,'nodes':nodes,'edges':len(graph),'scores':scores,
                   'ranks':{n:i+1 for i,n in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))},'convergence':conv}
+            def witnesses():
+                if label_mode is None:return []
+                old=s.db.execute("SELECT id FROM events WHERE person='baseline' AND institution='A'").fetchone()[0]
+                first=min(e['id'] for e in events if e['payload'].get('institution')=='A')
+                if label_mode=='prior':
+                    self.assertLess(old,first)
+                    return [{'institution':'A','witness_event_id':old,'prior_nonempty_label_before_all_delta_ids':True}]
+                self.assertLess(first,old);info=(s.task.root/'careers.sqlite').stat()
+                return [{'institution':'A','witness_event_id':first,'delta_label_precedes_prior_winner':True,
+                         'predecessor_manifest_sha256':pinned,'prior_label':['Prior A','CN'],
+                         'database_identity':{'bytes':info.st_size,'mtime_ns':info.st_mtime_ns},
+                         'scanned_through_rowid':s.db.execute('SELECT max(rowid) FROM events').fetchone()[0],
+                         'minimum_delta_id':first,'prior_label_absent_below_delta':True}]
             changes=s.db.total_changes
-            result=complete_additive_result(s,delta=delta,base_scores=base,previous_directory=previous,previous_manifest_sha256=pinned)
+            result=complete_additive_result(s,delta=delta,base_scores=base,previous_directory=previous,previous_manifest_sha256=pinned,label_witnesses=witnesses())
             result['nodes']=list(result['nodes']);result['edges']=list(result['edges'])
             full=rank_global(s)
             self.assertEqual(result['coverage'],full['coverage']);self.assertEqual(result['edges'],full['edges'])
-            self.assertEqual(result['sensitivity'],full['sensitivity'])
-            self.assertEqual(result['nodes'],full['nodes']);self.assertEqual(s.db.total_changes,changes)
+            if new_endpoint:
+                self.assertEqual(set(result['sensitivity']),set(full['sensitivity']))
+                for name,expected in full['sensitivity'].items():
+                    actual=dict(result['sensitivity'][name]);expected=dict(expected)
+                    self.assertAlmostEqual(actual.pop('probability_mass'),expected.pop('probability_mass'),places=12)
+                    self.assertEqual(actual,expected)
+                self.assertEqual([n['institution_id'] for n in result['nodes']],[n['institution_id'] for n in full['nodes']])
+                for actual,expected in zip(result['nodes'],full['nodes'],strict=True):
+                    actual=dict(actual);expected=dict(expected)
+                    for score in ('network_score','network_intensity_score'):
+                        self.assertAlmostEqual(actual.pop(score),expected.pop(score),places=12)
+                    self.assertEqual(actual,expected)
+            else:
+                self.assertEqual(result['sensitivity'],full['sensitivity'])
+                self.assertEqual(result['nodes'],full['nodes'])
+            self.assertEqual(s.db.total_changes,changes)
+            if label_mode:
+                wrong=witnesses();wrong[0]['witness_event_id']='0'*64
+                with self.assertRaises(ValueError):
+                    complete_additive_result(s,delta=delta,base_scores=base,previous_directory=previous,previous_manifest_sha256=pinned,label_witnesses=wrong)
             bad=copy.deepcopy(delta);bad['events'][0]['payload']['role']='changed'
             with self.assertRaises(ValueError):complete_additive_result(s,delta=bad,base_scores={**base,'delta_sha256':digest(bad)},previous_directory=previous,previous_manifest_sha256=pinned)
+            for field,value in [('people_delta',2),('event_delta',len(events)+1),('member_delta',2),('observed_event_delta',{'observed':1})]:
+                bad=copy.deepcopy(delta);bad[field]=value
+                with self.subTest(field=field),self.assertRaisesRegex(ValueError,'coverage delta'):
+                    complete_additive_result(s,delta=bad,base_scores={**base,'delta_sha256':digest(bad)},previous_directory=previous,previous_manifest_sha256=pinned)
+            duplicate=copy.deepcopy(delta);duplicate['recovered_member_ledger']*=2;duplicate['member_delta']=2
+            with self.assertRaisesRegex(ValueError,'coverage delta'):
+                complete_additive_result(s,delta=duplicate,base_scores={**base,'delta_sha256':digest(duplicate)},previous_directory=previous,previous_manifest_sha256=pinned)
+            empty='0000-0001-5109-3700';empty_person=private_person(empty)
+            self.assertNotEqual(empty_person,person)
+            with s.member(api,empty):s.finish_member(api,empty,'c'*64)
+            with_empty=copy.deepcopy(delta);with_empty['people'].append(empty_person);with_empty['member_delta']=2
+            with_empty['recovered_member_ledger'].append(list(s.db.execute('SELECT locator,sha256,status,reason FROM members WHERE source=? AND locator=?',(api,empty)).fetchone()))
+            result=complete_additive_result(s,delta=with_empty,base_scores={**base,'delta_sha256':digest(with_empty)},previous_directory=previous,previous_manifest_sha256=pinned,label_witnesses=witnesses())
+            self.assertEqual(result['coverage'],rank_global(s)['coverage'])
+            with_empty['people_delta']=2
+            with self.assertRaisesRegex(ValueError,'coverage delta'):
+                complete_additive_result(s,delta=with_empty,base_scores={**base,'delta_sha256':digest(with_empty)},previous_directory=previous,previous_manifest_sha256=pinned)
         finally:s.close()
 
     def test_additive_graph_overlay_preserves_sorted_pagerank_and_baseline(self):

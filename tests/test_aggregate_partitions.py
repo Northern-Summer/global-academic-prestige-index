@@ -16,6 +16,40 @@ class AggregatePartitionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_memory_sink_matches_filesystem_and_propagates_failure(self):
+        s=self.store(fixtures.archive([]))
+        try:
+            data=self.sample();target=s.task.root/'memory-control'
+            expected=write_result(s.task,data,target)
+            before={p.relative_to(s.task.root) for p in s.task.root.rglob('*')}
+            assets={}
+            actual=write_result(s.task,data,None,asset_sink=lambda n,b:assets.__setitem__(n,b))
+            self.assertEqual(actual,expected)
+            self.assertEqual(json.loads(assets['manifest.json']),expected)
+            for name,body in assets.items():
+                self.assertEqual(body,(target/name).read_bytes())
+            self.assertEqual(b''.join(logical_chunks(target,asset_reader=lambda p:assets[p.name])),canonical(data))
+            self.assertEqual(before,{p.relative_to(s.task.root) for p in s.task.root.rglob('*')})
+            import importlib.util
+            spec=importlib.util.spec_from_file_location('independent_memory','scripts/verify-public-release.py')
+            independent=importlib.util.module_from_spec(spec);spec.loader.exec_module(independent)
+            source=target/'source';source.mkdir();(source/'manifest.json').write_bytes(assets['source-manifest.json'])
+            proof=independent.verify_local_partitions(target,source,asset_reader=lambda p:assets[p.name])
+            self.assertEqual(proof['status'],'passed')
+            self.assertEqual(proof['logical_sha256'],expected['logical_sha256'])
+            def corrupt(path):
+                return assets[path.name]+b'corrupt'
+            with self.assertRaisesRegex(ValueError,'partition packed identity mismatch'):
+                independent.verify_local_partitions(target,source,asset_reader=corrupt)
+            def broken(name,body):
+                raise OSError('injected memory sink failure')
+            with self.assertRaisesRegex(OSError,'injected memory sink failure'):
+                write_result(s.task,data,None,asset_sink=broken)
+            self.assertEqual((target/'manifest.json').read_bytes(),assets['manifest.json'])
+            with self.assertRaisesRegex(ValueError,'memory-only'):
+                write_result(s.task,data,target,asset_sink=broken)
+        finally:s.close()
+
     def test_public_candidate_reuses_frozen_assets_and_preserves_current_release(self):
         from gapi.publication import prepare_partition_release
         from gapi.career_store import source_identity

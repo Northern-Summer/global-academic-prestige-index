@@ -344,7 +344,7 @@ def replay_local_chunks(directory, *, edge_limit=600000):
 
 
 def verify_local_partitions(directory, source_directory, *, replay_graph=False, edge_limit=600000,
-                            manifest_name='manifest.json',source_name='manifest.json',public_status=None):
+                            manifest_name='manifest.json',source_name='manifest.json',public_status=None,asset_reader=None):
     """Independent partition-to-accepted-source equivalence; no gapi imports."""
     directory=Path(directory).absolute()
     for path in (directory,*directory.parents,Path(source_directory).absolute(),*Path(source_directory).absolute().parents):
@@ -411,7 +411,8 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
             for ancestor in (path,*path.absolute().parents):
                 if ancestor.is_symlink() or (ancestor.exists() and ancestor.is_junction()):raise ValueError('linked external partition')
         if path.is_symlink():raise ValueError('linked partition asset')
-        body=bounded(path,maximum+65536)
+        body=bounded(path,maximum+65536) if asset_reader is None else asset_reader(path)
+        if not isinstance(body,bytes) or len(body)>maximum+65536:raise ValueError('partition packed byte bound')
         if len(body)!=entry['stored_bytes'] or hashlib.sha256(body).hexdigest()!=entry.get('stored_sha256'):
             raise ValueError('partition packed identity mismatch')
         with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:raw=stream.read(maximum+1)
@@ -489,7 +490,7 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
     return result
 
 
-def verify_public_partitions(manifest_path):
+def verify_public_partitions(manifest_path, *, asset_reader=None):
     """Verify the policy-bound status-only publication transform and reproduce
     the full graph through the pinned local predecessor, without gapi imports.
     """
@@ -508,12 +509,13 @@ def verify_public_partitions(manifest_path):
     old=next(f for f in local['fields'] if f['field']=='publication_status')
     new=next(f for f in m['fields'] if f['field']=='publication_status');a=new.get('asset',{})
     if a.get('file')!=a.get('sha256','')+'.json.gz' or not re.fullmatch(r'[a-f0-9]{64}\.json\.gz',a.get('file','')) or a.get('encoding')!='gzip':raise ValueError('unsafe public status asset')
-    body=bounded(manifest_path.parent/a['file'],65536)
+    body=bounded(manifest_path.parent/a['file'],65536) if asset_reader is None else asset_reader(manifest_path.parent/a['file'])
+    if not isinstance(body,bytes) or len(body)>65536:raise ValueError('public status packed byte bound')
     if len(body)!=a.get('stored_bytes') or hashlib.sha256(body).hexdigest()!=a.get('stored_sha256'):raise ValueError('public status stored identity')
     with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:status=stream.read(1025)
     if (status!=encode(m['publication_status']) or len(status)!=a.get('bytes') or hashlib.sha256(status).hexdigest()!=a.get('sha256')):raise ValueError('public status decoded identity')
     result=verify_local_partitions(manifest_path.parent,manifest_path.parent,replay_graph=True,
-        manifest_name=p['local_manifest'],source_name=p['local_source_manifest'],public_status=m['publication_status'])
+        manifest_name=p['local_manifest'],source_name=p['local_source_manifest'],public_status=m['publication_status'],asset_reader=asset_reader)
     expected=json.loads(local_raw);expected['fields']=[new if f['field']=='publication_status' else f for f in expected['fields']]
     expected.update(publication_status=m['publication_status'],logical_sha256=result['public_logical_sha256'],
                     logical_bytes=result['public_logical_bytes'],stored_bytes=local['stored_bytes']-old['asset']['stored_bytes']+a['stored_bytes'])

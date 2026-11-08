@@ -13,6 +13,23 @@ spec.loader.exec_module(publication)
 
 
 class CodePublicationTests(unittest.TestCase):
+    def test_memory_assets_prepare_exact_git_identity_without_local_blob_or_push(self):
+        import gzip,hashlib
+        raw=b'{"institution_count":2}';body=gzip.compress(raw,mtime=0)
+        name='outputs/global/'+hashlib.sha256(raw).hexdigest()+'.json.gz'
+        options=dict(paths=['code.py',name],external_bytes={name:body},prepare_only=True)
+        result=self.publish(**options)
+        blob=hashlib.sha1(b'blob '+str(len(body)).encode()+b'\0'+body).hexdigest()
+        self.assertIn(blob,self.git('ls-tree','-r',result['public_commit']))
+        missing=subprocess.run(['git','cat-file','-e',blob],cwd=self.root,capture_output=True)
+        self.assertNotEqual(missing.returncode,0);self.assertFalse((self.root/name).exists())
+        self.assertEqual(self.pushes,0);self.assertEqual(self.publish(**options),result)
+        for changed in ({'prepare_only':False},{'external_bytes':{name:body+b'drift'}},
+                        {'external_bytes':{'private.txt':body},'paths':['code.py','private.txt']},
+                        {'external_bytes':{name:b'x'*(24*1024**2+1)}}):
+            with self.assertRaises(RuntimeError):self.publish(**{**options,**changed})
+        self.assertEqual(self.pushes,0)
+
     def test_offline_preparation_has_no_remote_effect_and_drift_still_blocks_push(self):
         def offline(*args,**kwargs):
             if args[0] in ('ls-remote','push'):raise AssertionError('offline preparation contacted remote')

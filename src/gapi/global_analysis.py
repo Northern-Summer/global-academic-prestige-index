@@ -466,6 +466,27 @@ def scenario_result(store, nodes, changed_edges, alpha=.85, personalization=None
     return fixed,expanded
 
 
+def _institution_node_row(node, directory, network, order, intensity, denominators,
+                          counts, source_counts, corroborated, independent_origins, scenarios):
+    """Shared full/incremental institution-row semantics."""
+    name,country,meta=directory.get(node,(node,None,{}))
+    reasons=[]
+    if corroborated[node]<10:reasons.append('insufficient_independently_corroborated_relations')
+    if len(independent_origins.get(node,()))<2:reasons.append('insufficient_independent_source_classes')
+    if node not in directory or meta.get('identity_status')=='reported-label-unresolved':reasons.append('institution_crosswalk_pending')
+    reasons.append('external_dual_review_pending')
+    return {'institution_id':node,'name':name,'country':country,'region':meta.get('region'),
+            'institution_type':meta.get('type'),'observed_rank':order.get(node),'formal_rank':None,
+            'network_score':network.get(node),'award_score':None,'composite_score':None,
+            'network_intensity_score':intensity.get(node),'observed_training_denominator':denominators[node] or None,
+            'award_status':'missing_official_award_data','status':'observed_only' if node in network else 'unranked_no_qualifying_relations',
+            'unranked_reasons':reasons,'relations':counts[node],'source_classes':sorted(source_counts.get(node,())),
+            'independent_source_classes':sorted(independent_origins.get(node,())),
+            'corroborated_relations':corroborated[node],'traceability':1.0 if counts[node] else None,
+            'rank_range':[min(s['ranks'][node] for s in scenarios.values() if not s['prior_only']),
+                          max(s['ranks'][node] for s in scenarios.values() if not s['prior_only'])] if node in network else None}
+
+
 def complete_additive_result(store, *, delta, base_scores, previous_directory, previous_manifest_sha256,
                              label_witnesses=(), progress=None):
     """Complete the narrow append-only recovery contract without a population
@@ -491,6 +512,18 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
             'SELECT id,payload FROM events WHERE person=? ORDER BY id',(person,)))
     if sorted(current,key=lambda e:e['id'])!=sorted(delta['events'],key=lambda e:e['id']):raise ValueError('additive person input drift')
     if any(e['payload']['source']!='orcid-public-api' for e in current):raise ValueError('additive source overlap')
+    # Coverage people are distinct event subjects, not successfully fetched
+    # members: a valid empty API record contributes one member and zero people.
+    expected_people=len({e['payload']['person'] for e in current})
+    expected_status=Counter(e['payload']['status'] for e in current)
+    if (type(delta.get('people_delta')) is not int or delta['people_delta']!=expected_people
+            or type(delta.get('event_delta')) is not int or delta['event_delta']!=len(current)
+            or delta.get('observed_event_delta')!=dict(expected_status)
+            or any(type(n) is not int for n in delta.get('observed_event_delta',{}).values())
+            or type(delta.get('member_delta')) is not int
+            or delta['member_delta']!=len(delta['recovered_member_ledger'])
+            or len({row[0] for row in delta['recovered_member_ledger']})!=delta['member_delta']):
+        raise ValueError('additive coverage delta differs from committed input')
     for row in delta['recovered_member_ledger']:
         if list(store.db.execute("SELECT locator,sha256,status,reason FROM members WHERE source='orcid-public-api' AND locator=?",(row[0],)).fetchone() or ())!=row:
             raise ValueError('additive member drift')
@@ -516,7 +549,10 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
     load=lambda name:read_field(previous_directory,name,manifest_sha256=previous_manifest_sha256)
     metadata={f['field']:load(f['field']) for f in json.loads((Path(previous_directory)/'manifest.json').read_bytes())['fields']
               if f['kind']=='value'}
-    if metadata['algorithm']['config']!=DEFAULT_CONFIG or metadata['algorithm']['network_universe']!=nodes:raise ValueError('predecessor method or universe drift')
+    if (metadata['algorithm']['config']!=DEFAULT_CONFIG
+            or metadata['algorithm']['network_universe']!=sorted(state['edges'].nodes)):
+        raise ValueError('predecessor method or universe drift')
+    metadata['algorithm']['network_universe']=nodes
     den=TrainingDenominatorCheckpoint(store,None)
     if hashlib.sha256(den.path.read_bytes()).hexdigest()!=delta['predecessor_files'][den.path.name]:raise ValueError('denominator predecessor drift')
     denominators=den._read(den.path,delta['predecessor_binding'])
@@ -526,13 +562,31 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
     raw_affected={e['payload']['institution'] for e in current if e['payload'].get('institution')}
     aliases={raw:(store.db.execute('SELECT institution FROM active_institution_aliases WHERE alias=?',(raw,)).fetchone() or (raw,))[0]
              for raw in raw_affected}
-    affected=set(aliases.values());seen=set();regions={}
+    affected=set(aliases.values());seen=set();regions={};label_updates={}
     witness={w['institution']:w for w in label_witnesses}
     for row in load('nodes'):
         node=row['institution_id']
         if node in base_scores['scores']:regions[node]=row.get('region') or 'unknown'
         if node not in affected:continue
         seen.add(node);canonical_entity=store.db.execute('SELECT 1 FROM entities WHERE id=?',(node,)).fetchone()
+        w=witness.get(node)
+        if not canonical_entity and w and w.get('delta_label_precedes_prior_winner'):
+            candidates=[e for e in current if e['payload'].get('institution')==node and e['payload'].get('institution_name')]
+            first=min(candidates,key=lambda e:e['id']) if candidates else None
+            db=store.task.root/'careers.sqlite';info=db.stat()
+            if (not first or w.get('witness_event_id')!=first['id']
+                    or w.get('predecessor_manifest_sha256')!=previous_manifest_sha256
+                    or w.get('prior_label')!=[row['name'],row.get('country')]
+                    or w.get('database_identity')!={'bytes':info.st_size,'mtime_ns':info.st_mtime_ns}
+                    or w.get('scanned_through_rowid')!=store.db.execute('SELECT max(rowid) FROM events').fetchone()[0]
+                    or w.get('minimum_delta_id')!=first['id']
+                    or w.get('prior_label_absent_below_delta') is not True):
+                raise ValueError('directory new label winner lacks complete predecessor evidence')
+            # The frozen predecessor already binds its own minimum-ID label.
+            # A complete search found no event backing that label before the
+            # new minimum, so this exact committed new event now wins.
+            label_updates[node]=(first['payload']['institution_name'],first['payload'].get('country'))
+            continue
         for e in current:
             value=e['payload']
             if value.get('institution')!=node or not value.get('institution_name') or canonical_entity:continue
@@ -541,10 +595,28 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
             if not w or not w['prior_nonempty_label_before_all_delta_ids'] or not w['witness_event_id']<e['id']:
                 raise ValueError('directory label winner needs bounded evidence')
             previous=store.db.execute('SELECT institution,payload FROM events WHERE id=?',(w['witness_event_id'],)).fetchone()
-            if (not previous or previous[0]!=node or not json.loads(previous[1]).get('institution_name')
+            prior_value=json.loads(previous[1]) if previous else {}
+            if (not previous or previous[0]!=node
+                    or [prior_value.get('institution_name'),prior_value.get('country')]!=[row['name'],row.get('country')]
+                    or not prior_value.get('institution_name')
                     or w['witness_event_id'] in {item['id'] for item in current}):
                 raise ValueError('directory label witness does not match retained event')
-    if seen!=affected:raise ValueError('new directory institution requires explicit incremental label insertion')
+    new_directory={}
+    for node in sorted(affected-seen):
+        # The verified predecessor includes every prior event institution.
+        # A new raw identity may be introduced only by these exact new events.
+        # Aliased identities use the canonical entity, never a guessed label.
+        entity=store.db.execute('SELECT name,country,payload FROM entities WHERE id=?',(node,)).fetchone()
+        if entity:new_directory[node]=(entity[0],entity[1],json.loads(entity[2]))
+        else:
+            candidates=[e for e in current if e['payload'].get('institution')==node and e['payload'].get('institution_name')]
+            if candidates:
+                first=min(candidates,key=lambda e:e['id'])['payload']
+                new_directory[node]=(first['institution_name'],first.get('country'),{'identity_status':'reported-label-unresolved'})
+            elif node not in raw_affected:
+                raise ValueError('new aliased institution lacks authoritative entity')
+        if node in base_scores['scores']:regions[node]=(new_directory.get(node,(None,None,{}))[2].get('region') or 'unknown')
+    new_ids=sorted(affected-seen)
     scenarios={};expanded={}
     def scenario(label,edges,alpha=.85,personalization=None):
         report('sensitivity',scenario=label)
@@ -569,15 +641,28 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
     intensity,conv=_rank_intensity(store,nodes,graph,denominators)
     if not conv['converged'] or abs(math.fsum(intensity.values())-1)>1e-10:raise ValueError('incremental intensity failed')
     def node_rows():
+        missing=iter(new_ids);next_missing=next(missing,None)
+        counts=Counter(state['counts']);counts.update(new_counts)
+        sources={n:set(v) for n,v in state['source_counts'].items()}
+        for n,values in new_sources.items():sources.setdefault(n,set()).update(values)
+        def fresh(node):
+            return _institution_node_row(node,new_directory,base_scores['scores'],base_scores['ranks'],intensity,
+                denominators,counts,sources,Counter(state['corroborated']),state['independent_origins'],scenarios)
         for row in load('nodes'):
+            while next_missing is not None and next_missing<row['institution_id']:
+                yield fresh(next_missing);next_missing=next(missing,None)
             n=row['institution_id'];row.update(network_score=base_scores['scores'].get(n),
                 observed_rank=base_scores['ranks'].get(n),network_intensity_score=intensity.get(n),
-                observed_training_denominator=denominators[n] or None)
+                observed_training_denominator=denominators[n] or None,
+                status='observed_only' if n in base_scores['scores'] else 'unranked_no_qualifying_relations')
             if n in new_counts:
                 row['relations']+=new_counts[n];row['source_classes']=sorted(set(row['source_classes'])|new_sources[n]);row['traceability']=1.0
+            if n in label_updates:row['name'],row['country']=label_updates[n]
             row['rank_range']=([min(s['ranks'][n] for s in scenarios.values() if not s['prior_only']),
                                 max(s['ranks'][n] for s in scenarios.values() if not s['prior_only'])] if n in base_scores['scores'] else None)
             yield row
+        while next_missing is not None:
+            yield fresh(next_missing);next_missing=next(missing,None)
     def edge_rows():
         remaining=dict(add)
         for row in load('edges'):
@@ -593,7 +678,7 @@ def complete_additive_result(store, *, delta, base_scores, previous_directory, p
     coverage['member_status']['observed']+=delta['member_delta']
     for status,n in delta['observed_event_delta'].items():coverage['event_status'][status]=coverage['event_status'].get(status,0)+n
     coverage['countries']=sorted(set(coverage['countries'])|{e['payload']['country'] for e in current if e['payload'].get('country') is not None})
-    metadata.update(nodes=AggregateRows(json.loads((Path(previous_directory)/'manifest.json').read_bytes())['nodes'],node_rows),
+    metadata.update(nodes=AggregateRows(json.loads((Path(previous_directory)/'manifest.json').read_bytes())['nodes']+len(new_ids),node_rows),
                     edges=AggregateRows(len(graph),edge_rows),sensitivity=scenarios,expanded_universe_sensitivity=expanded,
                     convergence=base_scores['convergence'],acquisition_progress=store.candidate_progress())
     report('complete',nodes=len(metadata['nodes']),edges=len(graph))
@@ -727,21 +812,8 @@ def rank_global(store, *, public=False, publication_policy=None, checkpoint=Fals
     def node_rows():
         for number,node in enumerate(row_ids,1):
             if number%1000==0:store.task.check_memory()
-            name, country, meta = directory.get(node, (node, None, {}))
-            reasons = []
-            if corroborated[node] < 10: reasons.append("insufficient_independently_corroborated_relations")
-            if len(independent_origins.get(node,())) < 2: reasons.append("insufficient_independent_source_classes")
-            if node not in directory or directory[node][2].get("identity_status") == 'reported-label-unresolved': reasons.append("institution_crosswalk_pending")
-            reasons.append("external_dual_review_pending")
-            yield {"institution_id":node,"name":name,"country":country,"region":meta.get("region"),
-                "institution_type":meta.get("type"),"observed_rank":order.get(node),"formal_rank":None,
-                "network_score":network.get(node),"award_score":None,"composite_score":None,
-                "network_intensity_score":intensity.get(node),"observed_training_denominator":denominators[node] or None,
-                "award_status":"missing_official_award_data", "status":"observed_only" if node in network else "unranked_no_qualifying_relations",
-                "unranked_reasons":reasons,"relations":counts[node],"source_classes":sorted(source_counts.get(node,())),
-                "independent_source_classes":sorted(independent_origins.get(node,())),
-                "corroborated_relations":corroborated[node],"traceability":1.0 if counts[node] else None,
-                "rank_range":[min(s["ranks"][node] for s in scenarios.values() if not s["prior_only"]),max(s["ranks"][node] for s in scenarios.values() if not s["prior_only"])] if node in network else None}
+            yield _institution_node_row(node,directory,network,order,intensity,denominators,
+                counts,source_counts,corroborated,independent_origins,scenarios)
     def edge_rows():
         if hasattr(edges,'packed_rows') and hasattr(stages,'packed_rows'):
             for number,(((source,target),weight),(pair,stage_weights)) in enumerate(zip(edges.items(),stages.items()),1):

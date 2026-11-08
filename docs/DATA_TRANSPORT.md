@@ -327,9 +327,12 @@ verification route. No source database or previous generation is rewritten.
 Append-only recovery uses `global_analysis.complete_additive_result`, the pinned
 private additions and saved base scores. It checks the actual person events,
 member hashes, prior graph and denominator identities, source deletion bounds,
-institution aliases and label winners. Replacements, additional source support
-or previously absent directory nodes are refused rather than silently treated
-as additive. `AdditiveGraph` stores only added weights and an integer order index
+institution aliases and label winners. Replacements and additional source support
+are refused rather than silently treated as additive. Previously absent directory
+nodes require exact frozen new events or a canonical entity; label changes require
+the original minimum-event-ID rule and bounded predecessor evidence. Empty API
+members do not increase the distinct people represented by affiliation events.
+`AdditiveGraph` stores only added weights and an integer order index
 over the retained compact graph. Scenario calculation shares the full-analysis
 owner. The new generation stays local until the separate publication gate passes.
 
@@ -355,6 +358,17 @@ inputs from one declared frozen root. It hashes them directly into the temporary
 Git index, checks identity again before preparing the commit, preserves reviewed
 public ancestry, and uses the same HTTPS push/readback receipt. It never publishes
 private delta inputs or includes unrelated local ancestry.
+
+`write_result(..., target=None, asset_sink=...)` can emit these same bounded
+compressed assets to an owned memory sink. `logical_chunks`, the publication
+transform and the independent verifier accept an explicit asset reader and keep
+their existing length, hash, framing and logical-equivalence checks. The caller
+bounds retained compressed bytes and holds the normal writer exclusion during
+calculation. Small manifests and upload receipts remain durable. Memory output
+alone is not a recoverable selected generation: assets must be settled through
+the existing immutable Git-object transport before the process is released.
+`publish_code(..., external_bytes=..., prepare_only=True)` binds those exact
+public asset bytes to the reviewed tree without writing another local copy.
 
 The optional local archive index supports a selected gzip storage descriptor.
 `local_archive_index.index_bytes` verifies compressed and decoded identities before

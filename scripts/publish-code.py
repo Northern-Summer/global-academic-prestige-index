@@ -24,7 +24,7 @@ def file_hash(path):
 
 
 def publish_code(root, *, repository, base, branch, paths, receipt, message, git=None,
-                 external_inputs=None, external_root=None, prepare_only=False):
+                 external_inputs=None, external_root=None, prepare_only=False, external_bytes=None):
     root = Path(root).resolve()
     require(type(prepare_only) is bool,'prepare_only must be boolean')
     receipt = Path(receipt)
@@ -36,7 +36,13 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
             and '..' not in branch, 'invalid branch')
     require(bool(paths) and len(paths) == len(set(paths)), 'reviewed paths must be nonempty and unique')
     external_inputs={} if external_inputs is None else dict(external_inputs)
+    external_bytes={} if external_bytes is None else dict(external_bytes)
     require(set(external_inputs).issubset(paths),'external inputs outside reviewed paths')
+    require(set(external_bytes).issubset(paths) and not set(external_bytes)&set(external_inputs),
+            'memory inputs outside reviewed paths or conflicting sources')
+    require(not external_bytes or prepare_only,'memory assets require prepared immutable-object publication')
+    require(sum(len(v) for v in external_bytes.values() if isinstance(v,bytes))<=24*1024**2,
+            'memory aggregate storage exceeds bound')
     if external_inputs:
         require(external_root is not None,'external inputs need one explicitly reviewed root')
         external_root=Path(external_root).absolute()
@@ -46,6 +52,11 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
         require(not path.is_absolute() and str(path) == name and
                 not any(part in ('.', '..', '.git') for part in path.parts)
                 and not any(c in name for c in ':*?[\\'), 'invalid reviewed path')
+        if name in external_bytes:
+            require(bool(re.fullmatch(r'outputs/global/[a-f0-9]{64}\.json\.gz',name))
+                    and isinstance(external_bytes[name],bytes) and 0<len(external_bytes[name])<=32*1024**2,
+                    'memory publication permits only bounded content-addressed aggregate assets')
+            continue
         actual=Path(external_inputs[name]).absolute() if name in external_inputs else root/name
         boundary=external_root if name in external_inputs else root
         if name in external_inputs:
@@ -72,23 +83,28 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
     require(len(push_urls) == 1 and push_urls[0].startswith('https://github.com/')
             and push_urls[0].removeprefix('https://github.com/').removesuffix('.git') == repository,
             'push URLs differ from the single explicitly reviewed HTTPS repository')
-    hashes = {p: file_hash(actual_inputs[p]) for p in paths}
+    def fingerprint(name):
+        return hashlib.sha256(external_bytes[name]).hexdigest() if name in external_bytes else file_hash(actual_inputs[name])
+    hashes = {p:fingerprint(p) for p in paths}
     index = receipt.with_suffix('.index')
     require(not index.exists() and not index.is_symlink(), 'unfinished publication index requires inspection')
     env = {**os.environ, 'GIT_INDEX_FILE': str(index)}
     try:
         git('read-tree', base, env=env)
-        ordinary=[p for p in paths if p not in external_inputs]
+        ordinary=[p for p in paths if p not in external_inputs and p not in external_bytes]
         if ordinary:git('add', '--', *ordinary, env=env)
         for name in paths:
-            if name not in external_inputs:continue
-            blob=git('hash-object','-w','--no-filters','--',str(actual_inputs[name]))
+            if name in external_bytes:
+                body=external_bytes[name]
+                blob=hashlib.sha1(b'blob '+str(len(body)).encode('ascii')+b'\0'+body).hexdigest()
+            elif name in external_inputs:blob=git('hash-object','-w','--no-filters','--',str(actual_inputs[name]))
+            else:continue
             require(bool(re.fullmatch('[0-9a-f]{40}',blob)),'invalid external Git blob identity')
             git('update-index','--add','--cacheinfo','100644,'+blob+','+name,env=env)
-        tree = git('write-tree', env=env)
+        tree = git('write-tree',*(['--missing-ok'] if external_bytes else []),env=env)
         changed = git('diff-tree', '--no-commit-id', '--name-only', '-r', base, tree).splitlines()
         require(set(changed) == set(paths), 'reviewed path set differs from actual changes')
-        require(hashes == {p: file_hash(actual_inputs[p]) for p in paths},
+        require(hashes == {p:fingerprint(p) for p in paths},
                 'reviewed worktree changed while preparing the tree')
         if receipt.exists():
             record = json.loads(receipt.read_text(encoding='utf-8'))

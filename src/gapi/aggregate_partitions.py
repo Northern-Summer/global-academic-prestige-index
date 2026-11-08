@@ -128,7 +128,7 @@ def repartition(task, source, target=None, *, progress=None):
                     final_check=lambda:pointer.read_bytes()==original,progress=progress)
 
 
-def write_result(task, result, target, *, progress=None):
+def write_result(task, result, target, *, progress=None, asset_sink=None):
     """Emit a completed local calculation directly, without a duplicate legacy
     gzip set. Its exact legacy manifest is retained as a reproducible anchor.
     The caller owns analysis acceptance and the existing writer exclusion.
@@ -172,11 +172,14 @@ def write_result(task, result, target, *, progress=None):
             if number%10000==0:task.check_memory()
         if pending:yield block(bytes(pending))
         upstream.update(logical_sha256=sha.hexdigest(),decoded_bytes=size)
-    value=_convert(task,upstream,pieces(),target,original=lambda:canonical(upstream),progress=progress)
+    if asset_sink is not None and target is not None:raise ValueError('asset sink requires memory-only partition output')
+    value=_convert(task,upstream,pieces(),target,original=lambda:canonical(upstream),progress=progress,asset_sink=asset_sink)
+    if asset_sink is not None:
+        asset_sink('source-manifest.json',canonical(upstream));asset_sink('manifest.json',canonical(value))
     return value
 
 
-def _convert(task, upstream, pieces, target, *, source=None, original, final_check=lambda:True, progress=None):
+def _convert(task, upstream, pieces, target, *, source=None, original, final_check=lambda:True, progress=None, asset_sink=None):
     if target is not None:
         target=_directory(task,target)
         if target==source:raise ValueError('source and partition target must differ')
@@ -199,6 +202,7 @@ def _convert(task, upstream, pieces, target, *, source=None, original, final_che
         asset_count+=1
         if asset_count>MAX_ASSETS:raise ValueError('partition asset count exceeds bound')
         stored_bytes+=len(body);task.check_memory()
+        if asset_sink is not None:asset_sink(name,body);task.check_memory()
         if target is not None:
             from .global_analysis import _write_aggregate
             path=target/name
@@ -286,7 +290,7 @@ def _convert(task, upstream, pieces, target, *, source=None, original, final_che
     return result
 
 
-def logical_chunks(directory, *, check=None):
+def logical_chunks(directory, *, check=None, asset_reader=None):
     """Restore exact canonical logical bytes from committed row/value assets.
 
     Exhaustion verifies the final logical hash and both declared row counts.
@@ -311,8 +315,9 @@ def logical_chunks(directory, *, check=None):
                 or type(entry.get('stored_bytes')) is not int or not 0<entry['stored_bytes']<=maximum+65536):
             raise ValueError('invalid partition asset descriptor')
         p=directory/entry['file']
-        if p.is_symlink() or p.stat().st_size!=entry['stored_bytes']:raise ValueError('partition stored length mismatch')
-        body=p.read_bytes()
+        if p.is_symlink():raise ValueError('linked partition asset')
+        body=p.read_bytes() if asset_reader is None else asset_reader(p)
+        if not isinstance(body,bytes) or len(body)!=entry['stored_bytes']:raise ValueError('partition stored length mismatch')
         if hashlib.sha256(body).hexdigest()!=entry.get('stored_sha256'):raise ValueError('partition stored hash mismatch')
         import io
         with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:raw=stream.read(maximum+1)
