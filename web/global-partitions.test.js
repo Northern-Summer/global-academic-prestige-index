@@ -139,6 +139,35 @@ test('bounded prefetch preserves sequential output and cancellation',async()=>{
   assert.equal(requested,0);
 });
 
+test('verified partition progress renews idle deadline while stalled and cancelled loads terminate',async()=>{
+  const f=fixture(),signals=[];
+  const delayed=async(url,{signal})=>{
+    signals.push(signal);
+    await new Promise((resolve,reject)=>{
+      const done=()=>{clearTimeout(timer);reject(signal.reason);};
+      const timer=setTimeout(()=>{signal.removeEventListener('abort',done);resolve();},25);
+      signal.addEventListener('abort',done,{once:true});
+      if(signal.aborted)done();
+    });
+    return f.fetcher(url);
+  };
+  const started=Date.now();
+  assert.deepEqual(await loadPartitionedGlobal(f.manifest,'https://example.test/',{
+    concurrency:1,idleTimeoutMs:100,fetcher:delayed}),f.data);
+  assert.ok(Date.now()-started>100,'productive load may exceed one idle interval');
+  const stalled=(_url,{signal})=>new Promise((_,reject)=>{
+    signal.addEventListener('abort',()=>reject(signal.reason),{once:true});
+    if(signal.aborted)reject(signal.reason);
+  });
+  await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{
+    idleTimeoutMs:20,fetcher:stalled}),/No verified partition progress/);
+  await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{
+    idleTimeoutMs:100,signal:AbortSignal.timeout(20),fetcher:stalled}),{name:'TimeoutError'});
+  assert.ok(signals.every(s=>s.aborted),'settlement releases all owned signals');
+  for(const idleTimeoutMs of [0,60001,true,1.5])await assert.rejects(
+    loadPartitionedGlobal(f.manifest,'https://example.test/',{idleTimeoutMs}),/idle timeout/);
+});
+
 test('HTTP-decoded gzip binds full decoded identity without double decompression',async()=>{
   const f=fixture(),a=f.manifest.fields[0].asset;
   const {gunzipSync}=await import('node:zlib');

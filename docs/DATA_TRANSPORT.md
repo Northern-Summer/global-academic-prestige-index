@@ -283,6 +283,13 @@ selectors. Network rendering and pagination reuse one ordered edge selection;
 table-only search, sort and scenario changes do not recompute unrelated network
 filters. Graph display limits remain distinct from the complete table scope.
 
+Partition loading stops after 60 seconds without another verified partition,
+or after the page's 20-minute absolute deadline. Only fully verified assets
+renew the idle deadline; bytes arriving, failed requests and queued responses
+do not. Completion and failure cancel the remaining requests and clear the
+idle timer. These bounds preserve slow productive transfers without waiting
+indefinitely for a stalled source. They do not establish a network speed gain.
+
 ### Retiring duplicate legacy aggregate blocks
 
 `gapi.aggregate_chunks.select_successor` may select a sibling partition

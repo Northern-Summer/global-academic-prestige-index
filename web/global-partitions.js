@@ -117,13 +117,19 @@ export function decodePartitionRows(value,entry,{field,universe,shared=new Map()
   });
 }
 
-export async function loadPartitionedGlobal(manifest,base,{signal,fetcher=fetch,onProgress,concurrency=6}={}){
+export async function loadPartitionedGlobal(manifest,base,{signal,fetcher=fetch,onProgress,concurrency=6,idleTimeoutMs=60000}={}){
   if(!Number.isInteger(concurrency)||concurrency<1||concurrency>6)throw new Error('Invalid partition concurrency');
+  if(!Number.isInteger(idleTimeoutMs)||idleTimeoutMs<1||idleTimeoutMs>60000)throw new Error('Invalid partition idle timeout');
   const m=validatePartitionManifest(manifest),data={},shared=new Map();let assets=0;
   const stop=new AbortController(),requestSignal=signal?AbortSignal.any([signal,stop.signal]):stop.signal;
   const plan=m.fields.flatMap(f=>f.kind==='rows'?f.assets.map(a=>({a,rows:true})):
     f.kind==='object'?f.entries.map(v=>({a:v.asset,rows:false})):[{a:f.asset,rows:false}]);
   const pending=new Map();let next=0,consumed=0,pendingBytes=0,active=0;
+  let idleTimer;
+  const progressDeadline=()=>{
+    clearTimeout(idleTimer);
+    idleTimer=setTimeout(()=>stop.abort(new DOMException('No verified partition progress within idle deadline','TimeoutError')),idleTimeoutMs);
+  };
   function fill(){
     requestSignal.throwIfAborted();
     while(next<plan.length&&active<concurrency){
@@ -149,9 +155,11 @@ export async function loadPartitionedGlobal(manifest,base,{signal,fetcher=fetch,
     const result=await job.promise;pending.delete(consumed++);pendingBytes-=job.bytes;
     if(result.error)throw result.error;
     requestSignal.throwIfAborted();assets++;
+    progressDeadline();
     onProgress?.({loadedAssets:assets,totalAssets:m.asset_count});fill();return result.value;
   };
   try{
+  progressDeadline();
   fill();
   for(const f of m.fields){
     if(f.kind==='rows'){
@@ -173,5 +181,5 @@ export async function loadPartitionedGlobal(manifest,base,{signal,fetcher=fetch,
   }
   if(data.schema_version!==m.logical_schema_version||data.publication_status!==m.publication_status||assets!==m.asset_count)throw new Error('Partition payload contract mismatch');
   return data;
-  }finally{stop.abort();pending.clear();}
+  }finally{clearTimeout(idleTimer);stop.abort();pending.clear();}
 }
