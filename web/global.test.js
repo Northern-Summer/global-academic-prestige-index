@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,existsSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {loadPartitionedGlobal} from './global-partitions.js';
 import {gunzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
-import {MAX_DIRECTORY_NODES,csv,networkSlice,selectEdges,selectRows,validateGlobal} from './global-data.js';
+import {MAX_DIRECTORY_NODES,csv,networkSlice,networkSliceFromEdges,selectEdges,selectRows,validateGlobal} from './global-data.js';
 
 const node = (id,score,country='CN') => ({institution_id:id,name:id,country,network_score:score,award_score:null,composite_score:null,relations:1,corroborated_relations:0,source_classes:[],traceability:null,observed_rank:null,formal_rank:null,rank_range:null,unranked_reasons:['independent_review_pending']});
 const dataset = () => ({schema_version:'gapi-global-observed/v1',dataset_kind:'real/global-public-observations',algorithm:{config:{alpha:.85}},coverage:{events:3,people:1},nodes:[node('a',.7),node('b',.3,'DE'),node('missing',null)],edges:[{source:'b',target:'a',weight:2,stages:{doctorate:2}}]});
@@ -44,15 +46,22 @@ test('directory accepts the bounded expanded catalog without relaxing graph caps
   assert.throws(()=>validateGlobal(data),/browser budget/);
 });
 
-test('committed real release fits the directory contract and preserves every table row',()=>{
+test('committed real release fits the directory contract and preserves every table row',async()=>{
   const directory=new URL('../outputs/global/',import.meta.url);
   const manifest=JSON.parse(readFileSync(new URL('manifest.json',directory),'utf8'));
-  const stored=readFileSync(new URL(manifest.repository_snapshot?.filename??manifest.snapshot,directory));
-  const bytes=manifest.repository_snapshot?.encoding==='gzip'
-    ?gunzipSync(stored,{maxOutputLength:32*1024*1024}):stored;
-  assert.ok(bytes.length<=32*1024*1024);
-  assert.equal(createHash('sha256').update(bytes).digest('hex'),manifest.output_sha256);
-  const data=validateGlobal(JSON.parse(bytes));
+  let data;
+  if(manifest.schema_version==='gapi-aggregate-partitions/1'){
+    data=validateGlobal(await loadPartitionedGlobal(manifest,'https://fixture.invalid/',{fetcher:async url=>{
+      const name=new URL(url).pathname.split('/').at(-1),local=new URL(name,directory);
+      const path=existsSync(local)||!process.env.GAPI_PARTITION_ASSETS?local:resolve(process.env.GAPI_PARTITION_ASSETS,name);
+      return new Response(readFileSync(path));
+    }}),{partitionManifest:manifest});
+  }else{
+    const stored=readFileSync(new URL(manifest.repository_snapshot?.filename??manifest.snapshot,directory));
+    const bytes=manifest.repository_snapshot?.encoding==='gzip'?gunzipSync(stored,{maxOutputLength:32*1024*1024}):stored;
+    assert.ok(bytes.length<=32*1024*1024);assert.equal(createHash('sha256').update(bytes).digest('hex'),manifest.output_sha256);
+    data=validateGlobal(JSON.parse(bytes));
+  }
   assert.equal(selectRows(data).length,data.nodes.length);
   const network=networkSlice(data);
   assert.ok(network.nodes.length<=500);
@@ -92,6 +101,17 @@ test('focused network caps rendering without dropping table relations or changin
   assert.equal(networkSlice(data,{stage:'postdoc'},'focus').edges.length,0);
   assert.throws(()=>networkSlice(data,{},'__proto__'));
   assert.throws(()=>networkSlice(data,{},'unknown'));
+});
+
+test('network rendering reuses the exact ordered table selection for every view and filter',()=>{
+  const data=dataset(),before=JSON.stringify(data);
+  for(const filters of [{},{stage:'doctorate'},{stage:'postdoc'},{selected:'a'},{country:'US'}]){
+    const edges=selectEdges(data,filters),selected=JSON.stringify(edges);
+    for(const view of ['focus','all'])assert.deepEqual(networkSliceFromEdges(data,edges,view),networkSlice(data,filters,view));
+    assert.equal(JSON.stringify(edges),selected);
+  }
+  assert.equal(JSON.stringify(data),before);
+  assert.throws(()=>networkSliceFromEdges(data,[], '__proto__'));
 });
 
 test('official award inventory validates counts without imputing university scores',()=>{

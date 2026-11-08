@@ -9,6 +9,7 @@ import math
 import os
 import platform
 import subprocess
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -18,6 +19,46 @@ from .storage import project_root
 from .career_store import member_evidence_sql, verified_archive_sql
 from .task import BudgetStop, canonical, digest
 from .publication import public_sources
+
+
+PACKED_GRAPH_THRESHOLD = 200000
+
+
+def _rank_intensity(store, nodes, edges, denominators):
+    """Apply exact denominator weights without duplicating the large graph."""
+    if len(edges)<=PACKED_GRAPH_THRESHOLD:
+        return _rank_graph(store,nodes,{(s,t):w/max(1,denominators[t])
+            for (s,t),w in sorted(edges.items())},.85,1e-12,200)
+    from .ranking import pagerank_sparse
+    if hasattr(edges,'packed_rows'):
+        rows=edges.packed_rows()  # Completed checkpoint rows are endpoint-sorted.
+    else:
+        rows=((s,t,w) for (s,t),w in sorted(edges.items()))
+    store.task.check_memory()
+    return pagerank_sparse(nodes,((s,t,w/max(1,denominators[t])) for s,t,w in rows),
+        .85,1e-12,200,check=store.task.check_memory)
+
+
+def _rank_graph(store, nodes, edges, alpha, tolerance, iterations, personalization=None):
+    """Preserve sorted-edge model; large graphs avoid a second edge dict.
+
+    The threshold selects a representation, never truncates the graph or raises
+    a resource allowance. Packed admission and each iteration observe the same
+    task memory budget.
+    """
+    store.task.check_memory()
+    if hasattr(edges,'packed_rows'):
+        from .ranking import pagerank_sparse
+        store.task.check_memory()
+        return pagerank_sparse(nodes, edges.packed_rows(), alpha,tolerance,iterations,
+            check=store.task.check_memory,personalization=personalization)
+    if len(edges) <= PACKED_GRAPH_THRESHOLD:
+        return pagerank(nodes, dict(sorted(edges.items())), alpha, tolerance, iterations, personalization)
+    from .ranking import pagerank_sparse
+    keys = sorted(edges)
+    store.task.check_memory()
+    return pagerank_sparse(nodes, ((a,b,edges[(a,b)]) for a,b in keys),
+        alpha,tolerance,iterations,check=store.task.check_memory,personalization=personalization)
 
 
 def ror_records(path):
@@ -49,13 +90,20 @@ def ror_records(path):
 
 
 def resolve_institutions(store, *, extra_identifiers=()):
-    wanted = set(extra_identifiers)
-    if len(wanted) > 200000:
-        raise BudgetStop('institution crosswalk exceeds bounded in-memory set')
-    for row in store.db.execute("SELECT DISTINCT institution FROM events WHERE institution IS NOT NULL"):
+    # Admit by the task's actual memory budget, not an identifier-count proxy.
+    # Consume supplied iterables incrementally as well as database identifiers;
+    # failure here precedes all persistent crosswalk writes.
+    store.task.check_memory()
+    wanted = set()
+    for number, identifier in enumerate(extra_identifiers, 1):
+        wanted.add(identifier)
+        if number % 256 == 0:
+            store.task.check_memory()
+    for number, row in enumerate(store.db.execute("SELECT DISTINCT institution FROM events WHERE institution IS NOT NULL"), 1):
         wanted.add(row[0])
-        if len(wanted) > 200000:
-            raise BudgetStop("institution crosswalk exceeds bounded in-memory set")
+        if number % 256 == 0:
+            store.task.check_memory()
+    store.task.check_memory()
     directory = project_root() / "data/real/institutions.json.gz"
     resolved, ambiguous = {}, set()
     if directory.exists() and wanted:
@@ -64,7 +112,9 @@ def resolve_institutions(store, *, extra_identifiers=()):
         with directory.open("rb") as f:
             if hashlib.file_digest(f, "sha256").hexdigest() != expected:
                 raise ValueError("ROR normalized directory identity changed")
-        for record in ror_records(directory):
+        for number, record in enumerate(ror_records(directory), 1):
+            if number % 256 == 0:
+                store.task.check_memory()
             canonical_id = "ror:" + record["id"]
             ids = {canonical_id}
             for authority in ("grid", "wikidata"):
@@ -169,152 +219,102 @@ def observed_relations(items):
         yield key, dict(train, supporting_sources=sorted(training_sources)), dict(job, supporting_sources=sorted(job_sources))
 
 
-def relation_rows(store, *, allowed_sources=None):
+def relation_rows(store, *, allowed_sources=None, after_person=None, person_complete=None, persons=None):
     """Read one person's bounded events at a time. No population-sized JSON/list."""
+    # Source-deletion sensitivity can remove the only available source. That
+    # graph is exactly empty: do not scan the population merely to discard it.
+    if allowed_sources is not None and not allowed_sources:
+        return
+    selected=()
+    if persons is not None:
+        if (not isinstance(persons,(tuple,list)) or not 1<=len(persons)<=1000
+                or any(not isinstance(p,str) or not p for p in persons)
+                or len(set(persons))!=len(persons) or after_person is not None):
+            raise ValueError('invalid bounded relation person selection')
+        selected=tuple(sorted(persons))
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     enriched = has_interpretations(store)
     from .corroboration import decisions
     verified = decisions(store, allowed_sources=allowed_sources)
+    # This reader already owns a stable analysis transaction under the writer
+    # lock. Reuse the authoritative active view once instead of probing its
+    # alias and issue indexes for every event, including ineligible events.
+    aliases = {}
+    for number, (alias, target) in enumerate(store.db.execute(
+            'SELECT alias,institution FROM active_institution_aliases'), 1):
+        aliases[alias] = target
+        if number % 1000 == 0:
+            store.task.check_memory()
+    store.task.check_memory()
     archive_predicate,archive_params=verified_archive_sql(store.task)
     columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
-    cursor = store.db.execute("""SELECT e.person,e.payload,COALESCE(a.institution,e.institution),e.status,e.source,e.id""" + columns + """
-        FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution""" + join + """
-        WHERE """ + member_evidence_sql() + " AND " + archive_predicate + """
-        ORDER BY e.person,e.id""", ((VERSION, POLICY_SHA256) if enriched else ()) + archive_params)
-    person, events = None, []
-    for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
-        if person is not None and pid != person:
+    seek = ' AND e.person>?' if after_person is not None else ''
+    if selected:seek=' AND e.person IN ('+','.join('?' for _ in selected)+')'
+    if after_person is not None and not isinstance(after_person,str):
+        raise ValueError('invalid relation person cursor')
+    # Keep physical payload bytes until scalar eligibility has been checked.
+    # The reader otherwise decompresses every unresolved event before the loop
+    # discards it. Preserve row order, interpretation overrides and fanout gates.
+    cursor = store.db.execute("""SELECT e.person,e.payload AS stored_payload,e.institution,e.status,e.source,e.id""" + columns + """
+        FROM events e""" + join + """
+        WHERE """ + member_evidence_sql() + " AND " + archive_predicate + seek + """
+        ORDER BY e.person,e.id""", ((VERSION, POLICY_SHA256) if enriched else ()) + archive_params
+        + ((after_person,) if after_person is not None else selected))
+    try:
+        person, events = None, []
+        for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
+            institution = aliases.get(institution, institution)
+            if person is not None and pid != person:
+                yield from observed_relations(events)
+                if person_complete is not None:
+                    person_complete(person)
+                events = []
+            person = pid
+            if len(events) >= 4096:
+                raise BudgetStop("person event fanout exceeds bounded relation analysis")
+            if interpreted_status is not None:
+                status = interpreted_status
+            if status not in ("observed", "corroborated") or not institution:
+                continue
+            if allowed_sources is not None and source not in allowed_sources:
+                continue
+            from .event_storage import decode_event
+            row = json.loads(decode_event(store.db,payload))
+            row["institution"], row["status"] = institution, status
+            if source.startswith('orcid-'):
+                row['kind'], row['stage'] = classify(row['kind'],row.get('role'),completed_only=True)
+            if interpreted_status is not None:
+                row['kind'], row['stage'] = interpreted_kind, interpreted_stage
+            if event_id in verified:
+                row['status'] = 'corroborated'
+                row['evidence_origins'] = verified[event_id]['origins']
+            events.append(row)
+        if events:
             yield from observed_relations(events)
-            events = []
-        person = pid
-        if len(events) >= 4096:
-            raise BudgetStop("person event fanout exceeds bounded relation analysis")
-        if interpreted_status is not None:
-            status = interpreted_status
-        if status not in ("observed", "corroborated") or not institution:
-            continue
-        if allowed_sources is not None and source not in allowed_sources:
-            continue
-        row = json.loads(payload)
-        row["institution"], row["status"] = institution, status
-        if source.startswith('orcid-'):
-            row['kind'], row['stage'] = classify(row['kind'],row.get('role'),completed_only=True)
-        if interpreted_status is not None:
-            row['kind'], row['stage'] = interpreted_kind, interpreted_stage
-        if event_id in verified:
-            row['status'] = 'corroborated'
-            row['evidence_origins'] = verified[event_id]['origins']
-        events.append(row)
-    if events:
-        yield from observed_relations(events)
+        if person is not None and person_complete is not None:
+            person_complete(person)
+    finally:
+        cursor.close()
 
 
-def rank_global(store, *, public=False, publication_policy=None):
-    # This calculation reads SQLite and builds bounded in-memory graphs. It
-    # does not create a 64 MiB disk workspace. Admit actual exports only once
-    # their byte size is known; keep disk reserve and memory checks separate.
-    store.task.check()
-    store.task.check_memory()
-    allowed = public_sources(store.task,publication_policy) if public else None
-    edges, stages, counts, source_counts = defaultdict(float), defaultdict(Counter), Counter(), defaultdict(set)
-    corroborated = Counter()
-    independent_origins = defaultdict(set)
-    recent_edges = defaultdict(float)
-    relation_count = 0
-    for (employer, training, stage), train, job in relation_rows(store, allowed_sources=allowed):
-        relation_count += 1
-        key = employer, training
-        counts[training] += 1
-        source_counts[training].update(train['supporting_sources'])
-        source_counts[training].update(job['supporting_sources'])
-        if train["status"] == job["status"] == "corroborated":
-            corroborated[training] += 1
-            independent_origins[training].update(set(train.get('evidence_origins', ())) & set(job.get('evidence_origins', ())))
-        weight = DEFAULT_CONFIG["stage_weights"][stage]
-        edges[key] += weight
-        stages[key][stage] += weight
-        if job["year_start"] >= 2016:
-            recent_edges[key] += weight
-        # Bound Python sparse graph size; do not silently sample beyond this limit.
-        if len(edges) > 200000:
-            raise BudgetStop("sparse graph exceeds bounded in-memory analysis; use partitioned graph backend")
-        if relation_count % 1000 == 0:
-            store.task.check_memory()
-    nodes = sorted({endpoint for edge in edges for endpoint in edge})
-    network, convergence = pagerank(nodes, dict(sorted(edges.items())), .85, 1e-12, 200)
-    directory = {r[0]: (r[1], r[2], json.loads(r[3])) for r in store.db.execute("SELECT id,name,country,payload FROM entities")}
-    # A reported label is presentation only, never a name-based identity merge.
-    # The first eligible ID per institution owns its fallback label. Global ID
-    # order gives the same per-institution minimum without sorting all payloads
-    # in SQLite's bounded memory workspace.
-    for institution, payload, country, source in store.db.execute("SELECT institution,payload,country,source FROM events WHERE institution IS NOT NULL ORDER BY id"):
-        if allowed is not None and source not in allowed:
-            continue
-        reported = json.loads(payload).get("institution_name")
-        if institution not in directory and reported:
-            directory[institution] = (reported, country, {"identity_status":"reported-label-unresolved"})
-    # Observed event endpoints belong in directory even when they have no qualifying edge.
-    directory_ids = {r[0] for r in store.db.execute("SELECT DISTINCT COALESCE(a.institution,e.institution),e.source FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution WHERE e.institution IS NOT NULL")
-                     if allowed is None or r[1] in allowed}
-    ordering = sorted(network, key=lambda node: (-network[node], node))
-    order = {node: i+1 for i, node in enumerate(ordering)}
-    scenarios, expanded_scenarios = {}, {}
-    reference_nodes = set(nodes)
-    def scenario(label, changed_edges, alpha=.85, personalization=None):
-        if len(changed_edges) > 200000:
-            raise BudgetStop('sensitivity graph exceeds bounded sparse analysis')
-        store.task.check_memory()
-        positive_edges = {edge:weight for edge,weight in changed_edges.items() if weight > 0}
-        new_endpoints = sorted({endpoint for edge in positive_edges for endpoint in edge} - reference_nodes)
-        fixed_edges = {edge:weight for edge,weight in positive_edges.items()
-                       if edge[0] in reference_nodes and edge[1] in reference_nodes}
-        def evaluate(universe, valid_edges, boundary):
-            scores, conv = pagerank(universe, dict(sorted(valid_edges.items())), alpha, 1e-12, 1000, personalization)
-            return {"converged":conv["converged"], "edges":len(valid_edges),
-                "available_edges":len(positive_edges), "filtered_boundary_edges":len(positive_edges)-len(valid_edges),
-                "new_endpoints":new_endpoints, "universe_kind":boundary, "node_count":len(universe),
-                "probability_mass":math.fsum(scores.values()), "prior_only":not bool(valid_edges),
-                "ranks":{node:i+1 for i,node in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))}}
-        scenarios[label] = evaluate(nodes, fixed_edges, 'fixed-reference-universe')
-        if new_endpoints:
-            # Removing conflicting evidence can reveal previously excluded jobs.
-            # Keep this expanded comparison separate from the fixed-universe rank range.
-            expanded_scenarios[label] = evaluate(sorted(reference_nodes | set(new_endpoints)),
-                                                  positive_edges, 'reference-plus-new-endpoints')
-    for alpha in (.65, .85, .95):
-        scenario(f"alpha_{alpha}",edges,alpha)
-    for stage in DEFAULT_CONFIG["stage_weights"]:
-        scenario("stage_only_"+stage,{edge:values[stage] for edge,values in stages.items() if values[stage]>0})
-    available_sources={row[0] for row in store.db.execute('SELECT DISTINCT source FROM events')
-                       if allowed is None or row[0] in allowed}
-    # A deduplicated relation may have alternative evidence from another source.
-    # Subtracting the selected evidence's contribution would erase that support.
-    # Replay source filtering BEFORE joining and deduplicating the person's facts.
-    for source in sorted(available_sources):
-        remaining_edges=defaultdict(float)
-        for (employer,training,stage),_train,_job in relation_rows(store,allowed_sources=available_sources-{source}):
-            remaining_edges[(employer,training)]+=DEFAULT_CONFIG['stage_weights'][stage]
-        scenario('delete_source_'+source,remaining_edges)
-    scenario("employment_since_2016", recent_edges)
-    groups = Counter(directory.get(node,(None,None,{}))[2].get("region") or "unknown" for node in nodes)
-    if nodes:
-        scenario("region_balanced_prior",edges,personalization={node:1/groups[directory.get(node,(None,None,{}))[2].get("region") or "unknown"] for node in nodes})
+def _training_denominators(store, allowed, report):
     # Conditional intensity: denominator is observed training people, never graduates at risk.
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
     denominators = Counter()
+    report('training_denominators')
     store.db.create_function('gapi_training_observation', 4,
                              training_observation_eligible, deterministic=True)
     effective_kind = 'e.kind'
-    denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
-        FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
+    denominator_sql = """SELECT e.person,COALESCE(a.institution,e.institution)
+        FROM events e NOT INDEXED LEFT JOIN active_institution_aliases a ON a.alias=e.institution
         WHERE e.kind IN ('education','training') AND e.status IN ('observed','corroborated')"""
     params = ()
     if has_interpretations(store):
         # The explicit v2 view counts its interpreted training observations in
         # the same denominator; old frozen inputs retain their predecessor view.
-        denominator_sql = """SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)
-            FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution
+        denominator_sql = """SELECT e.person,COALESCE(a.institution,e.institution)
+            FROM events e NOT INDEXED LEFT JOIN active_institution_aliases a ON a.alias=e.institution
             LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?
             WHERE COALESCE(i.kind,e.kind) IN ('education','training')
             AND COALESCE(i.status,e.status) IN ('observed','corroborated')"""
@@ -328,47 +328,451 @@ def rank_global(store, *, public=False, publication_policy=None):
     if allowed is not None:
         denominator_sql += " AND e.source IN (" + ','.join('?' for _ in allowed) + ")"
         params += tuple(sorted(allowed))
-    for institution, count in store.db.execute(denominator_sql + " GROUP BY COALESCE(a.institution,e.institution)",params):
-        if institution:
-            denominators[institution] = count
-    intensity, _ = pagerank(nodes,{(s,t):w/max(1,denominators[t]) for (s,t),w in sorted(edges.items())},.85,1e-12,200)
-    rows = []
-    for node in sorted(directory_ids | set(nodes)):
-        name, country, meta = directory.get(node, (node, None, {}))
-        reasons = []
-        if corroborated[node] < 10: reasons.append("insufficient_independently_corroborated_relations")
-        if len(independent_origins[node]) < 2: reasons.append("insufficient_independent_source_classes")
-        if node not in directory or directory[node][2].get("identity_status") == 'reported-label-unresolved': reasons.append("institution_crosswalk_pending")
-        reasons.append("external_dual_review_pending")
-        rows.append({"institution_id":node,"name":name,"country":country,"region":meta.get("region"),
-            "institution_type":meta.get("type"),"observed_rank":order.get(node),"formal_rank":None,
-            "network_score":network.get(node),"award_score":None,"composite_score":None,
-            "network_intensity_score":intensity.get(node),"observed_training_denominator":denominators[node] or None,
-            "award_status":"missing_official_award_data", "status":"observed_only" if node in network else "unranked_no_qualifying_relations",
-            "unranked_reasons":reasons,"relations":counts[node],"source_classes":sorted(source_counts[node]),
-            "independent_source_classes":sorted(independent_origins[node]),
-            "corroborated_relations":corroborated[node],"traceability":1.0 if counts[node] else None,
-            "rank_range":[min(s["ranks"][node] for s in scenarios.values() if not s["prior_only"]),max(s["ranks"][node] for s in scenarios.values() if not s["prior_only"])] if node in network else None})
-    report = store.report()
-    # Operational counters/exception strings are private and nondeterministic; export an allowlist.
-    coverage = {k:report[k] for k in ("people","events","countries","event_status","member_status")}
-    if public:
-        placeholders = ','.join('?' for _ in allowed)
-        where = f" FROM events WHERE source IN ({placeholders})"
-        params = tuple(sorted(allowed))
-        people, event_count = store.db.execute(
-            'SELECT count(DISTINCT person),count(*)'+where, params).fetchone()
-        countries = [r[0] for r in store.db.execute(
-            'SELECT DISTINCT country'+where+" AND country IS NOT NULL AND country<>'' ORDER BY country", params)]
-        statuses = dict(store.db.execute('SELECT status,count(*)'+where+' GROUP BY status', params))
-        coverage = {"people":people, "events":event_count, "countries":countries,
-                    "event_status":dict(statuses), "member_status":dict(store.db.execute(
-                        f"SELECT status,count(*) FROM members WHERE source IN ({placeholders}) GROUP BY status", tuple(sorted(allowed))))}
+    # Read physical rows, then sort injective compact keys in memory. A hash
+    # shortcut would risk merging distinct people. Lowercase SHA256 IDs use a
+    # tagged lossless binary encoding; other identifiers retain exact UTF-8.
+    records=[];institution_ids={}
+    cursor=store.db.execute(denominator_sql,params)
+    try:
+        for number,(person,institution) in enumerate(cursor,1):
+            if institution:
+                if institution not in institution_ids:
+                    institution_ids[institution]=len(institution_ids)
+                raw=(b'\0'+bytes.fromhex(person) if len(person)==64
+                     and all(c in '0123456789abcdef' for c in person)
+                     else b'\1'+person.encode('utf-8'))
+                records.append(institution_ids[institution].to_bytes(4,'big')+raw)
+            if number%1000==0:
+                store.task.check_memory()
+                if number%100000==0:report('training_denominators',scanned_rows=number)
+    finally:cursor.close()
+    # CPython's sort may reserve half a pointer array. Admit that additional
+    # demand against the unchanged process allowance before starting the sort.
+    import struct
+    if store.task.check_memory()+len(records)*struct.calcsize('P')//2>store.task.config['memory_bytes']:
+        raise BudgetStop('training denominator sort exceeds process memory budget')
+    records.sort();previous=None;counts=Counter()
+    for number,key in enumerate(records,1):
+        if key!=previous:
+            counts[int.from_bytes(key[:4],'big')]+=1;previous=key
+        if number%100000==0:store.task.check_memory()
+    for institution,index in institution_ids.items():denominators[institution]=counts[index]
+    return denominators
+
+
+def _institution_directory(store, allowed, report):
+    report('institution_labels')
+    directory = {r[0]: (r[1], r[2], json.loads(r[3])) for r in store.db.execute("SELECT id,name,country,payload FROM entities")}
+    # A reported label is presentation only, never a name-based identity merge.
+    # Select the same smallest eligible event ID while reading physical rows.
+    # ID-index order caused random table/payload lookups across the full store.
+    # All allowed payloads are still decoded, including known institutions, so
+    # invalid input remains an error rather than silently disappearing.
+    canonical_directory=set(directory)
+    label_ids={}
+    for number, (event_id, institution, payload, country, source) in enumerate(store.db.execute("SELECT id,institution,payload,country,source FROM events NOT INDEXED WHERE institution IS NOT NULL"),1):
+        if number % 100000 == 0:
+            report('institution_labels',scanned_rows=number,institutions=len(directory))
+        if number % 1000 == 0:
+            store.task.check_memory()
+        if allowed is not None and source not in allowed:
+            continue
+        reported = json.loads(payload).get("institution_name")
+        if (institution not in canonical_directory and reported
+                and (institution not in label_ids or event_id<label_ids[institution])):
+            directory[institution] = (reported, country, {"identity_status":"reported-label-unresolved"})
+            label_ids[institution]=event_id
+    del canonical_directory,label_ids
+    # Observed event endpoints belong in directory even when they have no qualifying edge.
+    directory_ids = set()
+    report('institution_directory')
+    for number, row in enumerate(store.db.execute("SELECT DISTINCT COALESCE(a.institution,e.institution),e.source FROM events e LEFT JOIN active_institution_aliases a ON a.alias=e.institution WHERE e.institution IS NOT NULL"),1):
+        if allowed is None or row[1] in allowed:
+            directory_ids.add(row[0])
+        if number % 1000 == 0:
+            store.task.check_memory()
+    return directory,directory_ids
+
+
+def _coverage_counts(store, allowed, report=None):
+    """Exact scalar counts without population-sized GROUP BY temporary trees."""
+    where='' if allowed is None else ' WHERE source IN ('+','.join('?' for _ in allowed)+')'
+    params=() if allowed is None else tuple(sorted(allowed))
+    statuses=Counter();countries=set();events=people=0
+    def progress(source,number):
+        store.task.check_memory()
+        if report:report('coverage_counts',source=source,scanned_rows=number)
+    def scalar_cursor(sql):
+        # Only country/status/person columns: none uses a payload, URL or
+        # digest codec. Bypass the generic per-column decoding checks while
+        # preserving the connection's configured reader for other queries.
+        cursor=store.db.cursor();cursor.row_factory=None
+        try:return cursor.execute(sql,params)
+        except BaseException:
+            cursor.close();raise
+    if report:report('coverage_counts',source='event-status-and-countries',scanned_rows=0)
+    cursor=scalar_cursor('SELECT country,status FROM events NOT INDEXED'+where)
+    try:
+        for country,status in cursor:
+            events+=1;statuses[status]+=1
+            if country is not None and (allowed is None or country!=''):countries.add(country)
+            if events%1000000==0:progress('event-status-and-countries',events)
+    finally:cursor.close()
+    if report:report('coverage_counts',source='unique-people',scanned_rows=0)
+    cursor=scalar_cursor('SELECT person FROM events INDEXED BY events_person'+where+' ORDER BY person')
+    previous=None
+    try:
+        for number,(person,) in enumerate(cursor,1):
+            if person is not None and person!=previous:people+=1
+            previous=person
+            if number%1000000==0:progress('unique-people',number)
+    finally:cursor.close()
+    members=Counter();cursor=scalar_cursor('SELECT status FROM members'+where)
+    if report:report('coverage_counts',source='member-status',scanned_rows=0)
+    try:
+        for number,(status,) in enumerate(cursor,1):
+            members[status]+=1
+            if number%1000000==0:progress('member-status',number)
+    finally:cursor.close()
+    return {'people':people,'events':events,'countries':sorted(countries),
+            'event_status':dict(statuses),'member_status':dict(members)}
+
+
+def _scenario_summary(universe, scores, converged, *, edges, available_edges, new_endpoints, boundary):
+    return {'converged':converged,'edges':edges,'available_edges':available_edges,
+            'filtered_boundary_edges':available_edges-edges,'new_endpoints':new_endpoints,
+            'universe_kind':boundary,'node_count':len(universe),'probability_mass':math.fsum(scores.values()),
+            'prior_only':not bool(edges),
+            'ranks':{node:i+1 for i,node in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))}}
+
+
+def scenario_result(store, nodes, changed_edges, alpha=.85, personalization=None):
+    """Authoritative fixed/expanded-universe scenario calculation for full and
+    incrementally restored graphs. No source or evidence policy lives here.
+    """
+    store.task.check_memory();reference_nodes=set(nodes)
+    positive_edges = (changed_edges if all(weight>0 for _,weight in changed_edges.items())
+                      else {edge:weight for edge,weight in changed_edges.items() if weight > 0})
+    new_endpoints=sorted({endpoint for edge in positive_edges for endpoint in edge}-reference_nodes)
+    fixed_edges=(positive_edges if not new_endpoints else
+                 {edge:weight for edge,weight in positive_edges.items() if edge[0] in reference_nodes and edge[1] in reference_nodes})
+    def evaluate(universe, valid_edges, boundary):
+        scores,conv=_rank_graph(store,universe,valid_edges,alpha,1e-12,1000,personalization)
+        return _scenario_summary(universe,scores,conv['converged'],edges=len(valid_edges),available_edges=len(positive_edges),
+                                 new_endpoints=new_endpoints,boundary=boundary)
+    fixed=evaluate(nodes,fixed_edges,'fixed-reference-universe')
+    expanded=(evaluate(sorted(reference_nodes|set(new_endpoints)),positive_edges,'reference-plus-new-endpoints')
+              if new_endpoints else None)
+    return fixed,expanded
+
+
+def complete_additive_result(store, *, delta, base_scores, previous_directory, previous_manifest_sha256,
+                             label_witnesses=(), progress=None):
+    """Complete the narrow append-only recovery contract without a population
+    scan. The caller pins delta/base-score bytes and holds writer exclusion.
+    Every recovered person must have only the frozen new API events, and the
+    predecessor graph must have annual-only support. Other updates are refused.
+    Returned rows stream the retained aggregate; no previous output is mutated.
+    """
+    from .analysis_checkpoint import GraphCheckpoint,AdditiveGraph,TrainingDenominatorCheckpoint
+    from .aggregate_partitions import read_field
+    from .aggregate_chunks import AggregateRows
+    def report(phase,**values):
+        store.task.check_memory()
+        if progress:progress({'phase':phase,**values})
+    if (delta.get('schema_version')!='gapi-private-additive-input/1'
+            or base_scores.get('delta_sha256')!=digest(delta)
+            or base_scores.get('complete_aggregate') is not False):raise ValueError('unbound additive inputs')
+    people=tuple(delta['people'])
+    if not 1<=len(people)<=1000 or len(set(people))!=len(people):raise ValueError('invalid additive people')
+    current=[]
+    for person in people:
+        current.extend({'id':eid,'payload':json.loads(text)} for eid,text in store.db.execute(
+            'SELECT id,payload FROM events WHERE person=? ORDER BY id',(person,)))
+    if sorted(current,key=lambda e:e['id'])!=sorted(delta['events'],key=lambda e:e['id']):raise ValueError('additive person input drift')
+    if any(e['payload']['source']!='orcid-public-api' for e in current):raise ValueError('additive source overlap')
+    for row in delta['recovered_member_ledger']:
+        if list(store.db.execute("SELECT locator,sha256,status,reason FROM members WHERE source='orcid-public-api' AND locator=?",(row[0],)).fetchone() or ())!=row:
+            raise ValueError('additive member drift')
+    cp=GraphCheckpoint(store,None);path=cp.path.with_suffix('.compact')
+    if hashlib.sha256(path.read_bytes()).hexdigest()!=delta['predecessor_files'][path.name]:raise ValueError('additive graph predecessor drift')
+    state=cp._load_compact(path,expected_binding=delta['predecessor_binding'])
+    if any(set(v)-{'orcid-2026-summary'} for v in state['source_counts'].values()):raise ValueError('mixed-source predecessor requires explicit subtraction')
+    # API deletion can reuse the old graph only if all current API relations
+    # are exactly the frozen additions; this query visits API people, not a census.
+    from .orcid_stream import private_person
+    api_people=tuple(private_person(r[0]) for r in store.db.execute("SELECT locator FROM members WHERE source='orcid-public-api' AND status='observed'"))
+    actual=list(relation_rows(store,persons=api_people,allowed_sources={'orcid-public-api'}))
+    expected=[(tuple(r['key']),r['training'],r['job']) for r in delta['relations']]
+    if sorted(actual,key=lambda r:r[0])!=sorted(expected,key=lambda r:r[0]):raise ValueError('additional API relations outside frozen additions')
+    add=defaultdict(float);recent_add=defaultdict(float);stage_add=defaultdict(lambda:defaultdict(float));new_counts=Counter();new_sources=defaultdict(set)
+    for key,train,job in expected:
+        a,b,stage=key;w=DEFAULT_CONFIG['stage_weights'][stage];add[(a,b)]+=w;stage_add[stage][(a,b)]+=w
+        if job['year_start']>=2016:recent_add[(a,b)]+=w
+        new_counts[b]+=1;new_sources[b].update(train['supporting_sources']);new_sources[b].update(job['supporting_sources'])
+    graph=AdditiveGraph(state['edges'],dict(add));nodes=base_scores['nodes']
+    if sorted(set(state['edges'].nodes)|{n for edge in add for n in edge})!=nodes or len(graph)!=base_scores['edges']:
+        raise ValueError('base-score graph identity mismatch')
+    load=lambda name:read_field(previous_directory,name,manifest_sha256=previous_manifest_sha256)
+    metadata={f['field']:load(f['field']) for f in json.loads((Path(previous_directory)/'manifest.json').read_bytes())['fields']
+              if f['kind']=='value'}
+    if metadata['algorithm']['config']!=DEFAULT_CONFIG or metadata['algorithm']['network_universe']!=nodes:raise ValueError('predecessor method or universe drift')
+    den=TrainingDenominatorCheckpoint(store,None)
+    if hashlib.sha256(den.path.read_bytes()).hexdigest()!=delta['predecessor_files'][den.path.name]:raise ValueError('denominator predecessor drift')
+    denominators=den._read(den.path,delta['predecessor_binding'])
+    for _,institution in delta['training_person_institution_pairs']:denominators[institution]+=1
+    # Existing raw-institution labels stay authoritative only when the new
+    # label agrees, is canonical, or an earlier nonempty event wins by ID.
+    raw_affected={e['payload']['institution'] for e in current if e['payload'].get('institution')}
+    aliases={raw:(store.db.execute('SELECT institution FROM active_institution_aliases WHERE alias=?',(raw,)).fetchone() or (raw,))[0]
+             for raw in raw_affected}
+    affected=set(aliases.values());seen=set();regions={}
+    witness={w['institution']:w for w in label_witnesses}
+    for row in load('nodes'):
+        node=row['institution_id']
+        if node in base_scores['scores']:regions[node]=row.get('region') or 'unknown'
+        if node not in affected:continue
+        seen.add(node);canonical_entity=store.db.execute('SELECT 1 FROM entities WHERE id=?',(node,)).fetchone()
+        for e in current:
+            value=e['payload']
+            if value.get('institution')!=node or not value.get('institution_name') or canonical_entity:continue
+            if [value['institution_name'],value.get('country')]==[row['name'],row.get('country')]:continue
+            w=witness.get(node)
+            if not w or not w['prior_nonempty_label_before_all_delta_ids'] or not w['witness_event_id']<e['id']:
+                raise ValueError('directory label winner needs bounded evidence')
+            previous=store.db.execute('SELECT institution,payload FROM events WHERE id=?',(w['witness_event_id'],)).fetchone()
+            if (not previous or previous[0]!=node or not json.loads(previous[1]).get('institution_name')
+                    or w['witness_event_id'] in {item['id'] for item in current}):
+                raise ValueError('directory label witness does not match retained event')
+    if seen!=affected:raise ValueError('new directory institution requires explicit incremental label insertion')
+    scenarios={};expanded={}
+    def scenario(label,edges,alpha=.85,personalization=None):
+        report('sensitivity',scenario=label)
+        fixed,extra=scenario_result(store,nodes,edges,alpha,personalization);scenarios[label]=fixed
+        if extra is not None:expanded[label]=extra
+        if not fixed['converged'] or abs(fixed['probability_mass']-1)>1e-10:raise ValueError('incremental scenario failed')
+    scenario('alpha_0.65',graph,.65)
+    scenarios['alpha_0.85']=_scenario_summary(nodes,base_scores['scores'],base_scores['convergence']['converged'],
+        edges=len(graph),available_edges=len(graph),new_endpoints=[],boundary='fixed-reference-universe')
+    scenario('alpha_0.95',graph,.95)
+    for stage in DEFAULT_CONFIG['stage_weights']:
+        weights=dict(sorted((pair,values[stage]) for pair,values in state['stages'].items() if values.get(stage,0)>0))
+        scenario('stage_only_'+stage,AdditiveGraph(weights,dict(stage_add[stage])))
+        del weights
+    scenario('delete_source_orcid-2026-summary',dict(sorted(add.items())))
+    scenario('delete_source_orcid-public-api',AdditiveGraph(state['edges'],{}))
+    scenario('employment_since_2016',AdditiveGraph(state['recent_edges'],dict(recent_add)))
+    groups=Counter(regions.values())
+    scenario('region_balanced_prior',graph,personalization={n:1/groups[regions[n]] for n in nodes})
+    del regions,groups
+    report('intensity')
+    intensity,conv=_rank_intensity(store,nodes,graph,denominators)
+    if not conv['converged'] or abs(math.fsum(intensity.values())-1)>1e-10:raise ValueError('incremental intensity failed')
+    def node_rows():
+        for row in load('nodes'):
+            n=row['institution_id'];row.update(network_score=base_scores['scores'].get(n),
+                observed_rank=base_scores['ranks'].get(n),network_intensity_score=intensity.get(n),
+                observed_training_denominator=denominators[n] or None)
+            if n in new_counts:
+                row['relations']+=new_counts[n];row['source_classes']=sorted(set(row['source_classes'])|new_sources[n]);row['traceability']=1.0
+            row['rank_range']=([min(s['ranks'][n] for s in scenarios.values() if not s['prior_only']),
+                                max(s['ranks'][n] for s in scenarios.values() if not s['prior_only'])] if n in base_scores['scores'] else None)
+            yield row
+    def edge_rows():
+        remaining=dict(add)
+        for row in load('edges'):
+            pair=(row['source'],row['target'])
+            if pair in remaining:
+                row['weight']+=remaining.pop(pair)
+                for stage,values in stage_add.items():
+                    if pair in values:row['stages'][stage]=row['stages'].get(stage,0)+values[pair]
+            yield row
+        for pair,w in sorted(remaining.items()):yield {'source':pair[0],'target':pair[1],'weight':w,
+            'stages':{stage:values[pair] for stage,values in stage_add.items() if pair in values}}
+    coverage=metadata['coverage'];coverage['events']+=delta['event_delta'];coverage['people']+=delta['people_delta']
+    coverage['member_status']['observed']+=delta['member_delta']
+    for status,n in delta['observed_event_delta'].items():coverage['event_status'][status]=coverage['event_status'].get(status,0)+n
+    coverage['countries']=sorted(set(coverage['countries'])|{e['payload']['country'] for e in current if e['payload'].get('country') is not None})
+    metadata.update(nodes=AggregateRows(json.loads((Path(previous_directory)/'manifest.json').read_bytes())['nodes'],node_rows),
+                    edges=AggregateRows(len(graph),edge_rows),sensitivity=scenarios,expanded_universe_sensitivity=expanded,
+                    convergence=base_scores['convergence'],acquisition_progress=store.candidate_progress())
+    report('complete',nodes=len(metadata['nodes']),edges=len(graph))
+    return metadata
+
+
+def rank_global(store, *, public=False, publication_policy=None, checkpoint=False, progress=None, stream_rows=False):
+    if type(stream_rows) is not bool:raise ValueError('stream_rows must be boolean')
+    started=time.monotonic()
+    def report(phase, **counts):
+        if progress is not None:
+            progress({'phase':phase,'elapsed_seconds':round(time.monotonic()-started,3),**counts})
+    # This calculation reads SQLite and builds bounded in-memory graphs. It
+    # does not create a 64 MiB disk workspace. Admit actual exports only once
+    # their byte size is known; keep disk reserve and memory checks separate.
+    store.task.check()
+    store.task.check_memory()
+    allowed = public_sources(store.task,publication_policy) if public else None
+    edges, stages, counts, source_counts = defaultdict(float), defaultdict(Counter), Counter(), defaultdict(set)
+    corroborated = Counter()
+    independent_origins = defaultdict(set)
+    recent_edges = defaultdict(float)
+    relation_count = 0
+    resume = None
+    if checkpoint:
+        report('checkpoint_load')
+        from .analysis_checkpoint import GraphCheckpoint
+        resume = GraphCheckpoint(store,allowed)
+        saved = resume.load()
+        if saved is not None:
+            if hasattr(saved['edges'],'packed_rows'):
+                edges=saved.pop('edges'); stages=saved.pop('stages'); recent_edges=saved.pop('recent_edges')
+                counts.update(saved.pop('counts'))
+                source_counts.update((key,set(value)) for key,value in saved.pop('source_counts').items())
+                corroborated.update(saved.pop('corroborated'))
+                independent_origins.update((key,set(value)) for key,value in saved.pop('independent_origins').items())
+            else:
+                edges.update((tuple(key),value) for key,value in saved.pop('edges'))
+                stages.update((tuple(key),Counter(value)) for key,value in saved.pop('stages'))
+                counts.update(saved.pop('counts'))
+                source_counts.update((key,set(value)) for key,value in saved.pop('source_counts').items())
+                corroborated.update(saved.pop('corroborated'))
+                independent_origins.update((key,set(value)) for key,value in saved.pop('independent_origins').items())
+                recent_edges.update((tuple(key),value) for key,value in saved.pop('recent_edges'))
+            relation_count = saved['relation_count']
+            del saved
+            store.task.check_memory()
+    def graph_state():
+        return {'edges':list(edges.items()),'stages':list(stages.items()),'counts':dict(counts),
+                'source_counts':{key:sorted(value) for key,value in source_counts.items()},
+                'corroborated':dict(corroborated),
+                'independent_origins':{key:sorted(value) for key,value in independent_origins.items()},
+                'recent_edges':list(recent_edges.items()),'relation_count':relation_count}
+    def person_complete(person):
+        if resume is not None:
+            resume.boundary(person,graph_state)
+    options = ({'after_person':resume.after_person,'person_complete':person_complete}
+               if resume is not None else {})
+    relations = (() if resume is not None and resume.complete else
+                 relation_rows(store,allowed_sources=allowed,**options))
+    report('relations',resumed_complete=bool(resume is not None and resume.complete))
+    for (employer, training, stage), train, job in relations:
+        relation_count += 1
+        key = employer, training
+        counts[training] += 1
+        source_counts[training].update(train['supporting_sources'])
+        source_counts[training].update(job['supporting_sources'])
+        if train["status"] == job["status"] == "corroborated":
+            corroborated[training] += 1
+            independent_origins[training].update(set(train.get('evidence_origins', ())) & set(job.get('evidence_origins', ())))
+        weight = DEFAULT_CONFIG["stage_weights"][stage]
+        edges[key] += weight
+        stages[key][stage] += weight
+        if job["year_start"] >= 2016:
+            recent_edges[key] += weight
+        if relation_count % 1000 == 0:
+            store.task.check_memory()
+    if resume is not None:
+        resume.finish(graph_state)
+    from .analysis_checkpoint import TrainingDenominatorCheckpoint
+    denominator_checkpoint=TrainingDenominatorCheckpoint(store,allowed) if checkpoint else None
+    denominators=denominator_checkpoint.load() if denominator_checkpoint else None
+    if denominators is None:
+        denominators = _training_denominators(store,allowed,report)
+        if denominator_checkpoint:denominator_checkpoint.save(denominators)
+    else:report('training_denominators',resumed_complete=True,institutions=len(denominators))
+    nodes = sorted({endpoint for edge in edges for endpoint in edge})
+    report('base_pagerank',nodes=len(nodes),edges=len(edges),relations=relation_count)
+    network, convergence = _rank_graph(store, nodes, edges, .85, 1e-12, 200)
+    from .analysis_checkpoint import InstitutionDirectoryCheckpoint
+    directory_checkpoint=InstitutionDirectoryCheckpoint(store,allowed) if checkpoint else None
+    saved_directory=directory_checkpoint.load() if directory_checkpoint else None
+    if saved_directory is None:
+        directory,directory_ids=_institution_directory(store,allowed,report)
+        if directory_checkpoint:directory_checkpoint.save(directory,directory_ids)
+    else:
+        directory,directory_ids=saved_directory
+        report('institution_directory',resumed_complete=True,institutions=len(directory))
+    ordering = sorted(network, key=lambda node: (-network[node], node))
+    order = {node: i+1 for i, node in enumerate(ordering)}
+    scenarios, expanded_scenarios = {}, {}
+    def scenario(label, changed_edges, alpha=.85, personalization=None):
+        report('sensitivity',scenario=label,edges=len(changed_edges))
+        fixed,expanded=scenario_result(store,nodes,changed_edges,alpha,personalization)
+        scenarios[label]=fixed
+        if expanded is not None:expanded_scenarios[label]=expanded
+    for alpha in (.65, .85, .95):
+        scenario(f"alpha_{alpha}",edges,alpha)
+    for stage in DEFAULT_CONFIG["stage_weights"]:
+        scenario("stage_only_"+stage,{edge:values[stage] for edge,values in stages.items() if values[stage]>0})
+    available_sources={row[0] for row in store.db.execute('SELECT DISTINCT source FROM events')
+                       if allowed is None or row[0] in allowed}
+    # A deduplicated relation may have alternative evidence from another source.
+    # Subtracting the selected evidence's contribution would erase that support.
+    # Replay source filtering BEFORE joining and deduplicating the person's facts.
+    for source in sorted(available_sources):
+        report('source_deletion_relations',source=source)
+        remaining_edges=defaultdict(float)
+        for (employer,training,stage),_train,_job in relation_rows(store,allowed_sources=available_sources-{source}):
+            remaining_edges[(employer,training)]+=DEFAULT_CONFIG['stage_weights'][stage]
+            if len(remaining_edges) % 1000 == 0:
+                store.task.check_memory()
+        scenario('delete_source_'+source,remaining_edges)
+    scenario("employment_since_2016", recent_edges)
+    groups = Counter(directory.get(node,(None,None,{}))[2].get("region") or "unknown" for node in nodes)
+    if nodes:
+        scenario("region_balanced_prior",edges,personalization={node:1/groups[directory.get(node,(None,None,{}))[2].get("region") or "unknown"] for node in nodes})
+    report('intensity_pagerank')
+    intensity, _ = _rank_intensity(store,nodes,edges,denominators)
+    row_ids=sorted(directory_ids | set(nodes))
+    def node_rows():
+        for number,node in enumerate(row_ids,1):
+            if number%1000==0:store.task.check_memory()
+            name, country, meta = directory.get(node, (node, None, {}))
+            reasons = []
+            if corroborated[node] < 10: reasons.append("insufficient_independently_corroborated_relations")
+            if len(independent_origins.get(node,())) < 2: reasons.append("insufficient_independent_source_classes")
+            if node not in directory or directory[node][2].get("identity_status") == 'reported-label-unresolved': reasons.append("institution_crosswalk_pending")
+            reasons.append("external_dual_review_pending")
+            yield {"institution_id":node,"name":name,"country":country,"region":meta.get("region"),
+                "institution_type":meta.get("type"),"observed_rank":order.get(node),"formal_rank":None,
+                "network_score":network.get(node),"award_score":None,"composite_score":None,
+                "network_intensity_score":intensity.get(node),"observed_training_denominator":denominators[node] or None,
+                "award_status":"missing_official_award_data", "status":"observed_only" if node in network else "unranked_no_qualifying_relations",
+                "unranked_reasons":reasons,"relations":counts[node],"source_classes":sorted(source_counts.get(node,())),
+                "independent_source_classes":sorted(independent_origins.get(node,())),
+                "corroborated_relations":corroborated[node],"traceability":1.0 if counts[node] else None,
+                "rank_range":[min(s["ranks"][node] for s in scenarios.values() if not s["prior_only"]),max(s["ranks"][node] for s in scenarios.values() if not s["prior_only"])] if node in network else None}
+    def edge_rows():
+        if hasattr(edges,'packed_rows') and hasattr(stages,'packed_rows'):
+            for number,(((source,target),weight),(pair,stage_weights)) in enumerate(zip(edges.items(),stages.items()),1):
+                if (source,target)!=pair:raise ValueError('compact edge/stage order mismatch')
+                if number%1000==0:store.task.check_memory()
+                yield {'source':source,'target':target,'weight':weight,'stages':dict(stage_weights)}
+            return
+        for number,((source,target),weight) in enumerate(sorted(edges.items()),1):
+            if number%1000==0:store.task.check_memory()
+            yield {'source':source,'target':target,'weight':weight,'stages':dict(stages[(source,target)])}
+    if stream_rows:
+        from .aggregate_chunks import AggregateRows
+        rows=AggregateRows(len(row_ids),node_rows)
+        output_edges=AggregateRows(len(edges),edge_rows)
+    else:
+        rows=list(node_rows());output_edges=list(edge_rows())
+    # Ranking consumes only these aggregate fields. Do not invoke acquisition's
+    # full report (which also rebuilds candidate and archive progress) here.
+    report('coverage_counts')
+    from .analysis_checkpoint import CoverageCheckpoint
+    coverage_checkpoint=CoverageCheckpoint(store,allowed) if checkpoint else None
+    coverage=coverage_checkpoint.load() if coverage_checkpoint else None
+    if coverage is None:
+        coverage = _coverage_counts(store,allowed,report)
+        if coverage_checkpoint:coverage_checkpoint.save(coverage)
+    else:report('coverage_counts',resumed_complete=True)
     result = {"schema_version":"gapi-global-observed/v1","dataset_kind":"real/global-public-observations",
         "publication_status":"public-observations-pending-external-review" if public else "local-only-source-license-review",
         "scope":{"complete_global_census":False,"enumeration_complete":False,"source_scope":"committed, individually hashed records; annual archive excluded until verified"},
         "coverage":coverage,"nodes":rows,
-        "edges":[{"source":s,"target":t,"weight":w,"stages":dict(stages[(s,t)])} for (s,t),w in sorted(edges.items())],
+        "edges":output_edges,
         "algorithm":{"method_version":"gapi-observed-network/4", "direction":"employer -> training",
             "config":DEFAULT_CONFIG,"network_universe":nodes,
             "version_boundary":"New method outputs supersede predecessor calculations; historical bytes require their frozen inputs and pinned predecessor code."},
@@ -378,6 +782,7 @@ def rank_global(store, *, public=False, publication_policy=None):
             "not_run":["discipline","bootstrap","english_source_deletion","official_profile_loss"],
             "intensity_denominator":"observed training people; not all graduates or job seekers"},
         "limitations":["Observed scores are not employment rates or causal training effects.","Formal ranking and award/composite data are unavailable.","No completed independent official-profile corroboration."]}
+    report('evidence_metadata')
     if hasattr(store,'candidate_progress'):
         result['acquisition_progress']=store.candidate_progress(allowed_sources=allowed)
     if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='institution_bridge'").fetchone():
@@ -419,6 +824,7 @@ def rank_global(store, *, public=False, publication_policy=None):
             result['algorithm']['normalization_policy'] = {'version': VERSION, 'policy_sha256': POLICY_SHA256,
                 'interpreted_events': interpreted, 'canonical_events_modified': 0,
                 'confidence': 'observed-only; deterministic interpretations do not corroborate facts'}
+    report('aggregate_ready',nodes=len(result['nodes']),edges=len(result['edges']))
     return result
 
 
@@ -434,7 +840,9 @@ def _write_aggregate(task, target: Path, content: bytes):
         with target.open('rb') as source:
             if hashlib.file_digest(source, 'sha256').digest() == hashlib.sha256(content).digest():
                 return
-    task.check(len(content) * 2 + 65536)
+    # used() already includes the published predecessor. The only additional
+    # filesystem allocation is this exclusive temporary file, then replacement.
+    task.check(len(content) + 65536)
     temporary = target.with_name(target.name + '.tmp')
     created = False
     try:
@@ -542,9 +950,17 @@ def export_release(store, out: Path, *, publication_policy=None, frozen_input=No
     return manifest
 
 
-def export_local(store, *, compress_snapshot=False):
+def export_local(store, *, compress_snapshot=False, chunked=False, progress=None):
     """Local aggregate view can include noncommercial API data, never public by default."""
-    result = rank_global(store)
+    if type(chunked) is not bool:
+        raise ValueError('chunked must be boolean')
+    result = rank_global(store,checkpoint=chunked,progress=progress,stream_rows=chunked)
+    if chunked:
+        if progress is not None:progress({'phase':'chunk_write'})
+        from .aggregate_chunks import write
+        manifest=write(store.task,result,store.task.root/'global-local-chunks')
+        return {'manifest':manifest,'nodes':len(result['nodes']),
+                'relations':len(result['edges']),'convergence':result['convergence']}
     content = canonical(result)
     store.task.check_memory()
     checksum = hashlib.sha256(content).hexdigest()

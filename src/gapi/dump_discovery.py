@@ -45,7 +45,7 @@ def load_feed(path: Path):
 
 class FeedReader:
     def __init__(self, raw, task, *, max_bytes=None, deadline=None, resume=None, expected_bytes=None,
-                 max_reconnects=256, max_stalled_reconnects=8):
+                 max_reconnects=256, max_stalled_reconnects=8, verify_eof=False):
         self.raw, self.task = raw, task
         self.max_bytes, self.deadline = max_bytes, deadline
         self.size = 0
@@ -54,6 +54,7 @@ class FeedReader:
         self.resume, self.expected_bytes = resume, expected_bytes
         self.max_reconnects, self.reconnects = max_reconnects, 0
         self.max_stalled_reconnects, self.stalled_reconnects = max_stalled_reconnects, 0
+        self.verify_eof, self.eof_checked = verify_eof, False
 
     def check_deadline(self):
         if self.deadline is not None and time.monotonic() >= self.deadline:
@@ -72,6 +73,10 @@ class FeedReader:
         # The complete frozen representation needs no extra socket read or
         # reconnect. An exact byte budget must still allow EOF validation.
         if self.expected_bytes is not None and self.size == self.expected_bytes:
+            if self.verify_eof and not self.eof_checked:
+                if self.raw.read(1):
+                    raise ValueError('compressed source exceeds frozen length')
+                self.eof_checked = True
             return b''
         self.check_budget()
         size = CHUNK if size < 0 else min(size,CHUNK)

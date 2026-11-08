@@ -15,15 +15,34 @@ from .task import BudgetStop, canonical, digest
 
 CHUNK = 65536
 MAX_COMMIT_MEMBERS = 128
+MAX_LOCAL_COMMIT_MEMBERS = 1024
 MAX_TAR_PADDING_BYTES = 1024 * 1024
 ORCID = r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]"
 API_RECORD_TRANSPORT = 'incremental-record-xml/v1'
 
 
-def validate_commit_members(value):
-    if type(value) is not int or not 1 <= value <= MAX_COMMIT_MEMBERS:
-        raise ValueError(f'commit_members must be between 1 and {MAX_COMMIT_MEMBERS}')
+def validate_commit_members(value, *, local=False):
+    maximum=MAX_LOCAL_COMMIT_MEMBERS if local else MAX_COMMIT_MEMBERS
+    if type(value) is not int or not 1 <= value <= maximum:
+        raise ValueError(f'commit_members must be between 1 and {maximum}')
     return value
+
+ROOT_IDENTITY_ERROR = 'ORCID XML root identity does not match frozen member locator'
+
+
+def error_document_reasons():
+    """Exact retained diagnostics for an error document, never a normal record."""
+    return tuple(ROOT_IDENTITY_ERROR + f"; element='error'; identity_path={shape}"
+                 for shape in ('missing','empty','different'))
+
+
+def summary_roots(spec):
+    roots=['summaries']
+    filename=spec.get('filename','')
+    if isinstance(filename,str) and re.fullmatch(r'ORCID_\d{4}_\d{2}_summaries\.tar\.gz',filename):
+        roots.append(filename.removesuffix('.tar.gz'))
+    return tuple(roots)
+
 
 def summary_member_pattern(spec):
     """Accept documented roots and the exact frozen archive's actual root.
@@ -32,11 +51,7 @@ def summary_member_pattern(spec):
     accepting any vintage or arbitrary leading directories. ORCID's check digit
     may be X, including in the final three-character directory component.
     """
-    roots=['summaries']
-    filename=spec.get('filename','')
-    if isinstance(filename,str) and re.fullmatch(r'ORCID_\d{4}_\d{2}_summaries\.tar\.gz',filename):
-        roots.append(filename.removesuffix('.tar.gz'))
-    root='|'.join(re.escape(value) for value in roots)
+    root='|'.join(re.escape(value) for value in summary_roots(spec))
     return re.compile(rf"(?:\./)?(?:{root})/\d{{2}}[\dX]/({ORCID})\.xml")
 
 
@@ -80,7 +95,7 @@ class SummaryParser:
                 # Keep a bounded diagnostic without copying the unexpected
                 # identity (which could be a different person's identifier).
                 shape = 'missing' if 'path' not in attrs else 'empty' if not attrs['path'] else 'different'
-                raise ValueError("ORCID XML root identity does not match frozen member locator"
+                raise ValueError(ROOT_IDENTITY_ERROR +
                     f"; element={local[:64]!r}; identity_path={shape}")
         self.path.append(local)
         if len(self.path) > 64:
@@ -193,13 +208,16 @@ class _ArchiveMemberBatch:
     exactly as a single interrupted member was before. Budget scans remain at
     both transaction boundaries; SQLite's physical growth cap remains active.
     """
-    def __init__(self, store, source, limit):
+    def __init__(self, store, source, limit, checkpoint=None):
         self.store, self.source, self.limit = store, source, limit
         self.rows, self.known, self.events = [], {}, 0
+        self.checkpoint=checkpoint;self.position=None
+        self.commit_seconds=0.0;self.commits=0
 
     def flush(self):
         if not self.rows:
             return
+        started=time.monotonic()
         with self.store.member(self.source, 'archive-commit-batch'):
             for locator, sha256, status, reason, events in self.rows:
                 if status == 'rejected':
@@ -208,19 +226,23 @@ class _ArchiveMemberBatch:
                 else:
                     for record in events:
                         self.store.event(record)
-                self.store.finish_member(self.source, locator, sha256, status, reason)
+            self.store.finish_members(self.source, (row[:4] for row in self.rows))
+            if self.checkpoint:
+                self.checkpoint(self.position,self.rows[-1][:3])
             self.store.task.check_memory()
+        self.commit_seconds+=time.monotonic()-started;self.commits+=1
         self.rows.clear()
         self.known.clear()
         self.events = 0
 
-    def add(self, locator, sha256, status, reason, events):
+    def add(self, locator, sha256, status, reason, events, position=None):
         maximum = self.store.task.config['batch_events']
         if len(events) > maximum:
             raise ValueError('archive commit exceeds event limit')
         if self.events + len(events) > maximum:
             self.flush()
         self.rows.append((locator, sha256, status, reason, events))
+        self.position=position
         self.known[locator] = (sha256, status)
         self.events += len(events)
         self.store.task.check_memory()
@@ -228,26 +250,29 @@ class _ArchiveMemberBatch:
             self.flush()
 
 
-def stream_archive(store, source, raw, *, max_members=None, max_new_members=None, max_seconds=None, progress=None, commit_members=1):
+def stream_archive(store, source, raw, *, max_members=None, max_new_members=None, max_seconds=None, progress=None, commit_members=1, full_report=True, local=None):
     """Replay from the start, optionally bounding new commits instead of scans.
 
     Previously committed members still consume stream bytes and are hashed to
     detect changed input, but require no write transaction. Neither member limit
     proves archive completion; only EOF, CRC and the upstream checksum do that.
     """
+    if type(full_report) is not bool:
+        raise ValueError('full_report must be boolean')
     if max_new_members is not None and (type(max_new_members) is not int or max_new_members <= 0):
         raise ValueError('max_new_members must be a positive integer')
-    validate_commit_members(commit_members)
+    validate_commit_members(commit_members,local=local is not None)
     spec = store.task.config["sources"][source]
     member_pattern=summary_member_pattern(spec)
     store.start(source)
     store.status(source, 'provisional', detail='archive scan active; full verification pending')
-    reader = HashReader(raw, max_bytes=spec.get('size_bytes'))
+    reader = local.reader if local else HashReader(raw, max_bytes=spec.get('size_bytes'))
     started, processed, added, replayed = time.monotonic(), 0, 0, 0
-    compressed = gzip.GzipFile(fileobj=reader, mode="rb")
+    compressed = local.decoder if local else gzip.GzipFile(fileobj=reader, mode="rb")
     status, detail = "provisional", None
     pending_pax = False
-    batch = _ArchiveMemberBatch(store, source, commit_members) if commit_members > 1 else None
+    batch = (_ArchiveMemberBatch(store, source, commit_members,
+        local.checkpoint if local else None) if commit_members > 1 or local else None)
     try:
         while True:
             if ((max_members is not None and processed >= max_members)
@@ -275,6 +300,10 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                         raise ValueError('tar zero padding exceeds bounded expansion limit')
                     if any(tail):
                         raise ValueError("nonzero data after tar end")
+                if local:
+                    local.finish()
+                    status='verified'
+                    break
                 expected = spec.get("checksum")
                 if spec.get("size_bytes") is not None and reader.size != spec["size_bytes"]:
                     raise ValueError("compressed source length mismatch")
@@ -308,6 +337,8 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
             elif header.size > store.task.config["max_member_bytes"]:
                 reason = "member_exceeds_size_limit"
             previous = (batch.known.get(locator) if batch else None) or store.seen(source, locator)
+            if previous and local:
+                raise ValueError('local cursor would repeat a committed member')
             h = hashlib.sha256()
             events = []
             def collect(record):
@@ -349,7 +380,7 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
                 else:
                     if batch:
                         batch.add(locator, h.hexdigest(), 'rejected' if reason else 'observed',
-                                  reason, [] if reason else events)
+                                  reason, [] if reason else events,compressed.tell() if local else None)
                     else:
                         store.finish_member(source, locator, h.hexdigest(), "rejected" if reason else "observed", reason)
             if previous:
@@ -357,12 +388,18 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
             else:
                 added += 1
             processed += 1
-            if progress and processed % 100 == 0:
+            if progress and processed % (1000 if local else 100) == 0:
                 if batch:
                     batch.flush()
-                progress({"processed_this_pass": processed, "new_members_this_pass": added,
+                measurement={"processed_this_pass": processed, "new_members_this_pass": added,
                     "replayed_members_this_pass": replayed,
-                    "compressed_bytes": reader.size, "storage_bytes": store.task.used()})
+                    "compressed_bytes": reader.size, "storage_bytes": store.task.used()}
+                if local:
+                    elapsed=time.monotonic()-started
+                    measurement.update(elapsed_seconds=elapsed,
+                        new_members_per_second=added/max(elapsed,0.001),tar_offset=compressed.tell(),
+                        commit_seconds=batch.commit_seconds,commits=batch.commits)
+                progress(measurement)
         if batch:
             batch.flush()
     except BudgetStop as exc:
@@ -373,5 +410,15 @@ def stream_archive(store, source, raw, *, max_members=None, max_new_members=None
         raise
     finally:
         compressed.close()
-    store.status(source, status, byte_count=reader.size, sha256=reader.sha256.hexdigest() if status == "verified" else None, detail=detail)
-    return store.report()
+    store.status(source, status, byte_count=spec['size_bytes'] if local and status=='verified' else reader.size,
+        sha256=(local.archive_sha256 if local else reader.sha256.hexdigest()) if status == "verified" else None, detail=detail)
+    if not full_report:
+        return store.archive_report(source)
+    # A completed stream must remain resumable even when the optional
+    # whole-database report exceeds the process memory budget.
+    try:
+        return store.report()
+    except MemoryError:
+        result = store.archive_report(source)
+        result['report_unavailable'] = 'MemoryError'
+        return result

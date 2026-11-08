@@ -23,8 +23,10 @@ def file_hash(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def publish_code(root, *, repository, base, branch, paths, receipt, message, git=None):
+def publish_code(root, *, repository, base, branch, paths, receipt, message, git=None,
+                 external_inputs=None, external_root=None, prepare_only=False):
     root = Path(root).resolve()
+    require(type(prepare_only) is bool,'prepare_only must be boolean')
     receipt = Path(receipt)
     require(receipt.is_absolute() and receipt.resolve().is_relative_to(root),
             'receipt must belong to this checkout')
@@ -33,15 +35,27 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
     require(branch.startswith('refs/heads/') and bool(re.fullmatch('[A-Za-z0-9_./-]+', branch))
             and '..' not in branch, 'invalid branch')
     require(bool(paths) and len(paths) == len(set(paths)), 'reviewed paths must be nonempty and unique')
+    external_inputs={} if external_inputs is None else dict(external_inputs)
+    require(set(external_inputs).issubset(paths),'external inputs outside reviewed paths')
+    if external_inputs:
+        require(external_root is not None,'external inputs need one explicitly reviewed root')
+        external_root=Path(external_root).absolute()
+    actual_inputs={}
     for name in paths:
         path = PurePosixPath(name)
         require(not path.is_absolute() and str(path) == name and
                 not any(part in ('.', '..', '.git') for part in path.parts)
                 and not any(c in name for c in ':*?[\\'), 'invalid reviewed path')
-        actual = root / name
-        require(actual.is_file() and actual.resolve().is_relative_to(root)
+        actual=Path(external_inputs[name]).absolute() if name in external_inputs else root/name
+        boundary=external_root if name in external_inputs else root
+        if name in external_inputs:
+            require(bool(re.fullmatch(r'outputs/global/[a-f0-9]{64}\.json\.gz',name))
+                    and actual.name==path.name and actual.stat().st_size<=32*1024**2,
+                    'external publication permits only bounded content-addressed aggregate assets')
+        require(actual.is_file() and actual.resolve().is_relative_to(boundary)
                 and not any(p.is_symlink() for p in (actual, *actual.parents)),
-                'reviewed files must be regular checkout files')
+                'reviewed files must be regular files inside their declared root')
+        actual_inputs[name]=actual
     if git is None:
         def git(*args, env=None, input=None):
             run = subprocess.run(['git', '-c', 'http.version=HTTP/1.1', *args],
@@ -58,17 +72,23 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
     require(len(push_urls) == 1 and push_urls[0].startswith('https://github.com/')
             and push_urls[0].removeprefix('https://github.com/').removesuffix('.git') == repository,
             'push URLs differ from the single explicitly reviewed HTTPS repository')
-    hashes = {p: file_hash(root / p) for p in paths}
+    hashes = {p: file_hash(actual_inputs[p]) for p in paths}
     index = receipt.with_suffix('.index')
     require(not index.exists() and not index.is_symlink(), 'unfinished publication index requires inspection')
     env = {**os.environ, 'GIT_INDEX_FILE': str(index)}
     try:
         git('read-tree', base, env=env)
-        git('add', '--', *paths, env=env)
+        ordinary=[p for p in paths if p not in external_inputs]
+        if ordinary:git('add', '--', *ordinary, env=env)
+        for name in paths:
+            if name not in external_inputs:continue
+            blob=git('hash-object','-w','--no-filters','--',str(actual_inputs[name]))
+            require(bool(re.fullmatch('[0-9a-f]{40}',blob)),'invalid external Git blob identity')
+            git('update-index','--add','--cacheinfo','100644,'+blob+','+name,env=env)
         tree = git('write-tree', env=env)
         changed = git('diff-tree', '--no-commit-id', '--name-only', '-r', base, tree).splitlines()
         require(set(changed) == set(paths), 'reviewed path set differs from actual changes')
-        require(hashes == {p: file_hash(root / p) for p in paths},
+        require(hashes == {p: file_hash(actual_inputs[p]) for p in paths},
                 'reviewed worktree changed while preparing the tree')
         if receipt.exists():
             record = json.loads(receipt.read_text(encoding='utf-8'))
@@ -79,8 +99,9 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
             require(record.get('tested_worktree_sha256') == hashes,
                     'reviewed worktree bytes differ from the existing operation')
         else:
-            require(git('ls-remote', 'origin', branch).split()[0] == base,
-                    'public branch changed; reconcile before publication')
+            if not prepare_only:
+                require(git('ls-remote', 'origin', branch).split()[0] == base,
+                        'public branch changed; reconcile before publication')
             sha = git('commit-tree', tree, '-p', base, input=(message.rstrip() + '\n').encode())
             require(git('show', '-s', '--format=%P', sha) == base, 'public parent mismatch')
             record = {'state': 'prepared', 'repository': repository, 'branch': branch, 'base': base, 'tree': tree,
@@ -92,6 +113,7 @@ def publish_code(root, *, repository, base, branch, paths, receipt, message, git
     sha = record['public_commit']
     require(git('show', '-s', '--format=%P', sha) == base and git('rev-parse', sha+':') == tree,
             'receipt commit differs from the reviewed public tree')
+    if prepare_only:return record
     remote = git('ls-remote', 'origin', branch).split()[0]
     if remote != sha:
         require(remote == base, 'public branch changed; preserve concurrent work')

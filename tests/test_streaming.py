@@ -226,30 +226,118 @@ class StreamingTests(unittest.TestCase):
         args=SimpleNamespace(command='ingest-orcid',source=source,max_members=None,
             max_new_members=1,max_seconds=10)
         urls=[]
+        def fresh_fixture_source():
+            # Each transport/report case starts independently. The production
+            # annual CLI intentionally refuses a second scan of committed data.
+            fixture=CareerStore(task)
+            try:
+                for table in ('events','members','runs'):
+                    fixture.db.execute('DELETE FROM '+table+' WHERE source=?',(source,))
+                fixture.db.commit()
+            finally:fixture.close()
         class HTTP:
+            def within(self,seconds):
+                return __import__('contextlib').nullcontext()
+            def open_archive(self,source):
+                return self.open(task.config['sources'][source]['url'])
             def open(self,url):
                 urls.append(url)
                 return io.BytesIO(data)
             def close(self):pass
-        with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
+        with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()), \
+             patch.object(CareerStore,'report',side_effect=MemoryError('whole-store report forbidden')):
             for state in ('provisional','verified'):
+                fresh_fixture_source()
+                args.max_new_members=1 if state=='provisional' else None
                 output=io.StringIO()
                 with redirect_stdout(output):self.assertTrue(execute_task(task,args))
                 report=json.loads(output.getvalue())
                 self.assertEqual(report['sources'][0]['source'],source)
                 self.assertEqual(report['sources'][0]['status'],state)
-                self.assertEqual(report['events'],1)
+                self.assertEqual(report['sources'][0]['members'],1)
+                self.assertEqual(report['report_scope'],'committed-archive-run-only')
+                self.assertNotIn('events',report)
         self.assertEqual(urls,['https://example.org/frozen-2025.tar.gz']*2)
+        fresh_fixture_source()
         with patch.object(HTTP,'open',side_effect=OSError('bounded injected access failure')):
-            with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
+            with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()), \
+                 patch.object(CareerStore,'report',side_effect=MemoryError('whole-store report forbidden')):
                 with redirect_stdout(io.StringIO()),self.assertRaises(SystemExit) as raised:
                     execute_task(task,args)
                 self.assertEqual(raised.exception.code,2)
+        from urllib.error import HTTPError
+        for url,kind in (
+            ('https://example.org/robots.txt','robots'),
+            ('https://example.org/frozen-2025.tar.gz','frozen-archive'),
+            ('https://storage.example/object?signature=private-value','other-endpoint'),
+        ):
+            with self.subTest(request_kind=kind):
+                output=io.StringIO()
+                with patch.object(HTTP,'open',side_effect=HTTPError(url,403,'denied',{},None)), \
+                     patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()), \
+                     patch.object(CareerStore,'report',side_effect=MemoryError('whole-store report forbidden')):
+                    with redirect_stdout(output),self.assertRaises(SystemExit) as raised:
+                        execute_task(task,args)
+                self.assertEqual(raised.exception.code,2)
+                result=json.loads(output.getvalue())
+                self.assertEqual(result['archive_http_failure'],
+                    {'status':403,'stage':'download','request_kind':kind})
+                self.assertNotIn('private-value',output.getvalue())
+                self.assertEqual(next(r for r in result['sources'] if r['source']==source)['status'],
+                    'access_failed')
+        class DeniedStream(io.BytesIO):
+            def read(self, size=-1):
+                raise HTTPError(task.config['sources'][source]['url'],403,'denied',{},None)
+        output=io.StringIO()
+        with patch.object(HTTP,'open',return_value=DeniedStream(data)), \
+             patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()), \
+             patch.object(CareerStore,'report',side_effect=MemoryError('whole-store report forbidden')):
+            with redirect_stdout(output),self.assertRaises(SystemExit) as raised:
+                execute_task(task,args)
+        self.assertEqual(raised.exception.code,2)
+        result=json.loads(output.getvalue())
+        self.assertEqual(result['archive_http_failure'],
+            {'status':403,'stage':'archive-scan','request_kind':'frozen-archive'})
+        self.assertEqual(next(r for r in result['sources'] if r['source']==source)['status'],'failed')
         args.source='wikidata'
         with patch.object(HTTP,'open',side_effect=AssertionError('invalid source must not open HTTP')):
             with patch('gapi.stream_cli.PublicHTTP',return_value=HTTP()):
                 with self.assertRaisesRegex(ValueError,'annual ORCID archive'):
                     execute_task(task,args)
+
+    def test_archive_receipt_reads_only_selected_run_and_no_career_tables(self):
+        import sqlite3
+        data=archive([(f'summaries/097/{PERSON}.xml',XML)])
+        s=self.store(data)
+        try:
+            from unittest.mock import patch
+            with patch.object(s,'report',side_effect=MemoryError('forbidden full report')):
+                receipt=stream_archive(s,'orcid-2026-summary',io.BytesIO(data),full_report=False)
+            self.assertEqual(receipt['sources'][0]['members'],1)
+            self.assertEqual(receipt['sources'][0]['status'],'verified')
+            s.db.execute("INSERT INTO runs(source,identity,status) VALUES('other','unrelated','failed')")
+            s.db.commit()
+            def allow_run_only(action,table,column,database,trigger):
+                if action==sqlite3.SQLITE_READ and table!='runs':return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+            s.db.set_authorizer(allow_run_only)
+            bounded=s.archive_report('orcid-2026-summary')
+            self.assertEqual(bounded['sources'],receipt['sources'])
+            self.assertFalse(bounded['complete_global_census'])
+            self.assertNotIn('member_status',bounded)
+            with self.assertRaisesRegex(ValueError,'annual source'):
+                s.archive_report('wikidata')
+        finally:s.close()
+
+    def test_invalid_report_mode_cannot_start_or_read_archive(self):
+        from unittest.mock import patch
+        data=archive([])
+        s=self.store(data)
+        try:
+            with patch.object(s,'start',side_effect=AssertionError('must not start')):
+                with self.assertRaisesRegex(ValueError,'full_report must be boolean'):
+                    stream_archive(s,'orcid-2026-summary',io.BytesIO(data),full_report='false')
+        finally:s.close()
 
     def test_checksum_and_gzip_trailer_fail_closed(self):
         data = archive([(f"summaries/097/{PERSON}.xml", XML)])

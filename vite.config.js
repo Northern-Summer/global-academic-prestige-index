@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import { readFile } from 'node:fs/promises';
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, lstatSync } from 'node:fs';
+import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename } from 'node:path';
 import { validateGlobal } from './web/global-data.js';
-import {DOCUMENTATION,sourceInputs,writeBuildProvenance,readReleaseSnapshot} from './scripts/build-provenance.mjs';
+import {DOCUMENTATION,sourceInputs,writeBuildProvenance,readReleaseSnapshot,readReleasePartitions,readLocalPartitionSelection} from './scripts/build-provenance.mjs';
 import {readDerivedBundle,readDerivedAsset} from './scripts/derived-bundle.mjs';
+import {validatePartitionManifest} from './web/global-partitions.js';
 
 const base = process.env.GITHUB_ACTIONS === 'true' ? '/global-academic-prestige-index/' : '/';
 
@@ -25,6 +27,38 @@ export default defineConfig({
         .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">THE CURRENT EDITION</span><p>2023 年公开履历已完成全文件处理。持续采集的 ORCID、Wikidata 与官方奖项另列。</p><a href="./docs/STREAMING.md">数据来源与范围 ↘</a><div class="note-stamp" aria-hidden="true">GAPI</div></aside>');
     },
     configureServer(server) {
+      // Explicit local-only selection; the production single-file build and
+      // publication gates remain unchanged until their own adapter is verified.
+      if(process.env.GAPI_LOCAL_PARTITIONS==='1'){
+        const task=JSON.parse(readFileSync(resolve(buildRoot,'configs/orcid-2026-production.json'),'utf8'));
+        const regular=path=>{
+          for(let p=path;;p=dirname(p)){if(lstatSync(p).isSymbolicLink())throw new Error('Linked local partition path');if(dirname(p)===p)break;}
+          const info=lstatSync(path);if(!info.isFile()||info.size>32*1024*1024+65536)throw new Error('Invalid local partition file');
+          return readFileSync(path);
+        };
+        server.middlewares.use((request,response,next)=>{
+          const route=request.url?.split('?')[0];
+          if(route!=='/data/global/manifest.json'&&!/^\/data\/global\/[a-f0-9]{64}\.json\.gz$/.test(route||''))return next();
+          if(!['GET','HEAD'].includes(request.method))return next();
+          try{
+            const selection=readLocalPartitionSelection(task.work_dir),folder=selection.directory;
+            const raw=regular(resolve(folder,'manifest.json'));
+            if(raw.length>1024*1024)throw new Error('Local partition manifest bound');
+            if(selection.manifest_sha256&&createHash('sha256').update(raw).digest('hex')!==selection.manifest_sha256)throw new Error('Selected local partition manifest changed');
+            const manifest=validatePartitionManifest(JSON.parse(raw));let body=raw;
+            if(route!=='/data/global/manifest.json'){
+              const name=basename(route),assets=manifest.fields.flatMap(f=>f.kind==='rows'?f.assets:f.kind==='object'?f.entries.map(v=>v.asset):[f.asset]);
+              const selected=assets.find(a=>a.file===name);
+              if(!selected){response.statusCode=404;return response.end('Unselected partition asset');}
+              body=regular(resolve(folder,name));
+              if(body.length!==selected.stored_bytes||createHash('sha256').update(body).digest('hex')!==selected.stored_sha256)throw new Error('Local partition asset changed');
+            }
+            response.setHeader('Content-Type',route.endsWith('.gz')?'application/gzip':'application/json; charset=utf-8');
+            response.setHeader('Cache-Control','no-store');response.setHeader('Content-Length',body.length);
+            return response.end(request.method==='HEAD'?undefined:body);
+          }catch(error){return next(error);}
+        });
+      }
       const localScores = fileURLToPath(new URL('./data/real/us-academia-network.json', import.meta.url));
       const scoreRoutes = new Map([
         ['/data/local/us-academia-network.json', localScores],
@@ -85,6 +119,16 @@ export default defineConfig({
       const manifestPath = resolve(process.env.GAPI_RELEASE_MANIFEST || 'outputs/global/manifest.json');
       if (!existsSync(manifestPath)) throw new Error('A selected real release manifest is required. GAPI_CODE_ONLY=1 builds code/docs without a ranking.');
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      if(manifest.schema_version==='gapi-aggregate-partitions/1'){
+        const selected=readReleasePartitions(manifestPath,manifest);
+        if(process.env.GAPI_LOCAL_BUILD!=='1'&&manifest.publication_status!=='public-observations-pending-external-review')throw new Error('Local/restricted dataset cannot be published');
+        for(const [name,asset] of selected.files)this.emitFile({type:'asset',fileName:`data/global/${name}`,source:await readFile(asset.path)});
+        for(const [name,asset] of selected.bindings)this.emitFile({type:'asset',fileName:`data/global/${name}`,source:await readFile(asset.path)});
+        this.emitFile({type:'asset',fileName:'data/global/manifest.json',source:JSON.stringify(manifest)});
+        const historical=readDerivedBundle(buildRoot,manifest.derived_bundle);
+        if(historical)for(const [name,bytes] of historical.files)this.emitFile({type:'asset',fileName:`data/derived/${name}`,source:bytes});
+        return;
+      }
       const source = readReleaseSnapshot(manifestPath,manifest).bytes;
       const snapshot = validateGlobal(JSON.parse(source));
       const localOnly = process.env.GAPI_LOCAL_BUILD === '1';

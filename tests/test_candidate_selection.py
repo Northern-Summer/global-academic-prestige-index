@@ -20,6 +20,69 @@ class CandidateSelectionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_annual_reuse_keeps_api_accounting_and_unknown_failures(self):
+        from gapi.orcid_stream import error_document_reasons, summary_roots
+        store=self.store(fixtures.archive([]));source='orcid-2026-summary'
+        try:
+            ids=[f'0000-0002-1825-00{i:02}' for i in range(8)]
+            roots=summary_roots(store.task.config['sources'][source]);root=roots[-1]
+            store.start(source);store.status(source,'verified')
+            with store.db:
+                store.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',
+                    [('ingest-orcid-api',i,'query','response') for i in ids])
+                rows=[]
+                for n,i in enumerate(ids[:7]):
+                    status='observed' if n<2 else 'rejected'
+                    reason=(None if n<2 else error_document_reasons()[n-2] if n<5 else
+                            'member_exceeds_size_limit' if n==5 else 'unknown parser failure')
+                    prefix=('./'+roots[0]) if n==1 else root
+                    rows.append((source,prefix+'/'+i[-3:]+'/'+i+'.xml','a'*64,status,reason))
+                store.db.executemany('INSERT INTO members VALUES(?,?,?,?,?)',rows)
+                store.db.execute("INSERT INTO discovery_retries VALUES('ingest-orcid-api',?,1,0,'transient')",(ids[5],))
+            frozen=freeze(store);upper=frozen['selection']['max_candidate_rowid']
+            before=processing(store,frozen['selection_id']);changes=store.db.total_changes
+            self.assertEqual(set(store.pending('ingest-orcid-api',now=1)),set(ids))
+            for _ in range(2):
+                self.assertEqual(set(store.pending('ingest-orcid-api',now=1,max_candidate_rowid=upper,reuse_annual=True)),set(ids[5:]))
+            self.assertEqual(processing(store,frozen['selection_id']),before)
+            self.assertEqual(store.db.total_changes,changes)
+            self.assertEqual(before['sources'][0]['processed'],0)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM members WHERE source='orcid-public-api'").fetchone()[0],0)
+            with store.db:store.db.execute("UPDATE runs SET identity='different' WHERE source=?",(source,))
+            self.assertEqual(set(store.pending('ingest-orcid-api',now=1,max_candidate_rowid=upper,reuse_annual=True)),set(ids))
+        finally:store.close()
+
+    def test_annual_reuse_requires_finite_explicit_orcid_scope(self):
+        store=self.store(fixtures.archive([]))
+        try:
+            for command,options in [('ingest-orcid-api',{}),('ingest-wikidata',{'max_candidate_rowid':1}),
+                                    ('ingest-orcid-api',{'max_candidate_rowid':None})]:
+                with self.assertRaises(ValueError):store.pending(command,reuse_annual=True,**options)
+            with self.assertRaises(ValueError):store.pending('ingest-orcid-api',max_candidate_rowid=1,reuse_annual=1)
+        finally:store.close()
+
+    def test_collection_opt_in_does_not_request_error_documents_or_claim_success(self):
+        from gapi.orcid_stream import error_document_reasons
+        store=self.store(fixtures.archive([]));source='orcid-2026-summary'
+        try:
+            store.start(source);store.status(source,'verified')
+            identifier=fixtures.PERSON
+            with store.db:
+                store.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-orcid-api',identifier,'q','r'))
+                store.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',
+                    (source,'summaries/'+identifier[-3:]+'/'+identifier+'.xml','a'*64,'rejected',error_document_reasons()[0]))
+            identity=freeze(store)['selection_id']
+            with patch('gapi.collection.ingest_orcid_api') as request:
+                result=collect(store,None,max_seconds=10,discovery=False,candidate_selection=identity,reuse_annual=True,full_report=False)
+                request.assert_not_called()
+            self.assertFalse(result['global_complete'])
+            self.assertFalse(result['frozen_candidate_processing']['processing_complete'])
+            self.assertEqual(result['frozen_candidate_processing']['sources'][0]['observed_members'],0)
+            self.assertEqual(result['frozen_candidate_processing']['sources'][0]['pending'],1)
+            self.assertEqual(result['candidate_disposition_policy'],'verified-annual-reuse-and-retained-error-documents/1')
+            with self.assertRaises(ValueError):collect(store,None,reuse_annual=True)
+        finally:store.close()
+
     def seed(self,store):
         with store.db:
             store.db.executemany('INSERT INTO discovery VALUES(?,?,?,?)',[

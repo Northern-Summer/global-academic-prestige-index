@@ -181,6 +181,190 @@ def safe_url(url: str):
             raise
 
 
+class ArchiveSeekReader:
+    """Optional bounded seek adapter for imported gzip indexes.
+
+    New 64 KiB blocks advance process-restorable whole-source hashes. Replayed
+    blocks must match retained SHA-256 digests before bytes reach the decoder.
+    A sparse index that needs more than 4 MiB of old compressed data fails
+    closed instead of silently replaying the entire source. No raw disk cache.
+    This adapter is not enabled by the production CLI yet.
+    """
+    BLOCK = 65536
+    RETAIN_BLOCKS = 64
+
+    def __init__(self, http, spec, *, state=None, max_reconnects=256):
+        from .archive_hash import ArchiveHash, verify_native_hashes
+        from .task import digest
+        checksum = spec.get('checksum','')
+        self.md5_expected = checksum.removeprefix('md5:') if checksum.startswith('md5:') else None
+        self.url, self.total = spec['url'], spec.get('size_bytes')
+        if not http._frozen_orcid_range(self.url,self.total,self.md5_expected):
+            raise ValueError('seek requires exact frozen official annual source')
+        if type(max_reconnects) is not int or not 1 <= max_reconnects <= 4096:
+            raise ValueError('invalid archive seek reconnect bound')
+        self.http, self.identity = http, digest(spec)
+        self.response, self.wire_position = None, None
+        self.position = self.highwater = self.reconnects = 0
+        self.max_reconnects = max_reconnects
+        self.closed, self.eof_checked = False, False
+        self.cache_start, self.cache = None, b''
+        self.headers, self.blocks = {}, {}
+        verify_native_hashes()
+        self.md5, self.sha256 = ArchiveHash('md5'), ArchiveHash('sha256')
+        if state is not None:
+            keys = {'schema','source','highwater','headers','blocks','md5','sha256','checksum'}
+            if (not isinstance(state,dict) or set(state) != keys
+                    or state['schema'] != 'archive-seek-state/v1'
+                    or digest({k:v for k,v in state.items() if k != 'checksum'}) != state['checksum']
+                    or state['source'] != self.identity):
+                raise ValueError('archive seek state identity/checksum mismatch')
+            high = state['highwater']
+            if (type(high) is not int or not 0 < high <= self.total
+                    or (high != self.total and high % self.BLOCK)):
+                raise ValueError('archive seek highwater invalid')
+            headers = state['headers']
+            if (not isinstance(headers,dict) or set(headers)-{'etag','last-modified'}
+                    or any(not isinstance(v,str) or len(v)>1024 for v in headers.values())):
+                raise ValueError('archive seek validators invalid')
+            blocks = state['blocks']
+            last_start = ((high-1)//self.BLOCK)*self.BLOCK
+            first_start = max(0,last_start-(self.RETAIN_BLOCKS-1)*self.BLOCK)
+            starts = list(range(first_start,last_start+1,self.BLOCK))
+            if not isinstance(blocks,list) or len(blocks) != len(starts):
+                raise ValueError('archive seek replay window invalid')
+            for start, row in zip(starts,blocks):
+                if (not isinstance(row,list) or len(row)!=3 or row[0]!=start
+                        or type(row[0]) is not int or type(row[1]) is not int
+                        or row[1] != min(self.BLOCK,high-start)
+                        or not isinstance(row[2],str) or not re.fullmatch('[0-9a-f]{64}',row[2])):
+                    raise ValueError('archive seek replay block invalid')
+                self.blocks[start] = (row[1],row[2])
+            for name in ('md5','sha256'):
+                restored = ArchiveHash.restore(state[name])
+                if restored.algorithm != name or restored.size != high:
+                    raise ValueError('archive seek hash position mismatch')
+                setattr(self,name,restored)
+            self.highwater, self.headers = high, dict(headers)
+
+    def readable(self): return not self.closed
+    def seekable(self): return not self.closed
+    def tell(self): return self.position
+
+    def seek(self, offset, whence=0):
+        if self.closed: raise ValueError('archive seek reader closed')
+        if type(offset) is not int or whence not in (0,1,2):
+            raise ValueError('invalid archive seek')
+        target = offset + (self.position if whence==1 else self.total if whence==2 else 0)
+        if not 0 <= target <= self.total:
+            raise ValueError('archive seek outside frozen length')
+        self.position = target
+        return target
+
+    def _open_at(self, offset):
+        if self.response is not None:
+            self.response.close()
+        self.response = None
+        if offset:
+            raw = self.http.open_range(self.url,offset,self.total,self.headers,
+                                       expected_md5=self.md5_expected)
+        else:
+            raw = self.http.open(self.url,'application/octet-stream',headers={'Accept-Encoding':'identity'})
+            try:
+                if (int(raw.headers.get('Content-Length','-1')) != self.total
+                        or raw.headers.get('Content-Encoding','identity') != 'identity'):
+                    raise ValueError('archive seek initial representation mismatch')
+                headers = {k.lower():v for k,v in raw.headers.items()
+                           if k.lower() in ('etag','last-modified')}
+                if self.highwater and any(headers.get(k)!=v for k,v in self.headers.items()):
+                    raise ValueError('archive seek source validator changed')
+                self.headers = headers
+            except BaseException:
+                raw.close()
+                raise
+        self.response, self.wire_position = raw, offset
+
+    def _block(self, start):
+        if start > self.highwater:
+            raise ValueError('archive seek cannot skip unhashed bytes')
+        if start < self.highwater and start not in self.blocks:
+            raise ValueError('gzip index requires replay beyond bounded retained window')
+        if self.response is None or self.wire_position != start:
+            self._open_at(start)
+        wanted = min(self.BLOCK,self.total-start)
+        pending, stalled = bytearray(), 0
+        while len(pending) < wanted:
+            self.http.remaining()
+            self.http.task.check_memory()
+            try:
+                chunk = self.response.read(wanted-len(pending))
+                if not chunk:
+                    raise EOFError('archive seek truncated block')
+            except (OSError,EOFError):
+                if self.reconnects >= self.max_reconnects or stalled >= 8:
+                    raise
+                self.reconnects += 1
+                stalled += 1
+                self._open_at(start+len(pending))
+                continue
+            if len(chunk)>wanted-len(pending):
+                raise ValueError('archive seek oversized transport read')
+            pending.extend(chunk)
+            self.wire_position += len(chunk)
+            stalled = 0
+        block = bytes(pending)
+        checksum = hashlib.sha256(block).hexdigest()
+        if start < self.highwater:
+            if self.blocks[start] != (len(block),checksum):
+                raise ValueError('archive seek replay bytes changed')
+        else:
+            self.md5.update(block); self.sha256.update(block)
+            self.highwater += len(block)
+            self.blocks[start] = (len(block),checksum)
+            while len(self.blocks)>self.RETAIN_BLOCKS:
+                del self.blocks[min(self.blocks)]
+        self.cache_start,self.cache = start,block
+
+    def read(self, size=-1):
+        if self.closed: raise ValueError('archive seek reader closed')
+        if type(size) is not int or size < 0:
+            raise ValueError('unbounded archive seek read forbidden')
+        self.http.remaining()
+        if size==0: return b''
+        if self.position == self.total:
+            if self.highwater != self.total:
+                raise ValueError('archive seek EOF before complete checksum')
+            if not self.eof_checked:
+                if self.response is None or self.wire_position != self.total:
+                    raise ValueError('archive seek EOF requires complete final block read')
+                if self.response.read(1):
+                    raise ValueError('archive seek source exceeds frozen length')
+                self.eof_checked = True
+            return b''
+        start = self.position//self.BLOCK*self.BLOCK
+        if self.cache_start != start:
+            self._block(start)
+        offset = self.position-start
+        data = self.cache[offset:offset+min(size,self.BLOCK)]
+        self.position += len(data)
+        return data
+
+    def snapshot(self):
+        from .task import digest
+        if not self.highwater:
+            raise ValueError('empty archive seek checkpoint')
+        value = {'schema':'archive-seek-state/v1','source':self.identity,
+                 'highwater':self.highwater,'headers':dict(self.headers),
+                 'blocks':[[k,*v] for k,v in sorted(self.blocks.items())],
+                 'md5':self.md5.snapshot(),'sha256':self.sha256.snapshot()}
+        return {**value,'checksum':digest(value)}
+
+    def close(self):
+        if self.response is not None: self.response.close()
+        self.closed = True
+        self.cache = b''
+
+
 class PublicHTTP:
     def __init__(self, task, *, opener=None, sleep=time.sleep,reuse_connections=False):
         class PublicRedirect(HTTPRedirectHandler):
@@ -290,6 +474,19 @@ class PublicHTTP:
                 rules = RobotFileParser()
                 rules.parse(body.decode("utf-8", errors="replace").splitlines())
             except HTTPError as exc:
+                # Figshare documents these frozen public download URLs as its
+                # bulk-data interface. A 403 for robots.txt is an unavailable
+                # robots resource (RFC 9309 2.3.1.3), not a file refusal. Keep
+                # this permission URL-scoped: never cache an origin-wide allow.
+                # A real file 401/403 still fails in _open without a retry.
+                if exc.code == 403:
+                    for spec in self.task.config.get('sources', {}).values():
+                        if spec.get('kind') != 'orcid-summary-tar-gzip' or spec.get('url') != url:
+                            continue
+                        checksum = spec.get('checksum') or ''
+                        md5 = checksum[4:] if isinstance(checksum, str) and checksum.startswith('md5:') else None
+                        if self._frozen_orcid_range(url, spec.get('size_bytes'), md5):
+                            return
                 if exc.code != 404:
                     raise
                 rules = RobotFileParser()
@@ -334,6 +531,57 @@ class PublicHTTP:
             return XMLResponse(response, self.task.config['max_member_bytes'], observe_wire)
         return response
 
+    def _frozen_orcid_range(self, url, total, expected_md5):
+        """Only the exact frozen official summary object may use this route."""
+        p = urlsplit(url)
+        official = (p.scheme == 'https' and not p.query and not p.fragment
+                    and ((p.hostname == 'ndownloader.figshare.com' and re.fullmatch(r'/files/\d+', p.path))
+                         or (p.hostname == 'orcid.figshare.com' and re.fullmatch(r'/ndownloader/files/\d+', p.path))))
+        if (not official or type(total) is not int or total <= 0
+                or not isinstance(expected_md5, str) or not re.fullmatch('[a-f0-9]{32}', expected_md5)):
+            return False
+        for spec in self.task.config.get('sources', {}).values():
+            if (spec.get('kind') == 'orcid-summary-tar-gzip' and spec.get('url') == url
+                    and spec.get('size_bytes') == total and spec.get('checksum') == 'md5:'+expected_md5):
+                self.task.require_frozen()
+                return True
+        return False
+
+    @contextmanager
+    def open_archive(self, source, *, max_reconnects=256):
+        """Keep one decoder/hash stream alive across bounded HTTP reconnects.
+
+        This is not a persisted gzip seek index. Process exit still loses the
+        decoder state. Non-pinned archive contracts retain their original path.
+        """
+        if type(max_reconnects) is not int or not 1 <= max_reconnects <= 4096:
+            raise ValueError('total reconnect limit must be between 1 and 4096')
+        spec = self.task.config['sources'][source]
+        url, total = spec['url'], spec.get('size_bytes')
+        checksum = spec.get('checksum') or ''
+        md5 = checksum.removeprefix('md5:') if checksum.startswith('md5:') else None
+        if not self._frozen_orcid_range(url, total, md5):
+            with self.open(url) as raw:
+                yield raw
+            return
+        from .dump_discovery import FeedReader
+        raw = self.open(url, 'application/octet-stream', headers={'Accept-Encoding':'identity'})
+        try:
+            if (int(raw.headers.get('Content-Length', '-1')) != total
+                    or raw.headers.get('Content-Encoding', 'identity') != 'identity'):
+                raise ValueError('annual archive initial representation/length mismatch')
+            initial = dict(raw.headers)
+        except BaseException:
+            raw.close()
+            raise
+        reader = FeedReader(raw, self.task, expected_bytes=total,
+            resume=lambda offset:self.open_range(url, offset, total, initial, expected_md5=md5),
+            max_reconnects=max_reconnects, verify_eof=True)
+        try:
+            yield reader
+        finally:
+            reader.close()
+
     def open_range(self, url, offset, total, initial_headers, *, expected_md5=None):
         """Resume a fixed official dump inside the SAME decompression process.
 
@@ -343,14 +591,16 @@ class PublicHTTP:
         p = urlsplit(url)
         from .easy_orcid_census import ARCHIVES
         fixed_career=(url,total,expected_md5) in ARCHIVES.values()
+        fixed_annual=self._frozen_orcid_range(url,total,expected_md5)
         fixed_dump=(p.hostname == 'dumps.wikimedia.org' and not p.query and not p.fragment
                     and re.fullmatch(r'/wikidatawiki/entities/(\d{8})/wikidata-\1-all\.json\.(bz2|gz)', p.path))
-        if not (fixed_dump or fixed_career) or not 0 < offset < total:
+        if not (fixed_dump or fixed_career or fixed_annual) or not 0 < offset < total:
             raise ValueError('range is restricted to fixed official dump offsets')
-        etag = initial_headers.get('ETag', '')
-        modified = initial_headers.get('Last-Modified', '')
+        normalized = {key.lower():value for key,value in initial_headers.items()}
+        etag = normalized.get('etag', '')
+        modified = normalized.get('last-modified', '')
         validator = etag if etag.startswith('"') and etag.endswith('"') else modified
-        if not validator and not fixed_career:
+        if not validator and not (fixed_career or fixed_annual):
             raise ValueError('dump resume requires a source identity validator')
         if validator and validator == modified:
             try:
@@ -370,7 +620,8 @@ class PublicHTTP:
             if (not match or tuple(map(int,match.groups())) != (offset,total-1,total)
                     or int(response.headers.get('Content-Length','-1')) != total-offset):
                 raise ValueError('dump resume Content-Range/length mismatch')
-            if response.geturl() != url or response.headers.get('Content-Encoding','identity') != 'identity':
+            if ((not fixed_annual and response.geturl() != url)
+                    or response.headers.get('Content-Encoding','identity') != 'identity'):
                 raise ValueError('dump resume representation changed')
             key = 'ETag' if validator == etag else 'Last-Modified'
             if validator and response.headers.get(key) != validator:

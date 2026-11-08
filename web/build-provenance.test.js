@@ -7,7 +7,7 @@ import {gzipSync} from 'node:zlib';
 import {dirname,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {SOURCE_FILES,PROVENANCE,sourceInputs,writeBuildProvenance,verifyBuild,readReleaseSnapshot} from '../scripts/build-provenance.mjs';
+import {SOURCE_FILES,PROVENANCE,sourceInputs,writeBuildProvenance,verifyBuild,readReleaseSnapshot,readReleasePartitions,readLocalPartitionSelection} from '../scripts/build-provenance.mjs';
 import {readDerivedBundle,readDerivedAsset} from '../scripts/derived-bundle.mjs';
 
 function fixture(run) {
@@ -44,6 +44,52 @@ test('release provenance is idempotent and accepts later data-only commits',()=>
   put('release-receipt.json','{"note":"later data-only receipt"}');commit();
   const current=verify();assert.equal(current.status,'verified');
   assert.notEqual(current.source_commit,current.source_commit_at_build);
+}));
+
+test('local partition selection preserves predecessor default and rejects unsafe or unpinned choices',()=>fixture(({root,put})=>{
+  assert.equal(readLocalPartitionSelection(root).directory,join(root,'global-local-partitions'));
+  const selected={schema_version:'gapi-local-partition-selection/1',directory:'global-local-partitions-additions',manifest_sha256:'a'.repeat(64)};
+  put('global-local-partitions-current.json',JSON.stringify(selected));
+  assert.deepEqual(readLocalPartitionSelection(root),{directory:join(root,selected.directory),manifest_sha256:selected.manifest_sha256});
+  for(const change of [{directory:'../escape'},{directory:'D:/escape'},{directory:''},{manifest_sha256:null},{schema_version:'unknown'}]){
+    put('global-local-partitions-current.json',JSON.stringify({...selected,...change}));
+    assert.throws(()=>readLocalPartitionSelection(root),/Invalid local partition selection/);
+  }
+}));
+
+function partitionFixture(run){fixture(context=>{
+  const {root,put,commit,args}=context,hash=b=>createHash('sha256').update(b).digest('hex');
+  const raw=Buffer.from(JSON.stringify('local-only-source-license-review')),packed=gzipSync(raw),file=hash(raw)+'.json.gz';
+  const asset={file,encoding:'gzip',bytes:raw.length,sha256:hash(raw),stored_bytes:packed.length,stored_sha256:hash(packed)};
+  const manifest={schema_version:'gapi-aggregate-partitions/1',logical_schema_version:'gapi-global-observed/v1',
+    publication_status:'local-only-source-license-review',logical_sha256:'a'.repeat(64),source_manifest_sha256:'b'.repeat(64),
+    logical_bytes:200,nodes:0,edges:0,stored_bytes:packed.length,asset_count:1,
+    fields:[{field:'edges',kind:'rows',rows:0,assets:[]},{field:'nodes',kind:'rows',rows:0,assets:[]},{field:'publication_status',kind:'value',asset}]};
+  put(args.manifestPath,JSON.stringify(manifest));put('outputs/global/'+file,packed);
+  put('dist/data/global/manifest.json',JSON.stringify(manifest));put('dist/data/global/'+file,packed);commit();
+  args.mode='local-only';writeBuildProvenance(args);
+  run({...context,manifest,asset,packed});
+});}
+
+test('partition build binds all stored inputs and refuses local-only publication',()=>partitionFixture(({args,root,asset})=>{
+  const proof=JSON.parse(readFileSync(join(args.outDir,PROVENANCE)));
+  assert.equal(proof.selection.partition_inputs['outputs/global/'+asset.file],asset.stored_sha256);
+  assert.equal(verifyBuild({...args,publish:false}).status,'verified');
+  assert.throws(()=>verifyBuild({...args,publish:true}),/public real-observation build/);
+  assert.equal(readReleasePartitions(join(root,args.manifestPath),JSON.parse(readFileSync(join(root,args.manifestPath)))).bytes,asset.stored_bytes);
+}));
+
+test('partition provenance rejects changed source and built assets',()=>partitionFixture(({args,root,put,asset,packed})=>{
+  put('outputs/global/'+asset.file,Buffer.alloc(packed.length));
+  assert.throws(()=>verifyBuild({...args,publish:false}),/partition identity mismatch/);
+  put('outputs/global/'+asset.file,packed);
+  put('dist/data/global/'+asset.file,Buffer.alloc(packed.length));
+  assert.throws(()=>verifyBuild({...args,publish:false}),/Built output changed/);
+}));
+
+test('changing a partition label cannot grant public release rights',()=>partitionFixture(({args,root,manifest})=>{
+  assert.throws(()=>readReleasePartitions(join(root,args.manifestPath),{...manifest,publication_status:'public-observations-pending-external-review'}),/partition manifest/);
+  assert.throws(()=>readReleasePartitions(join(root,args.manifestPath),{...manifest,stored_bytes:manifest.stored_bytes+1}),/totals mismatch/);
 }));
 
 test('compressed repository snapshot keeps decoded output identity and committed storage proof',()=>fixture(({root,put,commit,args,verify})=>{

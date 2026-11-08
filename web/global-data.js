@@ -1,11 +1,17 @@
 // Directory capacity is independent of the much smaller rendered graph.
 import {decodeGlobalTransport, MAX_DIRECTORY_NODES} from './global-transport.js';
+import {validatePartitionManifest, PARTITION_CAPACITY} from './global-partitions.js';
 export {MAX_DIRECTORY_NODES};
 
-export function validateGlobal(data) {
+export function validateGlobal(data, {partitionManifest} = {}) {
   data = decodeGlobalTransport(data);
   if (data?.schema_version !== 'gapi-global-observed/v1' || data.dataset_kind !== 'real/global-public-observations') throw new Error('Invalid real global observation schema');
-  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || data.nodes.length > MAX_DIRECTORY_NODES || data.edges.length > 200000) throw new Error('Global slice exceeds browser budget');
+  const capacity=partitionManifest?PARTITION_CAPACITY:{nodes:MAX_DIRECTORY_NODES,edges:200000};
+  if(partitionManifest){
+    validatePartitionManifest(partitionManifest);
+    if(data.publication_status!==partitionManifest.publication_status||data.nodes?.length!==partitionManifest.nodes||data.edges?.length!==partitionManifest.edges)throw new Error('Partition selection mismatch');
+  }
+  if (!Array.isArray(data.nodes) || !Array.isArray(data.edges) || data.nodes.length > capacity.nodes || data.edges.length > capacity.edges) throw new Error('Global slice exceeds browser budget');
   const ids = new Set();
   const scores = new Map();
   for (const node of data.nodes) {
@@ -129,9 +135,13 @@ export const NETWORK_VIEWS = Object.freeze({
 });
 
 export function networkSlice(data, filters = {}, view = 'all') {
+  return networkSliceFromEdges(data, selectEdges(data, filters), view);
+}
+
+// Consume selectEdges' already ordered result; do not repeat its policy/sort.
+export function networkSliceFromEdges(data, edges, view = 'all') {
   const limits = Object.hasOwn(NETWORK_VIEWS, view) ? NETWORK_VIEWS[view] : null;
   if (!limits) throw new Error('Unknown network view');
-  const edges = selectEdges(data, filters);
   const ids = new Set();
   const visible = [];
   for (const edge of edges) {

@@ -13,6 +13,7 @@ import zlib
 from functools import lru_cache
 from .queue_storage import COLUMNS, unpack_digest
 from .evidence_storage import unpack_url
+from .projection_storage import _bounded_block_cache
 
 MAGIC = b'GAPIz1\0'
 MAX_BYTES = 16384
@@ -195,7 +196,7 @@ def decode_event(db, value):
             reader.close()
         if row is None:
             raise ValueError('event block missing')
-        # Always read actual bytes before consulting the one-block cache.
+        # Always read actual bytes before consulting the bounded block cache.
         # A changed or missing dependency must not reuse validated old content.
         values = _decoded_stored_block(key, row[0])
         if slot >= len(values):
@@ -204,10 +205,13 @@ def decode_event(db, value):
     return unpack(value,dictionary_lookup=lambda key:load_dictionary(db,key))
 
 
-@lru_cache(maxsize=1)
-def _decoded_stored_block(key, body):
-    # Retain one block only. Its framed UTF-8 input is bounded by MAX_BLOCK_BYTES;
-    # Python strings and tuple overhead add to that byte bound.
+@_bounded_block_cache
+def _decoded_stored_block(key, body, legacy=False):
+    # Reuse the existing 8 MiB/128-entry cache owner. It accounts compressed
+    # bytes, decoded strings and containers, and keys on actual stored bytes.
+    # Event blocks have no legacy projection framing.
+    if legacy:
+        raise ValueError('event blocks do not support legacy projection framing')
     return decode_event_block(key, body)
 
 
@@ -384,15 +388,18 @@ def repack_event_pages(store, *, after_rowid=0, max_events=20000, max_seconds=60
             'note':'internal reusable capacity only; resume with committed after_rowid'}
 
 
-def repack_event_blocks(store, *, after_rowid=0, max_events=20000, max_seconds=60):
+def repack_event_blocks(store, *, after_rowid=0, max_events=20000, max_seconds=60, commit_blocks=8):
     """Opt-in, bounded replacement under CareerStore's existing writer lock.
 
     Commit the block and every reference atomically. Existing references are
     immutable and skipped, making retries idempotent. No source fact, scalar,
     event identity, rowid or index is removed. Snapshots remain self-contained.
+    Up to 64 blocks may share one bounded transaction; the default remains eight.
     The returned cursor covers committed batches only; no live collector calls
     this maintenance function automatically.
     """
+    if type(commit_blocks) is not int or not 1 <= commit_blocks <= 64:
+        raise ValueError('invalid event block commit limit')
     columns = _validate_event_repack(store, after_rowid, max_events, max_seconds)
     from .ranking_snapshot import quoted
     payload_index = columns.index('payload')+1
@@ -405,42 +412,51 @@ def repack_event_blocks(store, *, after_rowid=0, max_events=20000, max_seconds=6
         reader = store.db.cursor(); reader.row_factory = None
         try:
             rows = reader.execute('SELECT rowid,* FROM events WHERE rowid>? ORDER BY rowid LIMIT ?',
-                (cursor, min(MAX_BLOCK_EVENTS, max_events-scanned))).fetchall()
+                (cursor, min(MAX_BLOCK_EVENTS*commit_blocks, max_events-scanned))).fetchall()
         finally:
             reader.close()
         if not rows:
             break
-        pending = [row for row in rows if not (
-            isinstance(row[payload_index], bytes) and row[payload_index].startswith(BLOCK_MAGIC))]
-        if pending:
-            texts = [decode_event(store.db, row[payload_index]) for row in pending]
-            key, body = encode_event_block(texts)
-            old_bytes = sum(len(value.encode('utf-8')) if isinstance(value, str) else len(value)
-                            for value in (row[payload_index] for row in pending))
-            benefit = old_bytes-len(body)-BLOCK_REFERENCE_BYTES*len(pending)-128
-            if benefit > 0:
-                with store.member('storage-page-repack', 'event-blocks', max_growth_bytes=8*1024**2):
-                    store.db.execute(BLOCK_DDL)
-                    store.db.execute('INSERT OR IGNORE INTO event_blocks VALUES(?,?)', (key, body))
-                    replacements = []
-                    for slot, (row, text) in enumerate(zip(pending, texts)):
-                        ref = BLOCK_MAGIC+key+slot.to_bytes(2, 'big')
-                        if decode_event(store.db, ref) != text:
-                            raise ValueError('stored event block conflicts with predecessor')
-                        replacements.append((*row[:payload_index], ref, *row[payload_index+1:]))
-                    store.db.executemany('DELETE FROM events WHERE rowid=?', [(row[0],) for row in pending])
-                    store.db.executemany(insert, replacements)
-                    reader = store.db.cursor(); reader.row_factory = None
-                    try:
-                        actual = reader.execute('SELECT rowid,* FROM events WHERE rowid>=? AND rowid<=? ORDER BY rowid',
-                            (rows[0][0], rows[-1][0])).fetchall()
-                    finally:
-                        reader.close()
-                    expected = {row[0]: row for row in replacements}
-                    if actual != [expected.get(row[0], row) for row in rows]:
-                        raise ValueError('event block replacement changed stored rows')
-                    store.task.check_memory()
-                changed += len(pending); blocks += 1; saved += benefit
+        batch_rows = rows
+        batch_changed = batch_blocks = batch_saved = 0
+        # At most 8192 physical rows; decode only one <=128-event block at a
+        # time. The original 8 MiB growth cap and both admissions still apply.
+        with store.member('storage-page-repack', 'event-blocks',
+                          max_growth_bytes=min(8*1024**2, 1024**2*commit_blocks)):
+            for offset in range(0, len(batch_rows), MAX_BLOCK_EVENTS):
+                rows = batch_rows[offset:offset+MAX_BLOCK_EVENTS]
+                pending = [row for row in rows if not (
+                    isinstance(row[payload_index], bytes) and row[payload_index].startswith(BLOCK_MAGIC))]
+                if pending:
+                    texts = [decode_event(store.db, row[payload_index]) for row in pending]
+                    key, body = encode_event_block(texts)
+                    old_bytes = sum(len(value.encode('utf-8')) if isinstance(value, str) else len(value)
+                                    for value in (row[payload_index] for row in pending))
+                    benefit = old_bytes-len(body)-BLOCK_REFERENCE_BYTES*len(pending)-128
+                    if benefit > 0:
+                        store.db.execute(BLOCK_DDL)
+                        store.db.execute('INSERT OR IGNORE INTO event_blocks VALUES(?,?)', (key, body))
+                        replacements = []
+                        for slot, (row, text) in enumerate(zip(pending, texts)):
+                            ref = BLOCK_MAGIC+key+slot.to_bytes(2, 'big')
+                            if decode_event(store.db, ref) != text:
+                                raise ValueError('stored event block conflicts with predecessor')
+                            replacements.append((*row[:payload_index], ref, *row[payload_index+1:]))
+                        store.db.executemany('DELETE FROM events WHERE rowid=?', [(row[0],) for row in pending])
+                        store.db.executemany(insert, replacements)
+                        reader = store.db.cursor(); reader.row_factory = None
+                        try:
+                            actual = reader.execute('SELECT rowid,* FROM events WHERE rowid>=? AND rowid<=? ORDER BY rowid',
+                                (rows[0][0], rows[-1][0])).fetchall()
+                        finally:
+                            reader.close()
+                        expected = {row[0]: row for row in replacements}
+                        if actual != [expected.get(row[0], row) for row in rows]:
+                            raise ValueError('event block replacement changed stored rows')
+                        store.task.check_memory()
+                        batch_changed += len(pending); batch_blocks += 1; batch_saved += benefit
+        changed += batch_changed; blocks += batch_blocks; saved += batch_saved
+        rows = batch_rows
         scanned += len(rows); cursor = rows[-1][0]
     return {'scanned_events': scanned, 'after_rowid': cursor, 'repacked_events': changed,
             'new_blocks': blocks, 'estimated_payload_bytes_saved': saved,

@@ -96,6 +96,10 @@ class OrcidPaxTests(unittest.TestCase):
         data=pax_archive(record(b'path=../escape'))
         store=self.store(data);task=store.task;store.close()
         class HTTP:
+            def within(self,seconds):
+                return __import__('contextlib').nullcontext()
+            def open_archive(self,source):
+                return self.open(task.config['sources'][source]['url'])
             def open(self,url):return io.BytesIO(data)
             def close(self):pass
         args=SimpleNamespace(command='ingest-orcid',source='orcid-2026-summary',

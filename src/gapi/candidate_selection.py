@@ -22,6 +22,30 @@ def candidate_rowid_filter(upper):
     return ' AND d.rowid<=?', (upper,)
 
 
+def annual_reuse_filter(task):
+    """Opt-in frozen-scope route: retain error-document failures and reuse normal
+    annual records. Neither outcome becomes an API member or API success.
+
+    Every lookup is against the indexed member identity and a verified run of
+    the exact frozen source. Changed source generations stop matching. Size and
+    field limits, unknown diagnostics and absent members remain requestable.
+    """
+    from .career_store import source_identity
+    from .orcid_stream import summary_roots, error_document_reasons
+    clauses=[];parameters=[]
+    for source,spec in sorted(task.config['sources'].items()):
+        if spec.get('kind')!='orcid-summary-tar-gzip':continue
+        roots=[prefix+root for root in summary_roots(spec) for prefix in ('','./')]
+        locators=','.join("?||'/'||substr(d.identifier,-3)||'/'||d.identifier||'.xml'" for _ in roots)
+        reasons=error_document_reasons()
+        clauses.append("""NOT EXISTS(SELECT 1 FROM runs ar JOIN members am ON am.source=ar.source
+            WHERE ar.source=? AND ar.identity=? AND ar.status='verified'
+            AND am.locator IN ("""+locators+") AND (am.status='observed' OR (am.status='rejected' AND am.reason IN ("+
+            ','.join('?' for _ in reasons)+'))))')
+        parameters.extend((source,source_identity(task,source),*roots,*reasons))
+    return ((' AND '+ ' AND '.join(clauses)) if clauses else ''),tuple(parameters)
+
+
 def _sources(progress):
     return [{key: row[key] for key in ('source','candidates','selection_sha256')}
             for row in progress['sources']]

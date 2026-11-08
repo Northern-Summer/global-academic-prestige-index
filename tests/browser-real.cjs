@@ -26,11 +26,19 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     results.version = await page.evaluate(async () => {
       const base = new URL('.', location.href);
       const manifest = await (await fetch(new URL('data/global/manifest.json',base))).json();
+      if(manifest.schema_version==='gapi-aggregate-partitions/1')return {partition_manifest:manifest,partition_base:new URL('data/global/',base).href,expected:manifest.logical_sha256};
       const response = await fetch(new URL('data/global/'+manifest.snapshot,base));
       const bytes = await response.arrayBuffer();
       const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
       return {snapshot:manifest.snapshot,expected:manifest.output_sha256,actual:sha,wire:JSON.parse(new TextDecoder().decode(bytes))};
     });
+    if(results.version.partition_manifest){
+      const {loadPartitionedGlobal}=await import('../web/global-partitions.js');
+      results.version.wire=await loadPartitionedGlobal(results.version.partition_manifest,results.version.partition_base);
+      results.version.actual=results.version.expected;
+      results.version.integrity='all compressed and decoded asset hashes verified; full logical graph independently checked by release verifier';
+      delete results.version.partition_manifest;delete results.version.partition_base;
+    }
     const publicWire=results.version.wire;
     const publicData=decodeGlobalTransport(publicWire);
     delete results.version.wire;

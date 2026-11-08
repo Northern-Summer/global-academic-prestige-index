@@ -16,6 +16,427 @@ class AnalysisTests(unittest.TestCase):
     setUp = fixtures.StreamingTests.setUp
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
+
+    def test_partition_publication_preflight_binds_verifier_policy_and_source_generation(self):
+        import copy
+        from pathlib import Path
+        from gapi.publication import partition_release_preflight
+        from gapi.career_store import source_identity
+        from gapi.task import digest
+        s=self.store(archive([]))
+        try:
+            manifest={'schema_version':'gapi-aggregate-partitions/1','publication_status':'local-only-source-license-review',
+                      'logical_sha256':'a'*64,'logical_bytes':123,'nodes':2,'edges':1}
+            policy=json.loads(Path('configs/publication-20261029.json').read_bytes())
+            runs=[{'source':'orcid-2026-summary','identity':source_identity(s.task,'orcid-2026-summary'),'status':'verified','members':1}]
+            independent={'status':'passed','manifest_sha256':digest(manifest),'logical_sha256':'a'*64,'logical_bytes':123,'nodes':2,'edges':1,
+                         'ordering_consistent':True,'max_score_error':1e-18,'probability_mass':1.0}
+            result=partition_release_preflight(s.task,manifest,policy,runs,independent)
+            self.assertEqual(result['qualification'],'public-observations-pending-external-review')
+            self.assertFalse(result['formal_ranking_qualified']);self.assertFalse(result['independent_personal_facts_verified'])
+            for update in ({'manifest_sha256':'b'*64},{'edges':2},{'ordering_consistent':False},
+                           {'max_score_error':float('nan')},{'max_score_error':True},{'probability_mass':float('nan')},
+                           {'probability_mass':False},{'probability_mass':.9}):
+                with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,policy,runs,{**independent,**update})
+            for update in ({'identity':'c'*64},{'status':'partial'},{'members':False},{'source':'unknown'}):
+                with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,policy,[{**runs[0],**update}],independent)
+            with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,None,runs,independent)
+            with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,policy,runs+runs,independent)
+            bad=copy.deepcopy(policy);bad['purpose']='commercial'
+            with self.assertRaises(ValueError):partition_release_preflight(s.task,manifest,bad,runs,independent)
+        finally:s.close()
+
+    def test_complete_additive_result_equals_full_analysis_and_refuses_drift(self):
+        import gzip,hashlib,copy
+        from gapi.analysis_checkpoint import GraphCheckpoint,AdditiveGraph
+        from gapi.aggregate_chunks import write
+        from gapi.aggregate_partitions import repartition
+        from gapi.global_analysis import relation_rows,complete_additive_result,_rank_graph,DEFAULT_CONFIG
+        from gapi.task import digest,canonical
+        s=self.store(archive([]))
+        try:
+            annual='orcid-2026-summary';s.start(annual)
+            def fact(source,person,inst,kind,stage,start,end,role):
+                return dict(source=source,person=person,institution=inst,kind=kind,stage=stage,
+                            year_start=start,year_end=end,role=role,locator='fixture',status='observed',country='CN')
+            with s.member(annual,'fixture'):
+                s.event(fact(annual,'baseline','A','education','doctorate',1990,1995,'PhD'))
+                s.event(fact(annual,'baseline','B','employment','academic',2000,None,'Professor'))
+                s.finish_member(annual,'fixture','a'*64)
+            s.status(annual,'verified')
+            with s.db:s.db.execute("INSERT INTO institution_aliases VALUES('alias:A','A','fixture')")
+            baseline=rank_global(s,checkpoint=True)
+            cp=GraphCheckpoint(s,None);state=cp.load();cp.write_compact(state)
+            legacy=s.task.root/'legacy';previous=s.task.root/'partitions';write(s.task,baseline,legacy);repartition(s.task,legacy,previous)
+            pinned=hashlib.sha256((previous/'manifest.json').read_bytes()).hexdigest()
+            binding=cp.binding;predecessor={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (
+                cp.path.with_suffix('.compact'),s.task.root/'analysis-training-denominators-74234e98afe7498f.json.gz')}
+            api='orcid-public-api';s.start(api);person=private_person(PERSON)
+            with s.member(api,PERSON):
+                s.event(dict(fact(api,person,'alias:A','education','doctorate',1991,1996,'PhD'),locator=PERSON))
+                s.event(dict(fact(api,person,'B','employment','academic',2001,None,'Professor'),locator=PERSON))
+                s.finish_member(api,PERSON,'b'*64)
+            events=[{'id':i,'payload':json.loads(text)} for i,text in s.db.execute('SELECT id,payload FROM events WHERE person=? ORDER BY id',(person,))]
+            rel=list(relation_rows(s,persons=(person,)))
+            delta={'schema_version':'gapi-private-additive-input/1','predecessor_binding':binding,
+                   'predecessor_files':predecessor,'people':[person],'events':events,
+                   'recovered_member_ledger':[list(s.db.execute('SELECT locator,sha256,status,reason FROM members WHERE source=? AND locator=?',(api,PERSON)).fetchone())],
+                   'relations':[{'key':list(k),'training':train,'job':job} for k,train,job in rel],
+                   'training_person_institution_pairs':[[person,'A']],'event_delta':2,'people_delta':1,'member_delta':1,'observed_event_delta':{'observed':2}}
+            graph=AdditiveGraph(GraphCheckpoint(s,None)._load_compact(cp.path.with_suffix('.compact'),expected_binding=binding)['edges'],{('B','A'):1.})
+            nodes=['A','B'];scores,conv=_rank_graph(s,nodes,graph,.85,1e-12,200)
+            base={'delta_sha256':digest(delta),'complete_aggregate':False,'nodes':nodes,'edges':1,'scores':scores,
+                  'ranks':{n:i+1 for i,n in enumerate(sorted(scores,key=lambda n:(-scores[n],n)))},'convergence':conv}
+            changes=s.db.total_changes
+            result=complete_additive_result(s,delta=delta,base_scores=base,previous_directory=previous,previous_manifest_sha256=pinned)
+            result['nodes']=list(result['nodes']);result['edges']=list(result['edges'])
+            full=rank_global(s)
+            self.assertEqual(result['coverage'],full['coverage']);self.assertEqual(result['edges'],full['edges'])
+            self.assertEqual(result['sensitivity'],full['sensitivity'])
+            self.assertEqual(result['nodes'],full['nodes']);self.assertEqual(s.db.total_changes,changes)
+            bad=copy.deepcopy(delta);bad['events'][0]['payload']['role']='changed'
+            with self.assertRaises(ValueError):complete_additive_result(s,delta=bad,base_scores={**base,'delta_sha256':digest(bad)},previous_directory=previous,previous_manifest_sha256=pinned)
+        finally:s.close()
+
+    def test_additive_graph_overlay_preserves_sorted_pagerank_and_baseline(self):
+        from gapi.analysis_checkpoint import AdditiveGraph
+        from gapi.global_analysis import _rank_graph
+        s=self.store(archive([]))
+        try:
+            base={('b','c'):2.,('c','a'):1.};original=dict(base)
+            additions={('a','b'):.6,('b','c'):.35,('z','a'):1.}
+            overlay=AdditiveGraph(base,additions);additions[('a','b')]=100.
+            expected={('a','b'):.6,('b','c'):2.35,('c','a'):1.,('z','a'):1.}
+            self.assertEqual(list(overlay.items()),list(expected.items()))
+            self.assertEqual(list(overlay.items()),list(expected.items()))
+            self.assertEqual(len(overlay),4);self.assertEqual(base,original)
+            nodes=['a','b','c','z','dangling']
+            scores,conv=_rank_graph(s,nodes,overlay,.85,1e-12,200)
+            reference,_=_rank_graph(s,nodes,expected,.85,1e-12,200)
+            self.assertTrue(conv['converged'])
+            for n in nodes:self.assertAlmostEqual(scores[n],reference[n],places=14)
+            self.assertEqual(sorted(scores,key=lambda n:(-scores[n],n)),sorted(reference,key=lambda n:(-reference[n],n)))
+            self.assertEqual(list(AdditiveGraph(base,{}).items()),list(base.items()))
+            from gapi.analysis_checkpoint import PackedMap,PackedRows
+            import struct
+            # Real compact checkpoints retain accumulation order, not key order.
+            packed=PackedMap(['a','b','c'],PackedRows(
+                struct.pack('<IId',2,0,1.)+struct.pack('<IId',1,2,2.),'<IId'),'edge')
+            self.assertEqual(list(AdditiveGraph(packed,{('a','b'):.6,('b','c'):.35}).items()),
+                             [(('a','b'),.6),(('b','c'),2.35),(('c','a'),1.)])
+            for bad in ({('a','b'):0},{('a','b'):-1},{('a','b'):True},{('a','b'):float('nan')},{'ab':1}):
+                with self.assertRaises(ValueError):AdditiveGraph(base,bad)
+            with self.assertRaises(ValueError):AdditiveGraph(dict(reversed(list(base.items()))),{})
+        finally:s.close()
+
+    def test_bounded_person_relations_match_selected_full_result_without_scan(self):
+        from gapi.global_analysis import relation_rows
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=[row for row in relation_rows(s) if row[1]['person']=='private-person']
+            self.assertTrue(expected)
+            # Unrelated corrupt payload must not be read by the bounded query.
+            with s.db:s.db.execute("UPDATE events SET payload='{' WHERE person='restricted-person'")
+            statements=[];s.db.set_trace_callback(statements.append)
+            selected=list(relation_rows(s,persons=('private-person',)))
+            s.db.set_trace_callback(None)
+            self.assertEqual(selected,expected)
+            self.assertTrue(any('e.person IN (' in sql for sql in statements))
+            self.assertFalse(list(relation_rows(s,persons=('not-present',))))
+            self.assertFalse(list(relation_rows(s,allowed_sources={'orcid-public-api'},persons=('private-person',))))
+            self.assertEqual(list(relation_rows(s,persons=('private-person',))),selected)
+            for value in ([],['private-person']*2,[''],[None],'private-person',list(map(str,range(1001)))):
+                with self.assertRaises(ValueError):list(relation_rows(s,persons=value))
+            with self.assertRaises(ValueError):list(relation_rows(s,persons=('private-person',),after_person='a'))
+        finally:s.close()
+
+    def test_streamed_intensity_matches_reference_with_dangling_nodes(self):
+        from collections import Counter
+        from unittest.mock import patch
+        from gapi.global_analysis import _rank_intensity
+        from gapi.ranking import pagerank,pagerank_sparse
+        from gapi.analysis_checkpoint import PackedMap,PackedRows
+        import struct
+        s=self.store(archive([]))
+        try:
+            nodes=['a','b','c'];edges={('a','b'):2.,('a','c'):.5,('b','a'):1.}
+            counts=Counter({'a':3,'b':5})
+            expected,_=pagerank(nodes,{pair:w/max(1,counts[pair[1]]) for pair,w in edges.items()},.85,1e-12,200)
+            previous,_=pagerank_sparse(nodes,((a,b,w/max(1,counts[b])) for (a,b),w in sorted(edges.items())),.85,1e-12,200)
+            packed=PackedMap(nodes,PackedRows(b''.join(struct.pack('<IId',nodes.index(a),nodes.index(b),w)
+                for (a,b),w in sorted(edges.items())),'<IId'),'edge')
+            with patch('gapi.global_analysis.PACKED_GRAPH_THRESHOLD',0):
+                for value in (edges,packed):
+                    actual,conv=_rank_intensity(s,nodes,value,counts)
+                    self.assertTrue(conv['converged'])
+                    self.assertAlmostEqual(sum(actual.values()),1,places=12)
+                    for node in nodes:self.assertAlmostEqual(actual[node],expected[node],places=12)
+                    self.assertEqual(actual,previous)
+                    self.assertEqual(sorted(actual,key=lambda n:(-actual[n],n)),sorted(expected,key=lambda n:(-expected[n],n)))
+        finally:s.close()
+
+    def test_analysis_progress_reports_phases_without_changing_result(self):
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=rank_global(s)
+            changes=s.db.total_changes;messages=[]
+            actual=rank_global(s,progress=messages.append)
+            self.assertEqual(actual,expected)
+            self.assertEqual(s.db.total_changes,changes)
+            phases=[item['phase'] for item in messages]
+            for phase in ('relations','base_pagerank','institution_labels','institution_directory',
+                          'sensitivity','training_denominators','intensity_pagerank',
+                          'coverage_counts','evidence_metadata','aggregate_ready'):
+                self.assertIn(phase,phases)
+            self.assertEqual(phases[-1],'aggregate_ready')
+            self.assertTrue(all(item['elapsed_seconds']>=0 for item in messages))
+            self.assertTrue(all(set(item)<= {'phase','elapsed_seconds','resumed_complete',
+                'nodes','edges','relations','scanned_rows','institutions','scenario','source'} for item in messages))
+        finally:s.close()
+
+    def test_graph_checkpoint_resume_skips_committed_people_and_matches_full_result(self):
+        from unittest.mock import patch
+        from gapi.analysis_checkpoint import GraphCheckpoint
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            rows=[json.loads(row[0]) for row in s.db.execute("SELECT payload FROM events WHERE source='wikidata'")]
+            with s.db:
+                for pid in ('a','z'):
+                    for row in rows:s.event(dict(row,person=pid))
+            expected=rank_global(s)
+            changes=s.db.total_changes
+            original=GraphCheckpoint.boundary
+            def interrupt(checkpoint,person,state):
+                original(checkpoint,person,state)
+                raise RuntimeError('interrupted after committed person')
+            with patch('gapi.analysis_checkpoint.CHECKPOINT_SECONDS',0),patch.object(GraphCheckpoint,'boundary',interrupt):
+                with self.assertRaisesRegex(RuntimeError,'committed person'):
+                    rank_global(s,checkpoint=True)
+            saved=GraphCheckpoint(s,None);state=saved.load()
+            self.assertEqual(saved.after_person,'a')
+            self.assertEqual(state['relation_count'],1)
+            queries=[];s.db.set_trace_callback(queries.append)
+            actual=rank_global(s,checkpoint=True)
+            s.db.set_trace_callback(None)
+            self.assertEqual(actual,expected)
+            self.assertTrue(any("e.person>'a'" in sql for sql in queries))
+            # Later sensitivity passes deliberately evaluate their own sources;
+            # the first pass itself resumed strictly after a, as SQL seek proves.
+            self.assertTrue(GraphCheckpoint(s,None).load())
+            self.assertEqual(s.db.total_changes,changes)
+            self.assertEqual(rank_global(s,checkpoint=True),expected)
+        finally:s.close()
+
+    def test_completed_compact_checkpoint_matches_full_result_without_first_pass(self):
+        from unittest.mock import patch
+        from gapi.analysis_checkpoint import GraphCheckpoint
+        from gapi.global_analysis import relation_rows
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=rank_global(s,checkpoint=True)
+            cp=GraphCheckpoint(s,None);state=cp.load()
+            original=cp.path.read_bytes();changes=s.db.total_changes
+            target=cp.write_compact(state);first=target.read_bytes()
+            self.assertEqual(cp.write_compact(state).read_bytes(),first)
+            calls=[]
+            def observe(*args,**kwargs):
+                calls.append(kwargs)
+                self.assertIsNotNone(kwargs.get('allowed_sources'))
+                return relation_rows(*args,**kwargs)
+            with patch('gapi.global_analysis.relation_rows',side_effect=observe):
+                actual=rank_global(s,checkpoint=True)
+            self.assertEqual(actual,expected)
+            self.assertEqual(cp.path.read_bytes(),original)
+            self.assertEqual(s.db.total_changes,changes)
+            with patch('gapi.global_analysis._write_aggregate',side_effect=OSError('injected')):
+                with self.assertRaises(OSError):cp.write_compact(state)
+            self.assertEqual(target.read_bytes(),first)
+            with patch('gapi.analysis_checkpoint.input_binding',return_value='drift'):
+                with self.assertRaisesRegex(ValueError,'matching input'):cp.write_compact(state)
+        finally:s.close()
+
+    def test_graph_checkpoint_interruption_inside_person_reprocesses_only_unsaved_group(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import observed_relations
+        from gapi.analysis_checkpoint import GraphCheckpoint
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            rows=[json.loads(row[0]) for row in s.db.execute("SELECT payload FROM events WHERE source='wikidata'")]
+            with s.db:
+                for row in rows:s.event(dict(row,person='a'))
+                training=next(row for row in rows if row['kind']=='education')
+                s.event(dict(training,institution='wd:Q3',stage='bachelor',year_end=1999))
+            expected=rank_global(s)
+            def interrupt(events):
+                for row in observed_relations(events):
+                    yield row
+                    if events[0]['person']=='private-person':
+                        raise RuntimeError('interrupted inside unsaved person')
+            with patch('gapi.analysis_checkpoint.CHECKPOINT_SECONDS',0),patch(
+                    'gapi.global_analysis.observed_relations',side_effect=interrupt):
+                with self.assertRaisesRegex(RuntimeError,'unsaved person'):
+                    rank_global(s,checkpoint=True)
+            cursor=GraphCheckpoint(s,None);saved=cursor.load()
+            self.assertEqual(cursor.after_person,'a')
+            self.assertEqual(saved['relation_count'],1)
+            self.assertEqual(rank_global(s,checkpoint=True),expected)
+        finally:s.close()
+
+    def test_empty_source_universe_requires_no_database_scan(self):
+        from unittest.mock import Mock
+        from gapi.global_analysis import relation_rows
+        store=Mock()
+        store.db.execute.side_effect=AssertionError('empty source universe scanned input')
+        self.assertEqual(list(relation_rows(store,allowed_sources=set())),[])
+        store.db.execute.assert_not_called()
+
+    def test_relation_alias_lookup_keeps_issue_exclusions_and_refreshes(self):
+        from gapi.global_analysis import relation_rows
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:
+                s.db.executemany('INSERT INTO institution_aliases VALUES(?,?,?)',[
+                    ('wd:Q1','ror:training','test'),('wd:Q2','ror:job','test')])
+                s.db.execute('INSERT INTO institution_alias_issues VALUES(?,?,?,?)',
+                    ('wd:Q2','test','ambiguous','{}'))
+            first=list(relation_rows(s,allowed_sources={'wikidata'}))
+            self.assertEqual([row[0] for row in first],[('wd:Q2','ror:training','doctorate')])
+            with s.db:
+                s.db.execute('DELETE FROM institution_alias_issues WHERE alias=?',('wd:Q2',))
+            second=list(relation_rows(s,allowed_sources={'wikidata'}))
+            self.assertEqual([row[0] for row in second],[('ror:job','ror:training','doctorate')])
+            self.assertEqual(second[0][1]['institution'],'ror:training')
+            self.assertEqual(second[0][2]['institution'],'ror:job')
+        finally:s.close()
+
+    def test_relation_alias_memory_stop_does_not_mutate_store(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import relation_rows
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            before=s.db.total_changes
+            with patch.object(s.task,'check_memory',side_effect=BudgetStop('memory bound')):
+                with self.assertRaisesRegex(BudgetStop,'memory bound'):
+                    list(relation_rows(s))
+            self.assertEqual(s.db.total_changes,before)
+            self.assertFalse(s.db.in_transaction)
+        finally:s.close()
+
+    def test_relation_payload_decoding_occurs_only_after_effective_eligibility(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import relation_rows
+        from gapi.event_storage import decode_event,pack
+        from gapi.career_normalization import DDL,VERSION,POLICY_SHA256
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            rows=list(s.db.execute("SELECT id,payload FROM events WHERE source='wikidata' ORDER BY id"))
+            identifier,text=rows[0]
+            with s.db:
+                s.db.execute("UPDATE events SET status='unresolved',payload=? WHERE id=?",(pack(text),identifier))
+            with patch('gapi.event_storage.decode_event',wraps=decode_event) as decoder:
+                list(relation_rows(s,allowed_sources={'wikidata'}))
+            self.assertEqual(decoder.call_count,len(rows)-1)
+            # A current interpretation can promote a scalar-unresolved row;
+            # delayed decoding must retain that row and original bytes.
+            s.db.executescript(DDL)
+            value=json.loads(text)
+            with s.db:
+                s.db.execute('INSERT INTO event_interpretations VALUES(?,?,?,?,?,?,?)',
+                    (identifier,VERSION,POLICY_SHA256,value['kind'],value['stage'],'observed',0))
+            with patch('gapi.event_storage.decode_event',wraps=decode_event) as decoder:
+                actual=list(relation_rows(s,allowed_sources={'wikidata'}))
+            self.assertEqual(decoder.call_count,len(rows))
+            self.assertEqual(len(actual),1)
+        finally:s.close()
+
+    def test_ranking_coverage_matches_report_without_full_report_call(self):
+        from unittest.mock import patch
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=s.report()
+            with patch.object(s,'report',side_effect=AssertionError('unbounded report')):
+                actual=rank_global(s)
+            self.assertEqual(actual['coverage'],{k:expected[k] for k in ('people','events','countries','event_status','member_status')})
+        finally:s.close()
+
+    def test_packed_global_route_preserves_all_scenarios_and_output(self):
+        from unittest.mock import patch
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=rank_global(s)
+            with patch('gapi.global_analysis.PACKED_GRAPH_THRESHOLD',0):
+                actual=rank_global(s)
+            def compare(a,b):
+                if isinstance(a,float):
+                    self.assertAlmostEqual(a,b,places=12)
+                elif isinstance(a,dict):
+                    self.assertEqual(a.keys(),b.keys())
+                    for key in a:compare(a[key],b[key])
+                elif isinstance(a,list):
+                    self.assertEqual(len(a),len(b))
+                    for x,y in zip(a,b):compare(x,y)
+                else:self.assertEqual(a,b)
+            compare(expected,actual)
+            self.assertIn('region_balanced_prior',actual['sensitivity'])
+            self.assertTrue(actual['convergence']['converged'])
+        finally:s.close()
+
+    def test_large_graph_route_admits_all_edges_and_honors_memory_stop(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import _rank_graph
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            nodes=[str(i) for i in range(500)]
+            edges={(a,b):1.0 for a in nodes for b in nodes[:401]}
+            expected,_=__import__('gapi.ranking',fromlist=['pagerank']).pagerank(nodes,edges,.85,1e-12,200)
+            actual,conv=_rank_graph(s,nodes,edges,.85,1e-12,200)
+            self.assertTrue(conv['converged'])
+            for node in nodes:self.assertAlmostEqual(expected[node],actual[node],places=12)
+            with patch.object(s.task,'check_memory',side_effect=[1,1,BudgetStop('graph memory boundary')]):
+                with self.assertRaisesRegex(BudgetStop,'graph memory boundary'):
+                    _rank_graph(s,nodes,edges,.85,1e-12,200)
+        finally:s.close()
+
+    def test_crosswalk_admits_more_than_old_count_cap_within_memory(self):
+        from gapi.global_analysis import resolve_institutions
+        s=self.store(archive([]))
+        try:
+            result=resolve_institutions(s,extra_identifiers=('external:'+str(i) for i in range(200001)))
+            self.assertEqual(result['resolved_identifiers'],0)
+            self.assertEqual(result['unresolved_identifiers'],200001)
+            self.assertEqual(result['name_similarity_merges'],0)
+        finally:s.close()
+
+    def test_crosswalk_memory_stop_bounds_generator_and_preserves_tables(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import resolve_institutions
+        from gapi.task import BudgetStop
+        s=self.store(archive([]));consumed=[]
+        try:
+            before=list(s.db.execute('SELECT * FROM institution_aliases'))
+            def identifiers():
+                for i in range(10000):
+                    consumed.append(i)
+                    yield 'external:'+str(i)
+            with patch.object(s.task,'check_memory',side_effect=[1,BudgetStop('memory pressure')]):
+                with self.assertRaisesRegex(BudgetStop,'memory pressure'):
+                    resolve_institutions(s,extra_identifiers=identifiers())
+            self.assertEqual(len(consumed),256)
+            self.assertEqual(list(s.db.execute('SELECT * FROM institution_aliases')),before)
+            self.assertEqual(s.db.execute('SELECT count(*) FROM entities').fetchone()[0],0)
+        finally:s.close()
     def seed(self,s):
         for source in ('wikidata','orcid-public-api'):
             s.start(source)
@@ -98,18 +519,246 @@ class AnalysisTests(unittest.TestCase):
             with s.db:
                 s.db.execute("UPDATE events SET payload=json_set(gapi_event_text(payload),'$.institution_name',id)")
             actual=rank_global(s,public=True)
-            sql='SELECT institution,payload,country,source FROM events WHERE institution IS NOT NULL ORDER BY id'
+            sql='SELECT id,institution,payload,country,source FROM events NOT INDEXED WHERE institution IS NOT NULL'
             plan=[row[-1] for row in s.db.execute('EXPLAIN QUERY PLAN '+sql)]
             self.assertFalse(any('TEMP B-TREE' in step for step in plan))
             original=s.db
             class PreviousQuery:
+                calls=0
                 def execute(self,query,*args):
-                    if query==sql:query=sql.replace('ORDER BY id','ORDER BY institution,id')
+                    if query==sql:
+                        self.calls+=1
+                        query=sql.replace(' NOT INDEXED','')+' ORDER BY institution,id'
                     return original.execute(query,*args)
                 def __getattr__(self,key):return getattr(original,key)
             s.db=PreviousQuery()
-            try:self.assertEqual(rank_global(s,public=True),actual)
+            try:
+                self.assertEqual(rank_global(s,public=True),actual)
+                self.assertEqual(s.db.calls,1)
             finally:s.db=original
+            # Independent oracle: the first nonempty label in ID order wins,
+            # while an authoritative entity label always takes precedence.
+            from gapi.global_analysis import public_sources
+            allowed=public_sources(s.task,None)
+            expected={}
+            for event_id,institution,payload,country,source in original.execute(
+                    sql.replace(' NOT INDEXED','')+' ORDER BY id'):
+                if source in allowed:
+                    label=json.loads(payload).get('institution_name')
+                    if label:expected.setdefault(institution,label)
+            expected.update((row[0],row[1]) for row in original.execute('SELECT id,name FROM entities'))
+            for node in actual['nodes']:
+                self.assertEqual(node['name'],expected.get(node['institution_id'],node['institution_id']))
+        finally:s.close()
+
+    def test_directory_scan_rejects_corrupt_payload_for_known_institution(self):
+        from unittest.mock import patch
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:
+                institution=s.db.execute('SELECT institution FROM events WHERE institution IS NOT NULL LIMIT 1').fetchone()[0]
+                s.db.execute('INSERT OR REPLACE INTO entities VALUES(?,?,?,?,?)',
+                    (institution,'Canonical label',None,1,'{}'))
+                s.db.execute('UPDATE events SET payload=? WHERE institution=?',('{',institution))
+            phases=[]
+            with patch('gapi.global_analysis.relation_rows',return_value=iter(())):
+                with self.assertRaises(json.JSONDecodeError):
+                    rank_global(s,progress=lambda row:phases.append(row['phase']))
+            self.assertEqual(phases[-1],'institution_labels')
+        finally:s.close()
+
+    def test_streamed_training_denominators_equal_distinct_sql(self):
+        from gapi.career_normalization import normalize_careers
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            original=s.db;queries=[]
+            base=json.loads(original.execute("SELECT payload FROM events WHERE kind='education' LIMIT 1").fetchone()[0])
+            with original:
+                for person in ('a','a'*64,'A'*64,'wd:Q1'):
+                    s.event(dict(base,person=person))
+            class Observe:
+                def execute(self,query,*args):
+                    if query.startswith('SELECT e.person,COALESCE(a.institution,e.institution)'):
+                        queries.append((query,args))
+                    return original.execute(query,*args)
+                def __getattr__(self,key):return getattr(original,key)
+            for interpreted in (False,True):
+                if interpreted:normalize_careers(s)
+                s.db=Observe()
+                try:actual=rank_global(s)
+                finally:s.db=original
+                query,args=queries[-1]
+                reference=query.replace('SELECT e.person,COALESCE(a.institution,e.institution)',
+                    'SELECT COALESCE(a.institution,e.institution),count(DISTINCT e.person)').replace(
+                    ' NOT INDEXED','')+' GROUP BY COALESCE(a.institution,e.institution)'
+                expected=dict(original.execute(reference,*args))
+                for node in actual['nodes']:
+                    self.assertEqual(node['observed_training_denominator'],expected.get(node['institution_id']) or None)
+                plan=[row[-1] for row in original.execute('EXPLAIN QUERY PLAN '+query,*args)]
+                self.assertFalse(any('TEMP B-TREE' in row for row in plan))
+            self.assertEqual(len(queries),2)
+        finally:s.close()
+
+    def test_training_denominator_sort_memory_failure_preserves_store(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import _training_denominators
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s);changes=s.db.total_changes
+            with patch.object(s.task,'check_memory',return_value=s.task.config['memory_bytes']):
+                with self.assertRaisesRegex(BudgetStop,'denominator sort'):
+                    _training_denominators(s,None,lambda *args,**kwargs:None)
+            self.assertEqual(s.db.total_changes,changes)
+            self.assertTrue(_training_denominators(s,None,lambda *args,**kwargs:None))
+        finally:s.close()
+
+    def test_completed_denominator_checkpoint_resume_and_failures(self):
+        import gzip,hashlib
+        from pathlib import Path
+        from unittest.mock import patch
+        from gapi.analysis_checkpoint import TrainingDenominatorCheckpoint,input_binding
+        from gapi.global_analysis import _training_denominators
+        from gapi.task import canonical,BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            expected=rank_global(s)
+            counts=_training_denominators(s,None,lambda *args,**kwargs:None)
+            cp=TrainingDenominatorCheckpoint(s,None)
+            original=s.task.root/'analysis-training-denominators.json.gz'
+            original.write_bytes(gzip.compress(canonical({'schema':'gapi-training-denominators/1',
+                'binding':input_binding(s,None),'counts':dict(counts),'source':'fixture'}),mtime=0))
+            sha=hashlib.sha256(original.read_bytes()).hexdigest()
+            code={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('src/gapi').glob('*.py')}
+            with self.assertRaisesRegex(ValueError,'identity mismatch'):
+                cp.import_completed(code,original_sha256='0'*64)
+            with patch('gapi.global_analysis._write_aggregate',side_effect=BudgetStop('capacity')):
+                with self.assertRaises(BudgetStop):cp.import_completed(code,original_sha256=sha)
+            self.assertFalse(cp.path.exists())
+            receipt=cp.import_completed(code,original_sha256=sha)
+            mtime=cp.path.stat().st_mtime_ns
+            self.assertEqual(cp.import_completed(code,original_sha256=sha),receipt)
+            self.assertEqual(cp.path.stat().st_mtime_ns,mtime)
+            with patch('gapi.global_analysis._training_denominators',side_effect=AssertionError('recomputed')):
+                self.assertEqual(rank_global(s,checkpoint=True),expected)
+            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),sha)
+            content=cp.path.read_bytes()
+            def next_generation(store,allowed,*,predecessor_code=None):
+                return cp.binding if predecessor_code is not None else '2'*64
+            with patch('gapi.analysis_checkpoint.input_binding',side_effect=next_generation):
+                advanced=TrainingDenominatorCheckpoint(s,None)
+                with self.assertRaisesRegex(ValueError,'receipt mismatch'):
+                    advanced.import_completed(code,original_sha256=sha)
+                migrated=advanced.import_completed(code,original_sha256=sha,predecessor_receipt=receipt)
+                self.assertEqual(advanced.load(),counts)
+                self.assertEqual(advanced.import_completed(code,original_sha256=sha,predecessor_receipt=receipt),migrated)
+            cp.path.write_bytes(content+b'trailing')
+            with self.assertRaisesRegex(ValueError,'stream bound'):cp.load()
+            cp.path.write_bytes(content)
+            with patch('gapi.analysis_checkpoint.input_binding',return_value='drift'):
+                with self.assertRaisesRegex(ValueError,'version drift'):
+                    TrainingDenominatorCheckpoint(s,None).load()
+            self.assertIsNone(TrainingDenominatorCheckpoint(s,set()).load())
+        finally:s.close()
+
+    def test_completed_directory_resume_and_atomic_failure(self):
+        from unittest.mock import patch
+        from gapi.analysis_checkpoint import InstitutionDirectoryCheckpoint
+        from gapi.global_analysis import _institution_directory
+        from gapi.task import BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s);expected=rank_global(s)
+            directory,ids=_institution_directory(s,None,lambda *args,**kwargs:None)
+            cp=InstitutionDirectoryCheckpoint(s,None)
+            with patch('gapi.global_analysis._write_aggregate',side_effect=BudgetStop('capacity')):
+                with self.assertRaises(BudgetStop):cp.save(directory,ids)
+            self.assertFalse(cp.path.exists())
+            cp.save(directory,ids);content=cp.path.read_bytes();mtime=cp.path.stat().st_mtime_ns
+            cp.save(directory,ids);self.assertEqual(cp.path.stat().st_mtime_ns,mtime)
+            with patch('gapi.global_analysis._institution_directory',side_effect=AssertionError('rescanned')):
+                self.assertEqual(rank_global(s,checkpoint=True),expected)
+            self.assertEqual(cp.load()[1],ids)
+            cp.path.write_bytes(content+b'garbage')
+            with self.assertRaisesRegex(ValueError,'stream bound'):cp.load()
+            cp.path.write_bytes(content)
+            with patch('gapi.analysis_checkpoint.input_binding',return_value='changed'):
+                with self.assertRaisesRegex(ValueError,'version drift'):
+                    InstitutionDirectoryCheckpoint(s,None).load()
+            self.assertIsNone(InstitutionDirectoryCheckpoint(s,set()).load())
+            with patch('gapi.global_analysis._write_aggregate',side_effect=OSError('write failed')):
+                with self.assertRaises(OSError):cp.save(directory,ids)
+            self.assertEqual(cp.path.read_bytes(),content)
+            import hashlib
+            from pathlib import Path
+            code={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('src/gapi').glob('*.py')}
+            sha=hashlib.sha256(content).hexdigest()
+            def generation(store,allowed,*,predecessor_code=None):
+                return cp.binding if predecessor_code is not None else '3'*64
+            with patch('gapi.analysis_checkpoint.input_binding',side_effect=generation):
+                newer=InstitutionDirectoryCheckpoint(s,None)
+                with self.assertRaisesRegex(ValueError,'identity mismatch'):
+                    newer.migrate_completed(code,original_sha256='0'*64)
+                with patch('gapi.global_analysis._write_aggregate',side_effect=OSError('failed')):
+                    with self.assertRaises(OSError):newer.migrate_completed(code,original_sha256=sha)
+                self.assertEqual(cp.path.read_bytes(),content)
+                receipt=newer.migrate_completed(code,original_sha256=sha)
+                self.assertEqual(receipt['current_binding'],'3'*64)
+                self.assertEqual(newer.load()[1],ids)
+                self.assertEqual(newer.load()[0],json.loads(json.dumps(directory)))
+        finally:s.close()
+
+    def test_streamed_coverage_matches_original_sql_for_source_scopes(self):
+        from gapi.global_analysis import _coverage_counts
+        s=self.store(archive([]))
+        try:
+            self.seed(s)
+            with s.db:s.db.execute("UPDATE events SET country='' WHERE source='wikidata'")
+            for allowed in (None,{'wikidata'},{'orcid-public-api'},set()):
+                where='' if allowed is None else ' WHERE source IN ('+','.join('?' for _ in allowed)+')'
+                params=() if allowed is None else tuple(sorted(allowed))
+                expected={'people':s.db.execute('SELECT count(DISTINCT person) FROM events'+where,params).fetchone()[0],
+                    'events':s.db.execute('SELECT count(*) FROM events'+where,params).fetchone()[0],
+                    'countries':[r[0] for r in s.db.execute('SELECT DISTINCT country FROM events'+where+
+                        (' WHERE' if allowed is None else ' AND')+' country IS NOT NULL'+
+                        ('' if allowed is None else " AND country<>''")+' ORDER BY country',params)],
+                    'event_status':dict(s.db.execute('SELECT status,count(*) FROM events'+where+' GROUP BY status',params)),
+                    'member_status':dict(s.db.execute('SELECT status,count(*) FROM members'+where+' GROUP BY status',params))}
+                changes=s.db.total_changes
+                self.assertEqual(_coverage_counts(s,allowed),expected)
+                self.assertEqual(s.db.total_changes,changes)
+        finally:s.close()
+
+    def test_completed_coverage_checkpoint_reuse_and_faults(self):
+        from unittest.mock import patch
+        from gapi.analysis_checkpoint import CoverageCheckpoint
+        from gapi.global_analysis import _coverage_counts
+        from gapi.task import canonical,BudgetStop
+        s=self.store(archive([]))
+        try:
+            self.seed(s);expected=rank_global(s);events=[]
+            coverage=_coverage_counts(s,None,lambda phase,**values:events.append(values))
+            self.assertEqual([e['source'] for e in events],
+                ['event-status-and-countries','unique-people','member-status'])
+            cp=CoverageCheckpoint(s,None)
+            with patch('gapi.global_analysis._write_aggregate',side_effect=BudgetStop('capacity')):
+                with self.assertRaises(BudgetStop):cp.save(coverage)
+            self.assertIsNone(cp.load());cp.save(coverage)
+            original=cp.path.read_bytes();mtime=cp.path.stat().st_mtime_ns
+            cp.save(coverage);self.assertEqual(mtime,cp.path.stat().st_mtime_ns)
+            with patch('gapi.global_analysis._coverage_counts',side_effect=AssertionError('recounted')):
+                self.assertEqual(rank_global(s,checkpoint=True),expected)
+            with self.assertRaisesRegex(ValueError,'reconciliation'):
+                cp.save(dict(coverage,events=coverage['events']+1))
+            self.assertEqual(cp.path.read_bytes(),original)
+            bad=json.loads(original);bad['binding']='changed';cp.path.write_bytes(canonical(bad))
+            with self.assertRaisesRegex(ValueError,'version drift'):cp.load()
+            cp.path.write_bytes(original+b'{}')
+            with self.assertRaises(ValueError):cp.load()
+            self.assertIsNone(CoverageCheckpoint(s,set()).load())
         finally:s.close()
 
     def test_versioned_noncommercial_publication_policy_allows_only_aggregate_fields(self):

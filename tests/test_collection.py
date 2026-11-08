@@ -44,6 +44,16 @@ class CollectionTests(unittest.TestCase):
             self.assertFalse(result['global_complete'])
         finally:s.close()
 
+    def test_collection_settlement_falls_back_to_source_rows_when_full_report_ooms(self):
+        s=self.store(archive([]))
+        try:
+            with patch.object(s,'report',side_effect=MemoryError('aggregate report exceeds heap')):
+                result=collect(s,None,max_seconds=1,discovery=False)
+            self.assertEqual(result['report']['report_scope'],'committed-source-runs-only')
+            self.assertEqual(result['report']['report_unavailable'],'MemoryError')
+            self.assertFalse(result['report']['complete_global_census'])
+        finally:s.close()
+
     def test_real_reader_contention_rolls_back_member_and_keeps_candidate_resumable(self):
         import sqlite3
         s=self.store(archive([]))
@@ -410,6 +420,31 @@ class CollectionTests(unittest.TestCase):
                 self.assertGreater(r['stages'][0]['members_per_second'],0)
             with self.assertRaisesRegex(ValueError,'queued-only'):
                 collect(s,None,{'id':'feed'},discovery=False)
+        finally:s.close()
+
+    def test_bounded_reporting_avoids_global_counts_and_preserves_commits(self):
+        s=self.store(archive([]))
+        statements=[]
+        try:
+            with s.db:
+                s.db.execute('INSERT INTO discovery VALUES(?,?,?,?)',('ingest-wikidata','Q1','a','b'))
+                s.db.execute('INSERT INTO members VALUES(?,?,?,?,?)',('orcid-2026-summary','unrelated','b'*64,'observed',None))
+            def ingest(store,http,ids,**kwargs):
+                store.start('wikidata')
+                with store.member('wikidata','Q1@1'):
+                    store.finish_member('wikidata','Q1@1','a'*64)
+            s.db.set_trace_callback(statements.append)
+            with patch('gapi.collection.ingest_wikidata',side_effect=ingest), patch.object(s,'report',side_effect=AssertionError('full report called')):
+                r=collect(s,None,discovery=False,max_seconds=10,full_report=False)
+            self.assertEqual(r['stages'][0]['new_members'],1)
+            self.assertEqual(r['stages'][0]['new_events'],0)
+            self.assertEqual(r['stages'][0]['events_scope'],'adapter-source-only')
+            self.assertEqual(r['stages'][0]['source'],'wikidata')
+            self.assertFalse(any(q.strip() in ('SELECT count(*) FROM events','SELECT count(*) FROM members') for q in statements))
+            self.assertFalse(s.pending('ingest-wikidata'))
+            self.assertEqual(s.seen('orcid-2026-summary','unrelated'),('b'*64,'observed'))
+            with self.assertRaises(ValueError):
+                collect(s,None,full_report=1)
         finally:s.close()
 
     def test_exhausted_academic_selection_continues_existing_degree_employer_feed(self):

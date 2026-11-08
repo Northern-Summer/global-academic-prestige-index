@@ -5,7 +5,7 @@ from unittest.mock import patch
 import test_streaming as fixtures
 from test_streaming import archive
 from gapi.career_store import CareerStore
-from gapi.monitoring import snapshot_report
+from gapi.monitoring import snapshot_report, settled_report
 from gapi.task import BudgetStop
 
 
@@ -13,6 +13,46 @@ class MonitoringTests(unittest.TestCase):
     setUp = fixtures.StreamingTests.setUp
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
+
+    def test_settled_report_refuses_writer_then_matches_owner_without_projection(self):
+        project=self.root/'settled-project'
+        project.mkdir()
+        self.enterContext(patch('gapi.task.project_root',return_value=project))
+        store=self.store(archive([]))
+        task=store.task
+        try:
+            with self.assertRaisesRegex(RuntimeError,'another task writer'):
+                settled_report(task)
+            expected=store.report()
+        finally:store.close()
+        before={p.name:p.stat().st_size for p in task.root.iterdir()}
+        original=(task.root/'careers.sqlite').read_bytes()
+        with patch('gapi.monitoring.report_projection',side_effect=AssertionError('projection')):
+            self.assertEqual(settled_report(task),expected)
+        self.assertEqual((task.root/'careers.sqlite').read_bytes(),original)
+        self.assertEqual({p.name:p.stat().st_size for p in task.root.iterdir()},before)
+
+    def test_settled_report_deadline_releases_exclusion_and_missing_db_stays_missing(self):
+        store=self.store(archive([]));task=store.task;store.close()
+        with patch('gapi.monitoring.time.monotonic',side_effect=[100,102]):
+            with self.assertRaises(BudgetStop):settled_report(task,max_seconds=1)
+        self.assertEqual(settled_report(task)['events'],0)
+        (task.root/'careers.sqlite').unlink()
+        with self.assertRaises(sqlite3.OperationalError):settled_report(task)
+        self.assertFalse((task.root/'careers.sqlite').exists())
+
+    def test_settled_report_query_interruption_releases_exclusion(self):
+        store=self.store(archive([]));task=store.task;store.close()
+        clock=[100]
+        def slow(view):
+            clock[0]=102
+            return view.db.execute('''WITH RECURSIVE seq(n) AS
+                (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<1000000)
+                SELECT sum(n) FROM seq''').fetchone()
+        with patch('gapi.monitoring.time.monotonic',side_effect=lambda:clock[0]),patch.object(CareerStore,'report',slow):
+            with self.assertRaisesRegex(BudgetStop,'settled report time budget'):
+                settled_report(task,max_seconds=1)
+        self.assertEqual(settled_report(task)['events'],0)
 
     def test_projection_excludes_large_private_landing_and_matches_report_owner(self):
         # Compare the same owned trees, not concurrently growing real test logs.

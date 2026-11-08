@@ -26,7 +26,8 @@ class CandidateRebindTests(unittest.TestCase):
         old=store.task.require_frozen()
         store.close()
         delivery=self.root/'delivery';delivery.mkdir()
-        self.config['additional_storage_roots']=[str(delivery)]
+        self.config['additional_storage_roots']=[
+            *self.config.get('additional_storage_roots',[]),str(delivery)]
         self.save_config()
         return CareerStore(Task(self.path)),previous,old
 

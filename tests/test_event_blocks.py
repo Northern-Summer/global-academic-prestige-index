@@ -21,6 +21,107 @@ class EventBlockTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_grouped_blocks_preserve_rows_and_reduce_transactions(self):
+        import io
+        from test_archive_commit_batches import members, SOURCE
+        from gapi.orcid_stream import stream_archive
+        store = self.store(fixtures.archive(members(300)))
+        try:
+            stream_archive(store, SOURCE, io.BytesIO(fixtures.archive(members(300))))
+            expected = logical_event_hash(store.db)
+            with patch.object(store, 'member', wraps=store.member) as commits:
+                result = repack_event_blocks(store, commit_blocks=8)
+            self.assertEqual(commits.call_count, 1)
+            self.assertEqual(result['scanned_events'], 300)
+            self.assertEqual(logical_event_hash(store.db), expected)
+            self.assertEqual(repack_event_blocks(store)['repacked_events'], 0)
+        finally:
+            store.close()
+
+    def test_failure_in_second_grouped_block_rolls_back_first_block(self):
+        import io
+        import gapi.event_storage as storage
+        from test_archive_commit_batches import members, SOURCE
+        from gapi.orcid_stream import stream_archive
+        data = fixtures.archive(members(300))
+        store = self.store(data)
+        try:
+            stream_archive(store, SOURCE, io.BytesIO(data))
+            expected = logical_event_hash(store.db)
+            original = storage.encode_event_block
+            calls = []
+            def fail(texts):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise BudgetStop('injected later block capacity failure')
+                return original(texts)
+            with patch.object(storage, 'encode_event_block', side_effect=fail):
+                with self.assertRaises(BudgetStop):
+                    repack_event_blocks(store, commit_blocks=8)
+            self.assertEqual(logical_event_hash(store.db), expected)
+            self.assertEqual(store.db.execute('SELECT count(*) FROM events WHERE substr(payload,1,7)=?', (BLOCK_MAGIC,)).fetchone()[0], 0)
+            self.assertFalse(store.db.in_transaction)
+        finally:
+            store.close()
+
+    def test_larger_group_preserves_cursor_rolls_back_and_resumes(self):
+        import io
+        import gapi.event_storage as storage
+        from test_archive_commit_batches import members, SOURCE
+        from gapi.orcid_stream import stream_archive
+        data = fixtures.archive(members(2050))
+        store = self.store(data)
+        try:
+            stream_archive(store, SOURCE, io.BytesIO(data))
+            expected = logical_event_hash(store.db)
+            original = storage.encode_event_block
+            calls = []
+            def fail(texts):
+                calls.append(1)
+                if len(calls) == 17:
+                    raise BudgetStop('injected final block capacity failure')
+                return original(texts)
+            with patch.object(storage, 'encode_event_block', side_effect=fail):
+                with self.assertRaisesRegex(BudgetStop, 'final block'):
+                    repack_event_blocks(store, commit_blocks=64)
+            self.assertEqual(logical_event_hash(store.db), expected)
+            self.assertEqual(store.db.execute('SELECT count(*) FROM events WHERE substr(payload,1,7)=?', (BLOCK_MAGIC,)).fetchone()[0], 0)
+            self.assertFalse(store.db.in_transaction)
+            with patch.object(store, 'member', wraps=store.member) as commits:
+                result = repack_event_blocks(store, commit_blocks=64)
+            self.assertEqual(commits.call_count, 1)
+            self.assertEqual(result['repacked_events'], 2050)
+            self.assertEqual(logical_event_hash(store.db), expected)
+            self.assertEqual(repack_event_blocks(store, commit_blocks=64)['repacked_events'], 0)
+            self.assertEqual(store.db.execute('PRAGMA quick_check').fetchone()[0], 'ok')
+        finally:
+            store.close()
+
+    def test_event_cache_reuses_interleaved_blocks_and_obeys_byte_limit(self):
+        import hashlib
+        from gapi.event_storage import _decoded_stored_block, encode_event_block
+        from gapi.projection_storage import CACHE_BYTES
+        cached = _decoded_stored_block
+        cached.cache_clear()
+        self.addCleanup(cached.cache_clear)
+        blocks = [encode_event_block([str(n)*100]) for n in range(12)]
+        for key, body in blocks:
+            cached(key, body)
+        with patch('gapi.event_storage.decode_event_block', side_effect=AssertionError('unexpected decode')):
+            for key, body in blocks:
+                cached(key, body)
+        self.assertEqual(cached.cache_info().hits, 12)
+        cached.cache_clear()
+        for n in range(8):
+            key, body = encode_event_block([chr(65+n)*16000]*128)
+            self.assertEqual(len(cached(key, body)), 128)
+            self.assertLessEqual(cached.cache_info().bytes, CACHE_BYTES)
+        self.assertLess(cached.cache_info().currsize, 8)
+        count = cached.cache_info().currsize
+        with self.assertRaises(ValueError):
+            cached(hashlib.sha256(b'wrong').digest(), body)
+        self.assertEqual(cached.cache_info().currsize, count)
+
     def seed(self, store):
         analysis.AnalysisTests.seed(self, store)
         rows = list(store.db.execute('SELECT id,payload FROM events ORDER BY id'))
@@ -171,7 +272,8 @@ repack_event_blocks(store)
     def test_invalid_limits_and_side_effect_schema_are_rejected(self):
         store = self.store(fixtures.archive([]))
         try:
-            for kwargs in ({'after_rowid':-1}, {'max_events':True}, {'max_seconds':float('inf')}):
+            for kwargs in ({'after_rowid':-1}, {'max_events':True}, {'max_seconds':float('inf')},
+                           {'commit_blocks':0}, {'commit_blocks':65}, {'commit_blocks':True}):
                 with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                     repack_event_blocks(store, **kwargs)
             with store.db:

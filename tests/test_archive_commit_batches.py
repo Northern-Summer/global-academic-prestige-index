@@ -36,6 +36,68 @@ class ArchiveCommitBatchTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def test_batch_advances_counter_once_and_preserves_duplicate_evidence(self):
+        store = self.store(fixtures.archive([]))
+        try:
+            store.start(SOURCE)
+            rows = [('a', 'a'*64, 'observed', None),
+                    ('b', 'b'*64, 'rejected', 'malformed XML'),
+                    ('a', 'a'*64, 'rejected', 'duplicate must retain first state')]
+            statements = []
+            store.db.set_trace_callback(statements.append)
+            with store.member(SOURCE, 'ledger-batch'):
+                store.finish_members(SOURCE, rows)
+            store.db.set_trace_callback(None)
+            self.assertEqual(store.db.execute('SELECT locator,sha256,status,reason FROM members ORDER BY rowid').fetchall(), rows[:2])
+            self.assertEqual(store.db.execute('SELECT members FROM runs WHERE source=?', (SOURCE,)).fetchone()[0], 2)
+            self.assertEqual(sum(sql.startswith('UPDATE runs SET members=members+') for sql in statements), 1)
+            with store.member(SOURCE, 'same-ledger-batch'):
+                store.finish_members(SOURCE, rows)
+            self.assertEqual(store.db.execute('SELECT members FROM runs WHERE source=?', (SOURCE,)).fetchone()[0], 2)
+        finally:
+            store.db.set_trace_callback(None)
+            store.close()
+
+    def test_batch_digest_conflict_rolls_back_rows_and_counter(self):
+        store = self.store(fixtures.archive([]))
+        try:
+            store.start(SOURCE)
+            with store.member(SOURCE, 'original'):
+                store.finish_member(SOURCE, 'existing', 'a'*64)
+            with self.assertRaisesRegex(ValueError, 'member changed'):
+                with store.member(SOURCE, 'conflicting-batch'):
+                    store.finish_members(SOURCE, [('new', 'b'*64, 'observed', None),
+                                                 ('existing', 'c'*64, 'observed', None)])
+            self.assertIsNone(store.seen(SOURCE, 'new'))
+            self.assertEqual(store.seen(SOURCE, 'existing'), ('a'*64, 'observed'))
+            self.assertEqual(store.db.execute('SELECT members FROM runs WHERE source=?', (SOURCE,)).fetchone()[0], 1)
+        finally:
+            store.close()
+
+    def test_cli_refuses_committed_prefix_with_or_without_resume(self):
+        from types import SimpleNamespace
+        from gapi.stream_cli import execute_task
+        data=fixtures.archive(members(2))
+        store=self.store(data)
+        stream_archive(store,SOURCE,io.BytesIO(data),max_members=1,full_report=False)
+        task=store.task
+        before=store.db.execute('SELECT * FROM runs WHERE source=?',(SOURCE,)).fetchone()
+        store.close()
+        args=SimpleNamespace(command='ingest-orcid',source=SOURCE,resume=True,
+            commit_members=1,max_members=None,max_new_members=None,max_seconds=1)
+        for resume in (True,False):
+            args.resume=resume
+            with self.subTest(resume=resume),patch('gapi.stream_cli.PublicHTTP') as http:
+                with self.assertRaisesRegex(ValueError,'would replay committed input'):
+                    execute_task(task,args)
+                http.return_value.open_archive.assert_not_called()
+                http.return_value.open.assert_not_called()
+        store=CareerStore(task)
+        try:
+            self.assertEqual(store.db.execute('SELECT * FROM runs WHERE source=?',(SOURCE,)).fetchone(),before)
+            self.assertEqual(store.db.execute('SELECT count(*) FROM members WHERE source=?',(SOURCE,)).fetchone()[0],1)
+        finally:store.close()
+
     def test_logical_rows_match_single_member_commits(self):
         data = fixtures.archive(members(13))
         first = self.store(data, source_compression=True)
@@ -226,6 +288,10 @@ class ArchiveCommitBatchTests(unittest.TestCase):
         args = SimpleNamespace(command='ingest-orcid',source=SOURCE,max_members=None,
                                max_new_members=None,max_seconds=10,commit_members=32)
         class HTTP:
+            def within(self,seconds):
+                return __import__('contextlib').nullcontext()
+            def open_archive(self,source):
+                return self.open(task.config['sources'][source]['url'])
             def open(self,url):
                 return io.BytesIO(data)
             def close(self):
@@ -236,7 +302,9 @@ class ArchiveCommitBatchTests(unittest.TestCase):
                 self.assertTrue(execute_task(task,args))
             self.assertEqual(transport.call_count,1)
             report = json.loads(output.getvalue())
-            self.assertEqual(report['events'],3)
+            self.assertEqual(report['sources'][0]['members'],3)
+            self.assertEqual(report['report_scope'],'committed-archive-run-only')
+            self.assertNotIn('events',report)
             self.assertEqual(report['sources'][0]['status'],'verified')
 
     def test_corrupt_trailer_cannot_promote_committed_batches(self):

@@ -82,6 +82,37 @@ class PublicTransportTests(unittest.TestCase):
 
     def test_actual_public_data_roundtrip_and_no_input_mutation(self):
         manifest = json.loads(Path('outputs/global/manifest.json').read_bytes())
+        if manifest.get('schema_version')=='gapi-aggregate-partitions/1':
+            from gapi.aggregate_partitions import read_field
+            import os
+            # Test this codec's unchanged bounded node defaults on every real
+            # row, without forcing a 251 MB partitioned result through its
+            # intentionally smaller single-snapshot envelope.
+            local=Path('outputs/global/local-input-manifest.json');m=json.loads(local.read_bytes())
+            directory=Path(os.environ.get('GAPI_PARTITION_ASSETS',str(local.parent)))
+            raw_manifest=directory/'manifest.json'
+            if directory==local.parent:
+                # Committed release evidence has its explicit pinned name.
+                rows_field=next(f for f in m['fields'] if f['field']=='nodes');count=0
+                for asset in rows_field['assets']:
+                    packed=(directory/asset['file']).read_bytes()
+                    self.assertEqual(hashlib.sha256(packed).hexdigest(),asset['stored_sha256'])
+                    value=json.loads(gzip.decompress(packed));rows=[dict(zip(value['columns'],r)) for r in value['rows']]
+                    original={'schema_version':'gapi-global-observed/v1','nodes':rows}
+                    encoded=pack(original);self.assertEqual(unpack(encoded),original)
+                    self.assertEqual(independent.expand_transport(encoded),original);count+=len(rows)
+                self.assertEqual(count,manifest['nodes'])
+            else:
+                count=0;batch=[]
+                for row in read_field(directory,'nodes',manifest_sha256=manifest['publication']['local_manifest_sha256']):
+                    batch.append(row);count+=1
+                    if len(batch)==1000:
+                        original={'schema_version':'gapi-global-observed/v1','nodes':batch};encoded=pack(original)
+                        self.assertEqual(unpack(encoded),original);self.assertEqual(independent.expand_transport(encoded),original);batch=[]
+                if batch:
+                    original={'schema_version':'gapi-global-observed/v1','nodes':batch};self.assertEqual(unpack(pack(original)),original)
+                self.assertEqual(count,manifest['nodes'])
+            return
         path = Path('outputs/global') / manifest.get('repository_snapshot', {}).get('filename', manifest['snapshot'])
         raw = path.read_bytes()
         if path.suffix == '.gz':

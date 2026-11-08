@@ -120,7 +120,7 @@ def pagerank(nodes: list[str], edges: dict[tuple[str, str], float], alpha: float
     return dict(zip(nodes, rank)), {"iterations": iterations, "error": error, "converged": error < tolerance}
 
 
-def pagerank_sparse(nodes, edge_rows, alpha=.85, tolerance=1e-12, max_iterations=200, *, check=None):
+def pagerank_sparse(nodes, edge_rows, alpha=.85, tolerance=1e-12, max_iterations=200, *, check=None, personalization=None):
     """Same row-normalized model with packed edge arrays, for large real graphs.
 
     Does not duplicate a Python edge dictionary. The optional resource observer
@@ -132,6 +132,13 @@ def pagerank_sparse(nodes, edge_rows, alpha=.85, tolerance=1e-12, max_iterations
     if not math.isfinite(alpha) or not 0<=alpha<1 or not math.isfinite(tolerance) or tolerance<=0 or type(max_iterations) is not int or max_iterations<1:
         raise ValueError('invalid PageRank parameters')
     if not nodes:return {},{'iterations':0,'error':0.0,'converged':True}
+    prior=None
+    if personalization is not None:
+        if set(personalization)-set(nodes) or any(not math.isfinite(v) or v<0 for v in personalization.values()) or sum(personalization.values())<=0:
+            raise ValueError('invalid personalization vector')
+        total=sum(personalization.values())
+        if not math.isfinite(total):raise ValueError('personalization sum exceeds finite arithmetic')
+        prior=[personalization.get(node,0.0)/total for node in nodes]
     index={n:i for i,n in enumerate(nodes)}
     sources,targets,weights=array('I'),array('I'),array('d')
     outgoing=array('d',[0.0])*len(nodes)
@@ -143,12 +150,16 @@ def pagerank_sparse(nodes, edge_rows, alpha=.85, tolerance=1e-12, max_iterations
         if check and count%1000==0:check()
     if any(not math.isfinite(v) for v in outgoing):raise ValueError('outgoing weight sum exceeds finite arithmetic')
     for i,a in enumerate(sources):weights[i]/=outgoing[a]
-    n=len(nodes);rank=[1/n]*n;error=math.inf
+    n=len(nodes);rank=prior[:] if prior is not None else [1/n]*n;error=math.inf
     dangling=[i for i,total in enumerate(outgoing) if total==0]
     for iterations in range(1,max_iterations+1):
         if check:check()
-        base=(1-alpha)/n+alpha*sum(rank[i] for i in dangling)/n
-        nxt=[base]*n
+        dangling_mass=sum(rank[i] for i in dangling)
+        if prior is None:
+            base=(1-alpha)/n+alpha*dangling_mass/n
+            nxt=[base]*n
+        else:
+            nxt=[(1-alpha)*value+alpha*dangling_mass*value for value in prior]
         for a,b,w in zip(sources,targets,weights):nxt[b]+=alpha*rank[a]*w
         error=sum(abs(a-b) for a,b in zip(nxt,rank));rank=nxt
         if error<tolerance:break

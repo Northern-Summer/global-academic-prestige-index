@@ -25,6 +25,24 @@ class PackedPageRankTests(unittest.TestCase):
         self.assertGreater(result['X'],result['Y'])
         self.assertAlmostEqual(sum(result.values()),1)
 
+    def test_personalized_model_matches_reference_and_stable_order(self):
+        rng=random.Random(53712)
+        for n in (3,20,80):
+            nodes=[str(i) for i in range(n)]
+            edges={(a,b):rng.random()*3 for a in nodes for b in nodes[:-1] if a!=b and rng.random()<.13}
+            prior={node:rng.random() if i%3 else 0 for i,node in enumerate(nodes)}
+            for graph in (edges,{}):
+                for alpha in (0,.65,.85,.95):
+                    expected,ref=pagerank(nodes,graph,alpha,1e-12,1000,prior)
+                    actual,conv=pagerank_sparse(nodes,((a,b,w) for (a,b),w in graph.items()),alpha,1e-12,1000,personalization=prior)
+                    self.assertTrue(ref['converged'] and conv['converged'])
+                    self.assertAlmostEqual(math.fsum(actual.values()),1,places=12)
+                    for node in nodes:self.assertAlmostEqual(expected[node],actual[node],places=13)
+                    self.assertEqual(sorted(nodes,key=lambda x:(-expected[x],x)),sorted(nodes,key=lambda x:(-actual[x],x)))
+        for prior in ({},{'outside':1},{'0':-1},{'0':float('nan')},{'0':float('inf')},{'0':1e308,'1':1e308}):
+            with self.subTest(prior=prior),self.assertRaises(ValueError):
+                pagerank_sparse(['0','1'],[],personalization=prior)
+
     def test_invalid_inputs_and_resource_cancellation(self):
         for edge in [('X','Y',-1),('X','Y',float('nan'))]:
             with self.assertRaises(ValueError):pagerank_sparse(['X','Y'],[edge])

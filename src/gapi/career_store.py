@@ -249,12 +249,14 @@ class CareerStore:
     def seen(self, source, locator):
         return self.db.execute("SELECT sha256,status FROM members WHERE source=? AND locator=?", (source, locator)).fetchone()
 
-    def pending(self, command, limit=200, *, now=None, priority_source=None, max_candidate_rowid=None):
+    def pending(self, command, limit=200, *, now=None, priority_source=None, max_candidate_rowid=None, reuse_annual=False):
         sources=CANDIDATE_SOURCES
         if command not in sources or not 1<=limit<=1000:
             raise ValueError('invalid pending source/batch limit')
         if priority_source is not None and (command!='ingest-orcid-api' or priority_source!='wikidata'):
             raise ValueError('cross-source priority requires explicit Wikidata-to-ORCID identity')
+        if type(reuse_annual) is not bool or (reuse_annual and (command!='ingest-orcid-api' or max_candidate_rowid is None)):
+            raise ValueError('annual reuse requires an explicit finite ORCID candidate selection')
         member_keys='''WITH member_keys AS MATERIALIZED (
             SELECT locator,CASE WHEN instr(locator,'@')>0 AND
                 (instr(locator,char(0))=0 OR instr(locator,'@')<instr(locator,char(0)))
@@ -273,6 +275,11 @@ class CareerStore:
                     AND lower(d.identifier) NOT IN (SELECT prefix FROM member_keys WHERE prefix IS NOT NULL)
                 ELSE NOT EXISTS(SELECT 1 FROM members m WHERE m.source=?
                     AND (m.locator=d.identifier OR m.locator LIKE d.identifier||'@%')) END'''
+        reuse_parameters=()
+        if reuse_annual:
+            from .candidate_selection import annual_reuse_filter
+            reuse_sql,reuse_parameters=annual_reuse_filter(self.task)
+            eligible+=reuse_sql
         relationship='r.source=d.source AND r.identifier=d.identifier'
         query=(member_keys+'SELECT d.identifier FROM discovery d '
                'LEFT JOIN discovery_retries r ON '+relationship+eligible)
@@ -286,6 +293,7 @@ class CareerStore:
         # Both sets exclude NULL, preserving the original NOT EXISTS predicate.
         parameters=(sources[command],command,time.time() if now is None else now,
                     MAX_CANDIDATE_ATTEMPTS,sources[command])
+        parameters+=reuse_parameters
         bound,bound_parameters=candidate_rowid_filter(max_candidate_rowid)
         query+=bound
         retry_query+=bound
@@ -478,12 +486,61 @@ class CareerStore:
             record["source"], record["locator"], record["status"], pack_event(self.db,text,record,source_seed=seed)))
 
     def finish_member(self, source, locator, sha256, status="observed", reason=None):
+        self.finish_members(source, ((locator, sha256, status, reason),))
+
+    def finish_members(self, source, rows):
+        """Finish bounded member rows in their caller's existing transaction.
+
+        Keep the ledger's original conflict checks, insert order and rejection
+        details. Advance the source counter once for the actually inserted rows;
+        the transaction still commits members, events and cursor together.
+        """
+        added = 0
+        for locator, sha256, status, reason in rows:
+            added += self._finish_member_row(source, locator, sha256, status, reason)
+        if added:
+            self.db.execute("UPDATE runs SET members=members+? WHERE source=?", (added, source))
+
+    def _finish_member_row(self, source, locator, sha256, status, reason):
         old = self.seen(source, locator)
         if old and old[0] != sha256:
             raise ValueError("member changed within frozen source")
-        added=self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, pack_digest(sha256), status, reason)).rowcount
-        if added:
-            self.db.execute("UPDATE runs SET members=members+? WHERE source=?", (added, source))
+        return self.db.execute("INSERT OR IGNORE INTO members VALUES(?,?,?,?,?)", (source, locator, pack_digest(sha256), status, reason)).rowcount
+
+    def archive_report(self, source):
+        """Read one committed run, without sorting or aggregating career rows.
+
+        This is a settlement receipt, not a member reconciliation or quality
+        report. Missing aggregate metrics are deliberately absent, never zero.
+        """
+        if source not in orcid_archive_sources(self.task):
+            raise ValueError('archive report requires a configured annual source')
+        row = self.db.execute(
+            'SELECT source,identity,status,bytes,members,sha256,detail FROM runs WHERE source=?',
+            (source,)).fetchone()
+        if row is None:
+            raise ValueError('archive source has no committed run')
+        return {
+            'report_scope': 'committed-archive-run-only',
+            'sources': [dict(zip(('source','identity','status','bytes','members','sha256','detail'), row))],
+            'storage_bytes': self.task.used(),
+            'storage_budget': self.task.config['budget_bytes'],
+            'complete_global_census': False,
+        }
+
+    def bounded_report(self):
+        """Return settlement-safe source rows when full aggregation is unavailable."""
+        rows = self.db.execute(
+            'SELECT source,identity,status,bytes,members,sha256,detail FROM runs ORDER BY source'
+        ).fetchall()
+        return {
+            'report_scope': 'committed-source-runs-only',
+            'sources': [dict(zip(('source','identity','status','bytes','members','sha256','detail'), row))
+                        for row in rows],
+            'storage_bytes': self.task.used(),
+            'storage_budget': self.task.config['budget_bytes'],
+            'complete_global_census': False,
+        }
 
     def report(self):
         progress=self.candidate_progress()

@@ -1,5 +1,7 @@
 import { verifySnapshotBytes } from './snapshot.js';
-import { csv, NETWORK_VIEWS, networkSlice, selectEdges, selectRows, validateGlobal } from './global-data.js';
+import { csv, NETWORK_VIEWS, networkSliceFromEdges, selectEdges, selectRows, validateGlobal } from './global-data.js';
+import {loadPartitionedGlobal} from './global-partitions.js';
+import {fetchJSON} from './derived-data.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stageNames = {bachelor:'本科',master:'硕士',doctorate:'博士',postdoc:'博士后训练'};
@@ -39,6 +41,7 @@ root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">ORCID API / 
 document.querySelector('.intro').after(root);
 const $=selector=>root.querySelector(selector);
 let data,page=0,edgePage=0,selected='',dispose,networkEnabled=false,networkGeneration=0;
+let edgeSelectionKey,edgeSelection,nodeNames;
 const fields=()=>({query:$('#global-search').value,country:$('#global-country').value,sort:$('#global-sort').value,scenario:$('#global-scenario').value});
 const filters=()=>({stage:$('#global-stage').value,country:$('#global-country').value,selected});
 function bars(items,format=String){
@@ -69,7 +72,9 @@ function renderTable(){
   $('#global-scenario-note').textContent=scenario ? `当前情景只改变序位；份额列仍显示参考设置。${scenario.prior_only?'本情景没有有效关系，仅余先验分布。':''} 固定网络采用 ${scenario.edges} / ${scenario.available_edges??scenario.edges} 条可用边。${expanded ? `另有扩展网络对照：${expanded.node_count} 个节点、${expanded.edges} 条边；新增机构不会被当成“名次稳定”。` : ''}` : '当前为参考设置。情景范围只描述已观测网络；未知全球缺失不在范围内。';
 }
 async function renderNetwork(){
-  const generation=++networkGeneration,view=$('#global-network-view').value,limits=NETWORK_VIEWS[view],slice=networkSlice(data,filters(),view),edges=selectEdges(data,filters()),names=new Map(data.nodes.map(n=>[n.institution_id,n.name]));
+  const generation=++networkGeneration,view=$('#global-network-view').value,limits=NETWORK_VIEWS[view],selection=filters(),selectionKey=JSON.stringify(selection);
+  if(selectionKey!==edgeSelectionKey){edgeSelection=selectEdges(data,selection);edgeSelectionKey=selectionKey;}
+  const edges=edgeSelection,slice=networkSliceFromEdges(data,edges,view),names=nodeNames;
   edgePage=Math.min(edgePage,Math.max(0,Math.ceil(edges.length/50)-1));
   $('#global-edge-status').textContent=`二维列表含当前筛选的全部 ${integer(edges.length)} 条关系，可翻页查看。3D 显示 ${slice.nodes.length} 个节点、${slice.edges.length} 条边；当前视图上限为 ${limits.nodes} 个节点 / ${integer(limits.edges)} 条边。`;
   $('#global-edges').innerHTML=edges.slice(edgePage*50,edgePage*50+50).map(e=>`<tr><td>${esc(names.get(e.source))} →</td><td>${esc(names.get(e.target))}</td><td>${esc(e.visible_weight.toFixed(2))}</td></tr>`).join('')||'<tr><td colspan="3">当前范围暂无有效关系；缺失不等于没有影响力。</td></tr>';
@@ -93,19 +98,29 @@ function renderAwards(){
 async function load(){
   try{
     const base=import.meta.env.BASE_URL;
-    const manifestResponse=await fetch(`${base}data/global/manifest.json`);if(!manifestResponse.ok)throw new Error(`manifest HTTP ${manifestResponse.status}`);
-    const manifest=await manifestResponse.json();if(!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.json$/.test(manifest.snapshot))throw new Error('不安全的快照路径');
+    const {value:manifest}=await fetchJSON(`${base}data/global/manifest.json`,1024*1024);
+    if(manifest.schema_version==='gapi-aggregate-partitions/1'){
+      const partitionBase=new URL(`${base}data/global/`,location.href);
+      data=validateGlobal(await loadPartitionedGlobal(manifest,partitionBase,{
+        signal:AbortSignal.timeout(120000),
+        onProgress:({loadedAssets,totalAssets})=>{$('#global-status').textContent=`正在校验年度结果分片 ${loadedAssets} / ${totalAssets}…`;},
+      }),{partitionManifest:manifest});
+    }else{
+    if(!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.json$/.test(manifest.snapshot))throw new Error('不安全的快照路径');
     const response=await fetch(`${base}data/global/${manifest.snapshot}`);if(!response.ok)throw new Error(`snapshot HTTP ${response.status}`);
     if(Number(response.headers.get('Content-Length'))>32*1024*1024)throw new Error('快照超过浏览器容量预算');
     const reader=response.body.getReader(),chunks=[];let size=0;
     while(true){const {value:chunk,done}=await reader.read();if(done)break;size+=chunk.byteLength;if(size>32*1024*1024){await reader.cancel();throw new Error('快照超过浏览器容量预算');}chunks.push(chunk);}
     const bytes=new Uint8Array(size);let offset=0;chunks.forEach(c=>{bytes.set(c,offset);offset+=c.byteLength;});await verifySnapshotBytes(bytes,manifest);
     data=validateGlobal(JSON.parse(new TextDecoder().decode(bytes)));
+    }
     const countryCodes=[...new Set(data.nodes.map(n=>n.country).filter(Boolean))].sort();
     $('#global-country').innerHTML+=countryCodes.map(c=>`<option value="${esc(c)}">${esc(countryName(c))} · ${esc(c)}</option>`).join('');
     $('#global-scenario').innerHTML='<option value="">参考设置 α = 0.85</option>'+Object.entries(data.sensitivity??{}).filter(([key])=>key!=='alpha_0.85').map(([key,s])=>`<option value="${esc(key)}">${esc(scenarioName(key))}${s.prior_only?'（仅先验）':''}</option>`).join('');
-    $('#global-status').textContent=`版本已校验 · 数据持续采集中 · 正式全球排名尚未发布`;
-    $('#global-status').dataset.snapshot=manifest.output_sha256;
+    const local=data.publication_status==='local-only-source-license-review';
+    $('#global-status').textContent=local?'本地年度聚合已校验 · 尚未公开发布 · 正式全球排名尚未发布':'版本已校验 · 数据持续采集中 · 正式全球排名尚未发布';
+    if(local)root.querySelector('.observation-tag').textContent='本地数据 · 未发布';
+    $('#global-status').dataset.snapshot=manifest.output_sha256??manifest.logical_sha256;
     const scored=data.nodes.filter(n=>n.network_score!=null).length,relations=data.nodes.reduce((sum,n)=>sum+n.relations,0);
     const metrics=[['收录人数',data.coverage.people,'人'],['履历记录',data.coverage.events,'条'],['去重人才关系',relations,'条'],['评分机构',scored,'个']];
     $('#global-metrics').innerHTML=metrics.map(([label,value,unit])=>`<div><span>${esc(label)}</span><strong>${esc(integer(value))}<small>${esc(unit)}</small></strong></div>`).join('');
@@ -116,8 +131,10 @@ async function load(){
       $('#global-acquisition').hidden=false;
       $('#global-acquisition-sources').innerHTML=acquisition.map(s=>`<div><div><span>${esc(sourceName(s.source))}</span><span>已处理 ${esc(integer(s.processed))} / ${esc(integer(s.candidates))}</span></div><progress value="${s.processed}" max="${s.candidates}" aria-label="${esc(sourceName(s.source))} 已发现候选处理进度">${esc(integer(s.processed))} / ${esc(integer(s.candidates))}</progress><p>待处理 ${esc(integer(s.pending))} · 其中待重试 ${esc(integer(s.pending_with_errors))} · 已拒绝 ${esc(integer(s.rejected_members))}</p></div>`).join('');
     }
+    nodeNames=new Map(data.nodes.map(n=>[n.institution_id,n.name]));
     renderAwards();
-    for(const id of ['#global-search','#global-country','#global-sort','#global-scenario'])$(id).addEventListener('input',()=>{page=0;edgePage=0;renderTable();renderNetwork();});
+    for(const id of ['#global-search','#global-sort','#global-scenario'])$(id).addEventListener('input',()=>{page=0;renderTable();});
+    $('#global-country').addEventListener('input',()=>{page=0;edgePage=0;renderTable();renderNetwork();});
     $('#global-prev').onclick=()=>{page--;renderTable();};$('#global-next').onclick=()=>{page++;renderTable();};
     $('#global-rows').addEventListener('click',e=>{const id=e.target.closest('[data-institution]')?.dataset.institution;if(id)details(id);});
     $('#global-network-view').onchange=()=>renderNetwork();

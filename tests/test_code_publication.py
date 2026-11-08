@@ -13,6 +13,49 @@ spec.loader.exec_module(publication)
 
 
 class CodePublicationTests(unittest.TestCase):
+    def test_offline_preparation_has_no_remote_effect_and_drift_still_blocks_push(self):
+        def offline(*args,**kwargs):
+            if args[0] in ('ls-remote','push'):raise AssertionError('offline preparation contacted remote')
+            return self.transport(*args,**kwargs)
+        prepared=self.publish(prepare_only=True,git=offline)
+        self.assertEqual(prepared['state'],'prepared');self.assertEqual(self.pushes,0)
+        self.assertEqual(self.publish(prepare_only=True,git=offline),prepared)
+        self.remote=self.git('rev-parse','HEAD')
+        with self.assertRaisesRegex(RuntimeError,'branch changed'):self.publish()
+        self.assertEqual(self.pushes,0)
+    def test_frozen_external_asset_is_committed_without_checkout_copy_and_retries_once(self):
+        import gzip,hashlib
+        with tempfile.TemporaryDirectory(prefix='gapi-frozen-') as directory:
+            frozen=Path(directory).resolve();raw=b'{"institution_count":2}';body=gzip.compress(raw,mtime=0)
+            name=hashlib.sha256(raw).hexdigest()+'.json.gz';source=frozen/name;source.write_bytes(body)
+            destination='outputs/global/'+name
+            options=dict(paths=['code.py',destination],external_inputs={destination:source},external_root=frozen)
+            result=self.publish(**options)
+            actual=subprocess.run(['git','show',result['public_commit']+':'+destination],cwd=self.root,capture_output=True,check=True).stdout
+            self.assertEqual(actual,body);self.assertFalse((self.root/destination).exists())
+            self.assertNotIn('private.txt',self.git('ls-tree','-r','--name-only',result['public_commit']))
+            self.assertEqual(self.publish(**options),result);self.assertEqual(self.pushes,1)
+            source.write_bytes(body+b'drift')
+            with self.assertRaises(RuntimeError):self.publish(**options)
+            self.assertEqual(self.pushes,1)
+
+    def test_external_input_boundary_and_mid_prepare_drift_prevent_push(self):
+        import gzip,hashlib
+        with tempfile.TemporaryDirectory(prefix='gapi-frozen-') as directory:
+            frozen=Path(directory).resolve();raw=b'{}';name=hashlib.sha256(raw).hexdigest()+'.json.gz';source=frozen/name;source.write_bytes(gzip.compress(raw,mtime=0));destination='outputs/global/'+name
+            options=dict(paths=['code.py',destination],external_inputs={destination:source},external_root=frozen)
+            for changed in ({'external_root':self.root},{'external_root':None},
+                            {'paths':['code.py']},{'external_inputs':{'private.txt':source},'paths':['code.py','private.txt']}):
+                with self.assertRaises(RuntimeError):self.publish(**{**options,**changed})
+            normal=self.transport
+            def mutate(*args,**kwargs):
+                value=normal(*args,**kwargs)
+                if args[0]=='hash-object':source.write_bytes(b'changed during preparation')
+                return value
+            with self.assertRaisesRegex(RuntimeError,'changed while preparing'):
+                self.publish(**options,git=mutate)
+            self.assertEqual(self.pushes,0);self.assertFalse(self.receipt.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -21,9 +21,13 @@ DISCOVERY_WINDOW_SECONDS = 60
 CANDIDATE_PROGRESS_INTERVAL_SECONDS = 900
 
 
-def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True,candidate_selection=None,orcid_record=False):
+def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=None,discovery=True,candidate_selection=None,orcid_record=False,full_report=True,reuse_annual=False):
+    if type(full_report) is not bool:
+        raise ValueError('full_report must be boolean')
     if type(orcid_record) is not bool:
         raise ValueError('orcid_record must be boolean')
+    if type(reuse_annual) is not bool or (reuse_annual and candidate_selection is None):
+        raise ValueError('annual reuse requires an explicit frozen candidate selection')
     if not math.isfinite(max_seconds) or max_seconds<=0 or not 1<=batch_members<=200:
         raise ValueError('invalid collection time/batch budget')
     if not discovery and feed is not None:
@@ -52,6 +56,8 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
     # least-served ready source. One bounded batch may overrun the fair share;
     # paused, empty and failed sources never prevent another source progressing.
     service_seconds={'ingest-orcid-api':0.0,'ingest-wikidata':0.0}
+    stage_stalls={'ingest-orcid-api':0,'ingest-wikidata':0}
+    source_retry_after={}
     def window(seconds):
         return http.within(seconds) if hasattr(http,'within') else nullcontext()
     while time.monotonic()<deadline:
@@ -119,16 +125,25 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
         adapters=(('ingest-orcid-api',ingest_orcid_api),('ingest-wikidata',ingest_wikidata))
         for command,adapter in sorted(adapters,key=lambda entry:service_seconds[entry[0]]):
             if command in suspended or time.monotonic()>=deadline:continue
+            retry_at=source_retry_after.get(command)
+            if retry_at is not None:
+                if time.monotonic()<retry_at:continue
+                del source_retry_after[command]
             source='orcid-public-api' if command=='ingest-orcid-api' else 'wikidata'
             if not store.source_ready(source):
                 continue
             batch_started=time.monotonic()
-            ids=store.pending(command,batch_members,
+            route_options={'reuse_annual':True} if reuse_annual and command=='ingest-orcid-api' else {}
+            ids=store.pending(command,batch_members,**route_options,
                 priority_source='wikidata' if command=='ingest-orcid-api' else None,**selection_options)
             if not ids:continue
             if time.monotonic()>=deadline:break
-            events_before=store.db.execute('SELECT count(*) FROM events').fetchone()[0]
-            before=store.db.execute('SELECT count(*) FROM members').fetchone()[0]
+            # The bounded mode uses existing source-leading indexes rather
+            # than recounting unrelated annual archives for every API batch.
+            count_where='' if full_report else ' WHERE source=?'
+            count_parameters=() if full_report else (source,)
+            events_before=store.db.execute('SELECT count(*) FROM events'+count_where,count_parameters).fetchone()[0]
+            before=store.db.execute('SELECT count(*) FROM members'+count_where,count_parameters).fetchone()[0]
             retried_before=store.db.execute('SELECT COALESCE(sum(attempts),0) FROM discovery_retries').fetchone()[0]
             stage_exhausted=False
             try:
@@ -152,7 +167,7 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
             except (OSError,ValueError,RuntimeError) as exc:
                 store.failure(command,'collection-loop',str(exc))
                 suspended.add(command)
-            after=store.db.execute('SELECT count(*) FROM members').fetchone()[0]
+            after=store.db.execute('SELECT count(*) FROM members'+count_where,count_parameters).fetchone()[0]
             completed=after-before
             retried=store.db.execute('SELECT COALESCE(sum(attempts),0) FROM discovery_retries').fetchone()[0]-retried_before
             state=store.db.execute('SELECT status,detail FROM runs WHERE source=?',(source,)).fetchone()
@@ -165,17 +180,35 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
             if not storage_contended and not stage_exhausted and store.source_ready(source) and ((state and state[0]=='access_failed') or (not completed and not retried)):
                 suspended.add(command)
             progressed|=completed>0 or retried>0
+            bounded_backoff=False
+            if stage_exhausted and completed==0 and retried==0:
+                stage_stalls[command]+=1
+                if stage_stalls[command]>=2:
+                    # A repeatedly exhausted, non-productive source should not
+                    # consume the other source's fair-share window. Keep its
+                    # queue intact and re-admit it after a bounded cooldown.
+                    source_retry_after[command]=time.monotonic()+300
+                    stage_stalls[command]=0
+                    bounded_backoff=True
+                    if progress:progress({'stage':command,'status':'bounded-no-progress-backoff',
+                                          'retry_seconds':300})
+            elif completed>0 or retried>0:
+                stage_stalls[command]=0
             elapsed=time.monotonic()-batch_started
             service_seconds[command]+=elapsed
-            events_after=store.db.execute('SELECT count(*) FROM events').fetchone()[0]
+            events_after=store.db.execute('SELECT count(*) FROM events'+count_where,count_parameters).fetchone()[0]
             item={'stage':command,'new_members':completed,'events':events_after,
                 'new_events':events_after-events_before,'elapsed_seconds':round(elapsed,3),
                 'members_per_second':round(completed/elapsed,4) if elapsed>0 else None,
                 'storage_bytes':store.task.used(),'deferred_this_batch':retried,
                 'storage_contended':storage_contended,
                 'priority_deferred':getattr(store,'last_priority_deferred',False),
-                'stage_time_exhausted':stage_exhausted,'suspended_this_run':command in suspended}
+                'stage_time_exhausted':stage_exhausted,'suspended_this_run':command in suspended,
+                'bounded_no_progress_backoff':bounded_backoff}
             stages.append(item)
+            if not full_report:
+                item['events_scope']='adapter-source-only'
+                item['source']=source
             if progress:progress(item)
             if storage_contended:break
             if (candidate_selection is not None and progress
@@ -208,14 +241,22 @@ def collect(store,http,feed=None,*,max_seconds=900,batch_members=50,progress=Non
                 if progress:progress({'stage':'dump-discovery','failed':str(exc)[:256]})
             continue
         break
+    try:
+        settlement_report = store.report() if full_report else store.bounded_report()
+    except MemoryError:
+        # Preserve the source settlement without allowing optional aggregate
+        # metrics to turn committed collection work into a failed run.
+        settlement_report = store.bounded_report()
+        settlement_report['report_unavailable'] = 'MemoryError'
     result={'status':'resumable-storage-contention' if storage_contended else
             'resumable-time-boundary' if time.monotonic()>=deadline else 'resumable-source-boundary',
         'suspended_sources':sorted(suspended),'suspended_discovery':sorted(discovery_suspended),
-        'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':store.report(),
+        'discovery_pages_committed':discovery_pages,'stages':list(stages),'report':settlement_report,
         'scheduling_policy':'least-source-service-time/1',
         'source_service_seconds':{key:round(value,3) for key,value in service_seconds.items()},
         'global_complete':False,'archive_discovery_enabled':feed is not None,'discovery_enabled':discovery}
     if candidate_selection is not None:
         result['frozen_candidate_processing']=processing(store,candidate_selection)
     if orcid_record:result['orcid_api_route']='record'
+    if reuse_annual:result['candidate_disposition_policy']='verified-annual-reuse-and-retained-error-documents/1'
     return result

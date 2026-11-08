@@ -5,7 +5,7 @@ import sqlite3
 import time
 import math
 
-from .career_store import CareerStore
+from .career_store import CareerStore, exclusive_writer
 from .event_storage import configure_reader
 from .task import BudgetStop
 
@@ -20,6 +20,51 @@ REPORT_COLUMNS = {
     'institution_alias_issues':'reason',
     'discovery':'source,identifier,query_sha256,response_sha256',
 }
+
+
+def settled_report(task, *, max_seconds=60, candidate_selection=None):
+    """Read the report owner directly while the existing exclusion is held.
+
+    Explicit settled operation only: refuses an active collector, opens SQLite
+    read-only and allocates no database projection. The deadline covers queries
+    and Python-side candidate hashing; all exits release the source and lock.
+    """
+    if not math.isfinite(max_seconds) or max_seconds <= 0:
+        raise ValueError('monitor timeout must be positive')
+    deadline=time.monotonic()+max_seconds
+    def check():
+        task.check_memory()
+        if time.monotonic()>=deadline:
+            raise BudgetStop('settled report time budget exhausted')
+    stopped=None
+    def observe():
+        nonlocal stopped
+        try:
+            check()
+            return 0
+        except BudgetStop as exc:
+            stopped=exc
+            return 1
+    with exclusive_writer(task):
+        db=sqlite3.connect((task.root/'careers.sqlite').as_uri()+'?mode=ro',uri=True,timeout=1)
+        try:
+            configure_reader(db)
+            db.execute('PRAGMA query_only=ON')
+            db.set_progress_handler(observe,10000)
+            check()
+            view=CareerStore.__new__(CareerStore)
+            view.db,view.task=db,task
+            result=view.report()
+            if candidate_selection is not None:
+                from .candidate_selection import processing
+                result['frozen_candidate_processing']=processing(view,candidate_selection)
+            check()
+            return result
+        except sqlite3.OperationalError:
+            if stopped is not None:raise stopped from None
+            raise
+        finally:
+            db.close()
 
 
 def report_projection(snapshot, task, check):
