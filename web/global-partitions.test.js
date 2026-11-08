@@ -90,7 +90,23 @@ test('row references reject booleans, wrong width, unsupported keys and missing 
 test('a mid-stream fetch failure returns no partially accepted dataset',async()=>{
   const f=fixture();let n=0;
   await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher:async(...args)=>{if(++n===3)throw new Error('connection interrupted');return f.fetcher(...args);}}),/interrupted/);
-  assert.equal(n,3);
+  assert.ok(n>=3&&n<=6,'failure stops the bounded prefetch window');
+});
+
+test('bounded prefetch preserves sequential output and cancellation',async()=>{
+  const f=fixture();let active=0,peak=0,order=0;const signals=[];
+  const delayed=async(url,options)=>{
+    signals.push(options.signal);active++;peak=Math.max(peak,active);
+    try{await new Promise(resolve=>setTimeout(resolve,++order===1?20:1));return f.fetcher(url,options);}finally{active--;}
+  };
+  const serial=await loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher:f.fetcher,concurrency:1});
+  const parallel=await loadPartitionedGlobal(f.manifest,'https://example.test/',{fetcher:delayed});
+  assert.deepEqual(parallel,serial);assert.ok(peak>1&&peak<=6);assert.equal(active,0);
+  assert.ok(signals.every(s=>s.aborted),'settlement cancels owned request signals');
+  for(const concurrency of [0,7,true,1.5])await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{concurrency}),/concurrency/);
+  const stop=new AbortController();stop.abort();let requested=0;
+  await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{signal:stop.signal,fetcher:()=>{requested++;}}));
+  assert.equal(requested,0);
 });
 
 test('HTTP-decoded gzip binds full decoded identity without double decompression',async()=>{
