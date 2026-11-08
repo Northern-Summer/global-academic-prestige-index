@@ -169,9 +169,13 @@ path, link, size, encoding, sparse and global PAX overrides remain rejected.
 An accessible gzip prefix is not full enumeration or checksum verification.
 
 `SummaryParser` enables Expat text buffering with an explicit 8 KiB buffer.
-This reduces fragmented Python character callbacks while retaining the existing
-2,048-character affiliation-field limit, structural handlers and DTD/entity
-rejection. Differential tests compare buffered and unbuffered parsing across
+This reduces fragmented Python character callbacks. Only text consumed by the
+normalized event is buffered; department, city and credit-name text is ignored
+because those fields are not retained. The combined retained UTF-8 text uses the
+existing event-storage byte budget, and the completed canonical event must still
+fit 16 KiB before emission. Long role titles are retained losslessly when they
+fit that contract. Structural handlers and DTD/entity rejection remain enforced.
+Differential tests compare buffered and unbuffered parsing across
 single-byte and normal chunks, entities, CDATA, multilingual text and malformed
 inputs. See [Python's Expat buffering contract](https://docs.python.org/3/library/pyexpat.html#xmlparser.buffer_text).
 The local synthetic microbenchmark is not a full-archive throughput measurement;
