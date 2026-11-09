@@ -51,10 +51,23 @@ test('committed real release fits the directory contract and preserves every tab
   const manifest=JSON.parse(readFileSync(new URL('manifest.json',directory),'utf8'));
   let data;
   if(manifest.schema_version==='gapi-aggregate-partitions/1'){
-    data=validateGlobal(await loadPartitionedGlobal(manifest,'https://fixture.invalid/',{fetcher:async url=>{
-      const name=new URL(url).pathname.split('/').at(-1),local=new URL(name,directory);
+    const read=name=>{
+      const local=new URL(name,directory);
       const path=existsSync(local)||!process.env.GAPI_PARTITION_ASSETS?local:resolve(process.env.GAPI_PARTITION_ASSETS,name);
-      return new Response(readFileSync(path));
+      return readFileSync(path);
+    };
+    data=validateGlobal(await loadPartitionedGlobal(manifest,'https://fixture.invalid/',{fetcher:async url=>{
+      const name=new URL(url).pathname.split('/').at(-1);
+      if(name===manifest.bundle?.file){
+        // The transfer is a deterministic build output, not another committed
+        // source copy. Reconstruct it from the exact committed shard order.
+        const plan=manifest.fields.flatMap(f=>f.kind==='rows'?f.assets:f.kind==='object'?f.entries.map(e=>e.asset):[f.asset]);
+        const body=Buffer.concat(plan.map(a=>read(a.file)));
+        assert.equal(body.length,manifest.bundle.bytes);
+        assert.equal(createHash('sha256').update(body).digest('hex'),manifest.bundle.sha256);
+        return new Response(body);
+      }
+      return new Response(read(name));
     }}),{partitionManifest:manifest});
   }else{
     const stored=readFileSync(new URL(manifest.repository_snapshot?.filename??manifest.snapshot,directory));
