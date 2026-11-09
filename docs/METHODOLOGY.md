@@ -2,7 +2,7 @@
 
 ## Current global observation method
 
-The global pipeline uses `gapi-observed-network/2`: fixed-reference parameter
+The current unified global pipeline uses `gapi-observed-network/4`: fixed-reference parameter
 ranges exclude prior-only and expanded-universe scenarios. If source deletion
 reveals new endpoints (for example by removing conflicting concurrent jobs),
 `expanded_universe_sensitivity` computes the wider graph. Scenario edge counts
@@ -30,7 +30,38 @@ amounts, not causal effects. The chart shows the top eight direct contributors;
 the 2D relationship table paginates the complete filtered edge set independently
 of Three.js's explicit 500-node/2,000-edge display cap.
 
-## Current page: U.S. aggregate hiring sample preview
+## Snapshot lineage and derived record disposition
+
+The current person-event analysis and the retained Easy ORCID 2023 projections
+share the private ORCID person-key owner. They are related snapshots, not
+independent evidence and not additive populations. The historical projection
+contains only previously retained two-sided careers; its distinct retained
+people form the historical comparison denominator.
+
+`rank-global --second-task ... --governance` reads the selected current events
+once in complete person boundaries. The existing reviewed lexical vocabulary is
+applied consistently across ORCID sources without changing stored events.
+The optional `coverage.processing` object identifies `record-governance/1` and
+its policy digest; original `coverage.event_status` counts remain unchanged.
+Primary disposition follows conflict, explicit exclusion, missing institution,
+missing classification, missing necessary date, then identified. Primary counts
+sum to all selected events; overlapping flags do not define another partition.
+
+Historical matches require the same person plus exact source-projection kind,
+normalized role, authoritative institution alias, and both date values. Matching
+stages establish concordance only; stage disagreement is reported with the
+current observation preserved. Historical-only or incompletely matched careers
+are not inserted into the current graph. Missing years and degree facts are not
+inferred. Retained historical records never count as independent corroboration.
+
+The page defaults to the current source vintage, loads the historical view only
+when selected, and labels reference shares separately from research-scenario
+ordering. Country/name filters do not recalculate reference scores. Public CSV
+shares use percentage units, explicitly labelled, and preserve snapshot identity.
+The Chinese [reader guide](../guide.html) explains the same contracts without
+requiring code or operations knowledge.
+
+## Separate local study: U.S. aggregate hiring sample
 
 This method applies only to the local real-data view produced by `gapi ingest-us-faculty`. It does not describe the canonical person-event reference implementation, synthetic teaching fixtures, award scoring, or a global university ranking.
 

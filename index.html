@@ -3,32 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Evidence-bounded global academic career observations and a separately named US faculty hiring research sample." />
+    <meta name="description" content="基于公开教育与学术任职记录的机构人才网络观察，提供当前来源与历史快照对照。" />
     <meta name="theme-color" content="#f4f2eb" />
     <title>GAPI · Global Academic Prestige Index</title>
-    <script type="module" crossorigin src="/global-academic-prestige-index/assets/index-BGrp2vfY.js"></script>
-    <link rel="stylesheet" crossorigin href="/global-academic-prestige-index/assets/index-7tJY-74C.css">
+    <script type="module" crossorigin src="/global-academic-prestige-index/assets/main-DcmsBiom.js"></script>
+    <link rel="modulepreload" crossorigin href="/global-academic-prestige-index/assets/scores-C4rxxcAJ.js">
+    <link rel="modulepreload" crossorigin href="/global-academic-prestige-index/assets/preload-helper-DIsxUNkR.js">
+    <link rel="stylesheet" crossorigin href="/global-academic-prestige-index/assets/scores-CBlTAXWC.css">
   </head>
   <body>
     <div id="app">
       <header class="topbar shell" id="top">
         <a class="brand" href="#top" aria-label="GAPI home"><span class="brand-mark">G</span><span>GAPI<span class="brand-sub">ACADEMIC MOBILITY</span></span></a>
-        <nav aria-label="主要导航"><a href="#historical-observations">全球观测</a><a href="#global-observations">多源核验</a><a href="#method">计算方法</a><a href="#source">数据来源</a></nav>
+        <nav aria-label="主要导航"><a href="?view=current#global-observations">最新观察</a><a href="?view=historical#historical-observations">2023 历史快照</a><a href="#method">计算方法</a><a href="#source">数据来源</a></nav>
         <span class="real-badge"><span aria-hidden="true"></span>真实公开数据</span>
       </header>
       <main class="shell">
         <section class="intro" aria-labelledby="page-title">
           <div class="intro-copy"><p class="eyebrow"><span class="eyebrow-mark"></span>GLOBAL ACADEMIC PRESTIGE INDEX</p><h1 id="page-title" lang="en">Academic influence,<br /><em>measured in movement.</em></h1><p class="lede">全球学术人才流动<br /><span>根据公开的教育与任职记录，计算机构之间的人才网络分数。</span></p></div>
-          <aside class="intro-note"><span class="note-index">THE CURRENT EDITION</span><p>2023 年公开履历已完成全文件处理。持续采集的 ORCID、Wikidata 与官方奖项另列。</p><a href="./docs/STREAMING.md">数据来源与范围 ↘</a><div class="note-stamp" aria-hidden="true">GAPI</div></aside>
+          <aside class="intro-note"><span class="note-index">数据与方法</span><p>依据公开教育和任职记录观察学术人才联系。当前来源与前期快照分别展示，指标含义和使用边界可随时查阅。</p><a href="./guide.html#reading">指标说明 ↘</a><div class="note-stamp" aria-hidden="true">GAPI</div></aside>
         </section>
+        <nav class="observation-views" aria-label="数据快照"><a id="current-view-link" href="?view=current#global-observations">最新统一观察</a><a id="historical-view-link" href="?view=historical#historical-observations">2023 历史快照</a></nav>
+        <div id="current-observation-slot"></div>
+        <div id="historical-observation-slot" hidden></div>
         
         <section class="method-section panel" id="method" aria-labelledby="method-title">
-          <div class="section-heading"><div><p class="eyebrow">03 / METHODOLOGY</p><h2 id="method-title">数据与方法</h2></div><a class="method-link" href="./docs/METHODOLOGY.md">计算方法 <span aria-hidden="true">↗</span></a></div>
+          <div class="section-heading"><div><p class="eyebrow">03 / METHODOLOGY</p><h2 id="method-title">数据与方法</h2></div><a class="method-link" href="./guide.html#method">计算方法 <span aria-hidden="true">↗</span></a></div>
           <div class="method-grid"><article><span class="method-number">01</span><h3>评分方法</h3><p>Y 聘用了 X 培养的人才，记为 Y → X。PageRank 沿这些关系，将影响力传回培养机构。</p></article><article><span class="method-number">02</span><h3>收录范围</h3><p>目前只包含已采集的公开记录。机构别名尚在核对，目录数量不等于大学数量。未收录的机构不计为零分。</p></article><article><span class="method-number">03</span><h3>使用须知</h3><p>网络分数不代表就业率或大学整体质量。正式排名须完成独立核验与第三方审查。</p></article></div>
           
         </section>
       </main>
-      <footer class="shell" id="source"><span>GAPI · 真实公开观测</span><span>来源扫描与独立核验仍在进行</span><a href="./docs/DATA_SOURCES.md">来源与使用许可</a><a href="./docs/RED_TEAM_REPORT.md">审查状态</a></footer>
+      <footer class="shell" id="source"><span>GAPI · 真实公开观测</span><span>公开履历中的学术流动观察</span><span><time datetime="2026-11-09T05:27:35.073Z">页面生成时间：2026-11-09 05:27:35 UTC</time></span><a href="./guide.html#sources">来源与使用许可</a><a href="./guide.html#limits">使用边界</a></footer>
     </div>
   </body>
 </html>

@@ -49,3 +49,19 @@ Input is UTF-8 JSON with `institutions`, `education_events`, `employment_events`
 Each education event requires an internal person key, institution, one of `bachelor`, `master`, `doctorate`, or `postdoc`, optional year, evidence key, and source class. Employment events require an institution, role type, optional start year, evidence key, and source class. The ranking layer only accepts an education/employment pair into the primary graph when both years are present and the employment start is not before training. Records with missing temporal anchors remain in the input snapshot but are excluded from the primary graph until reviewed. Awards require a stable award key/year/category, explicit attribution fields where known, and evidence key. The source evidence URL must use HTTP(S), the content hash must be lowercase SHA-256, and accepted events require an `approved` or `synthetic_demo` license status.
 
 This v0.1 contract does not publish raw person identifiers. Future public exports must aggregate to institution-level records and must pass a privacy and source-rights review.
+
+## Optional current-record disposition
+
+`coverage.processing` is an additive `record-governance/1` contract. It retains
+original `coverage.event_status`, and contains the policy digest, selected event
+total, six exclusive `primary` categories, overlapping `flags`, rule `changes`,
+historical concordance counts and person-level eligibility `funnel`. All
+primary categories sum to `coverage.events`. It contains numeric aggregates, not
+person identifiers, source roles or private matching diagnostics. Older releases
+without this field remain readable and cannot be interpreted as zero missingness.
+
+`scope.source_vintages` binds source identity, version and snapshot date to the
+selected input. The release envelope may add `publication.release_version` and
+`publication.published_at`. A source snapshot year is not an event year. Both
+current and historical CSV use shared reader-facing column definitions; reference
+network share uses percentage units, research-scenario rank is a separate column.
