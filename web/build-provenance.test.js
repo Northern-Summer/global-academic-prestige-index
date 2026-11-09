@@ -108,6 +108,25 @@ test('bundled build requires the complete transfer and does not require duplicat
   assert.throws(()=>verifyBuild({...args,publish:false}),/Built partition mismatch/);
 }));
 
+test('bundled production emits hash-bound guide metadata without requiring a full graph download',()=>partitionFixture(({args,root,manifest,packed,put})=>{
+  const hash=b=>createHash('sha256').update(b).digest('hex'),metadata=[];
+  for(const [field,value] of [['coverage',{events:3,people:2}],['scope',{source_vintages:[{source:'orcid-2026-summary'}]}]]){
+    const raw=Buffer.from(JSON.stringify(value)),body=gzipSync(raw);
+    const asset={file:hash(raw)+'.json.gz',encoding:'gzip',bytes:raw.length,sha256:hash(raw),stored_bytes:body.length,stored_sha256:hash(body)};
+    put('outputs/global/'+asset.file,body);metadata.push({field,kind:'value',asset,body});
+  }
+  const fields=[...manifest.fields,...metadata.map(({body,...f})=>f)].sort((a,b)=>a.field<b.field?-1:1);
+  const body=Buffer.concat(fields.filter(f=>f.kind==='value').map(f=>f.field==='publication_status'?packed:metadata.find(v=>v.field===f.field).body));
+  const updated={...manifest,fields,stored_bytes:body.length,asset_count:3,bundle:{format:'gapi-partition-concat/1',file:hash(body)+'.gapi',bytes:body.length,sha256:hash(body)}};
+  put(args.manifestPath,JSON.stringify(updated));put('dist/data/global/manifest.json',JSON.stringify(updated));
+  const selected=readReleasePartitions(join(root,args.manifestPath),updated);
+  for(const item of metadata)assert.ok(selected.outputFiles.has(item.asset.file),'guide metadata must have a real production route');
+  for(const [name,item] of selected.outputFiles)put('dist/data/global/'+name,item.body??readFileSync(item.path));
+  writeBuildProvenance(args);assert.equal(verifyBuild({...args,publish:false}).status,'verified');
+  rmSync(join(root,'dist/data/global',metadata[0].asset.file));
+  assert.throws(()=>verifyBuild({...args,publish:false}),/Built output changed after provenance/);
+}));
+
 test('partition provenance rejects changed source and built assets',()=>partitionFixture(({args,root,put,asset,packed})=>{
   put('outputs/global/'+asset.file,Buffer.alloc(packed.length));
   assert.throws(()=>verifyBuild({...args,publish:false}),/partition identity mismatch/);

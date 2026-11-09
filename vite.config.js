@@ -14,17 +14,19 @@ const base = process.env.GITHUB_ACTIONS === 'true' ? '/global-academic-prestige-
 const documentation = DOCUMENTATION;
 const buildRoot = dirname(fileURLToPath(import.meta.url));
 const buildInputs = sourceInputs(buildRoot);
+const builtAt=new Date().toISOString();
 
 export default defineConfig({
   base,
+  build:{rollupOptions:{input:{main:resolve(buildRoot,'index.html'),guide:resolve(buildRoot,'guide.html')}}},
   plugins: [{
     name: 'publish-method-docs',
     transformIndexHtml(html, context) {
       if (context.server) return html;
       // The US sample is local-only; production has no route or rights to it.
-      return html.replace(/<!-- LOCAL_SAMPLE_START -->[\s\S]*?<!-- LOCAL_SAMPLE_END -->/g, '')
+      return html.replace('<!-- BUILD_TIME -->',`<time datetime="${builtAt}">页面生成时间：${builtAt.replace('T',' ').replace(/\.\d{3}Z$/,' UTC')}</time>`).replace(/<!-- LOCAL_SAMPLE_START -->[\s\S]*?<!-- LOCAL_SAMPLE_END -->/g, '')
         .replace('<a href="#rankings">US sample</a>', '')
-        .replace(/<aside class="intro-note">[\s\S]*?<\/aside>/, '<aside class="intro-note"><span class="note-index">THE CURRENT EDITION</span><p>2023 年公开履历已完成全文件处理。持续采集的 ORCID、Wikidata 与官方奖项另列。</p><a href="./docs/STREAMING.md">数据来源与范围 ↘</a><div class="note-stamp" aria-hidden="true">GAPI</div></aside>');
+        ; // Public introduction is owned by index.html, identical in dev and production.
     },
     configureServer(server) {
       // Explicit local-only selection; the production single-file build and

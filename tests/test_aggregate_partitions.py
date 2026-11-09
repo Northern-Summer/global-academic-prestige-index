@@ -16,6 +16,26 @@ class AggregatePartitionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_direct_result_source_anchor_is_independently_verified_without_copy(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('independent_direct','scripts/verify-public-release.py')
+        independent=importlib.util.module_from_spec(spec);spec.loader.exec_module(independent)
+        s=self.store(fixtures.archive([]))
+        try:
+            target=s.task.root/'direct';m=write_result(s.task,self.sample(),target)
+            verify=lambda:independent.verify_local_partitions(target,target,source_name='source-manifest.json')
+            self.assertEqual(verify()['logical_sha256'],m['logical_sha256'])
+            self.assertEqual(verify()['status'],'passed')
+            for invalid in ('../source-manifest.json','source/manifest.json','arbitrary.json'):
+                with self.assertRaisesRegex(ValueError,'unsafe partition evidence filename'):
+                    independent.verify_local_partitions(target,target,source_name=invalid)
+            pointer=target/'source-manifest.json';original=pointer.read_bytes()
+            pointer.write_bytes(original+b' ')
+            with self.assertRaisesRegex(ValueError,'source contract'):verify()
+            pointer.write_bytes(original)
+            self.assertEqual(verify()['status'],'passed')
+        finally:s.close()
+
     def test_independent_bundle_order_hash_and_legacy_contract(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('independent_bundle','scripts/verify-public-release.py')

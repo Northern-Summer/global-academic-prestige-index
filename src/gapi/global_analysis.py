@@ -232,7 +232,7 @@ def relation_rows(store, *, allowed_sources=None, after_person=None, person_comp
 
 def _relation_people(store, *, allowed_sources=None, after_person=None, persons=None,
                      excluded_members=(), shared_aliases=None, prepared=None,
-                     physical_source=None, after_rowid=0, capture_directory=False):
+                     physical_source=None, after_rowid=0, capture_directory=False, governance=False):
     """Read one person's bounded events at a time. No population-sized JSON/list."""
     # Source-deletion sensitivity can remove the only available source. That
     # graph is exactly empty: do not scan the population merely to discard it.
@@ -293,6 +293,7 @@ def _relation_people(store, *, allowed_sources=None, after_person=None, persons=
     try:
         person, events = None, []
         summary = {'events': 0, 'event_status': Counter(), 'countries': set()}
+        if governance:summary['audit_rows']=[]
         if capture_directory:summary.update(labels={},directory_ids=set(),end_rowid=after_rowid)
         for record in cursor:
             pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status = record[:9]
@@ -301,6 +302,7 @@ def _relation_people(store, *, allowed_sources=None, after_person=None, persons=
                 yield person, events, summary
                 events = []
                 summary = {'events': 0, 'event_status': Counter(), 'countries': set()}
+                if governance:summary['audit_rows']=[]
                 if capture_directory:summary.update(labels={},directory_ids=set(),end_rowid=after_rowid)
             person = pid
             if excluded_members and (source, record[9].split('#', 1)[0]) in excluded_members:
@@ -326,6 +328,24 @@ def _relation_people(store, *, allowed_sources=None, after_person=None, persons=
                         previous=summary['labels'].get(institution)
                         if previous is None or event_id<previous[0]:
                             summary['labels'][institution]=(event_id,label,country)
+            if governance:
+                from .event_storage import decode_event
+                from .record_governance import effective_record, disposition
+                if row is None:row=json.loads(decode_event(store.db,payload))
+                raw=dict(row,institution=institution,status=status)
+                summary['audit_rows'].append(raw)
+                row=effective_record(raw)
+                if interpreted_status is not None:
+                    row.update(kind=interpreted_kind,stage=interpreted_stage,status=interpreted_status)
+                    raw['_governance_interpretation']=(interpreted_kind,interpreted_stage)
+                # Governance diagnostics and graph eligibility share the same
+                # effective record; original acquisition status stays untouched.
+                if disposition(row)[0]!='identified':continue
+                row['status']='observed'
+                if event_id in verified:
+                    row['status']='corroborated';row['evidence_origins']=verified[event_id]['origins']
+                events.append(row)
+                continue
             if interpreted_status is not None:
                 status = interpreted_status
             if status not in ("observed", "corroborated") or not institution:

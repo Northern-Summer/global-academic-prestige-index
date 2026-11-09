@@ -105,6 +105,7 @@ def register(sub):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name == 'rank-global':
+            parser.add_argument('--governance',action='store_true',help='classify all selected records and compare retained historical projections')
             parser.add_argument('--second-task',type=Path,
                 help='unify two existing frozen stores without copying source rows')
             parser.add_argument('--analysis-seconds',type=float,default=14400,
@@ -226,7 +227,7 @@ def execute(args):
         return False
     if args.command=='rank-global' and getattr(args,'second_task',None):
         from .unified_analysis import export_unified
-        result=export_unified((args.task,args.second_task),seconds=args.analysis_seconds,
+        result=export_unified((args.task,args.second_task),seconds=args.analysis_seconds,governance=args.governance,
             progress=(lambda item:print(json.dumps({'analysis_progress':item}),
                 file=__import__('sys').stderr,flush=True)) if args.progress else None)
         print(json.dumps(result,indent=2,sort_keys=True))

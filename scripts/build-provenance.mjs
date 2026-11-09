@@ -12,7 +12,7 @@ import {readDerivedBundle} from './derived-bundle.mjs';
 import {validatePartitionManifest} from '../web/global-partitions.js';
 
 export const DOCUMENTATION = ['METHODOLOGY.md','DATA_SOURCES.md','DATA_SCHEMA.md','BIAS_AND_LIMITATIONS.md','RED_TEAM_REPORT.md','STREAMING.md','CI_CD.md','OOD.md','FONTS.md','EASY_ORCID_2023_OBSERVATIONS.md'];
-export const SOURCE_FILES = ['index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/derived-bundle.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
+export const SOURCE_FILES = ['guide.html','index.html','vite.config.js','package.json','package-lock.json','scripts/build-provenance.mjs','scripts/derived-bundle.mjs','scripts/deploy-pages.mjs','.github/workflows/ci.yml',...DOCUMENTATION.map(name=>`docs/${name}`)];
 export const PROVENANCE = 'build-provenance.json';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceHash = bytes => hash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n')));
@@ -129,7 +129,14 @@ export function readReleasePartitions(manifestPath,manifest) {
     if(body.length!==manifest.bundle.bytes||hash(body)!==manifest.bundle.sha256)throw new Error('Partition bundle identity mismatch');
     bundle={...manifest.bundle,body};
   }
-  const outputFiles=new Map([...(bundle?[[bundle.file,{body:bundle.body,sha256:bundle.sha256,bytes:bundle.bytes}]]:files),...bindings]);
+  // The reader guide fetches only these verified metadata values. Keep them
+  // individually addressable even when the interactive view uses the bundle.
+  const summaries=new Map();
+  if(bundle)for(const name of ['coverage','scope']){
+    const field=manifest.fields.find(f=>f.field===name);
+    if(field?.kind==='value')summaries.set(field.asset.file,files.get(field.asset.file));
+  }
+  const outputFiles=new Map([...(bundle?[[bundle.file,{body:bundle.body,sha256:bundle.sha256,bytes:bundle.bytes}]]:files),...summaries,...bindings]);
   return {files,bindings,bundle,outputFiles,bytes:[...outputFiles.values()].reduce((n,f)=>n+f.bytes,0)};
 }
 

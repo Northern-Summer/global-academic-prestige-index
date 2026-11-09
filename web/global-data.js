@@ -1,6 +1,7 @@
 // Directory capacity is independent of the much smaller rendered graph.
 import {decodeGlobalTransport, MAX_DIRECTORY_NODES} from './global-transport.js';
 import {validatePartitionManifest, PARTITION_CAPACITY} from './global-partitions.js';
+import {validateProcessing} from './record-processing.js';
 export {MAX_DIRECTORY_NODES};
 
 export function validateGlobal(data, {partitionManifest} = {}) {
@@ -49,6 +50,7 @@ export function validateGlobal(data, {partitionManifest} = {}) {
   for (const field of ['events','people']) {
     if (!Number.isSafeInteger(data.coverage?.[field]) || data.coverage[field] < 0) throw new Error('Invalid coverage count');
   }
+  validateProcessing(data.coverage);
   const acquisition = data.acquisition_progress;
   if (acquisition != null) {
     if (acquisition.scope !== 'current-discovered-candidates-only' || acquisition.complete_global_census !== false

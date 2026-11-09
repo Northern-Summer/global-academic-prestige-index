@@ -1,16 +1,41 @@
 // Reuses an installed browser and Playwright; no downloads or account access.
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.GAPI_PLAYWRIGHT||'playwright');
-const url=process.env.GAPI_TEST_URL||'http://127.0.0.1:5174/';
+const selectedURL=new URL(process.env.GAPI_TEST_URL||'http://127.0.0.1:5174/');selectedURL.searchParams.set('view','historical');const url=selectedURL.href;
 const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.GAPI_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const result={url,errors:[]};
  try{
+  // Real request failures at each initial-read boundary must be recoverable
+  // without page refresh, diagnostic leakage, concurrent loads or duplicate handlers.
+  const descriptorPage=await browser.newPage();
+  const descriptorResponse=await descriptorPage.request.get(new URL('data/derived/manifest.json',url).href);
+  assert.ok(descriptorResponse.ok());const descriptor=await descriptorResponse.json();await descriptorPage.close();
+  result.initial_failure_retries=[];
+  for(const failedFile of ['manifest.json',descriptor.nodes.file,descriptor.overview.file]){
+    const probe=await browser.newPage();let attempts=0;
+    await probe.route('**/data/derived/**',async route=>{
+      if(new URL(route.request().url()).pathname.endsWith('/'+failedFile)){
+        attempts++;if(attempts===1)return route.fulfill({status:503,body:'PRIVATE_DIAGNOSTIC_TEST HTTP 503'});
+      }
+      return route.continue();
+    });
+    await probe.goto(url,{waitUntil:'domcontentloaded'});
+    await probe.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='error',null,{timeout:30000});
+    assert.doesNotMatch(await probe.locator('body').innerText(),/PRIVATE_DIAGNOSTIC_TEST|HTTP 503|Traceback/);
+    assert.ok(await probe.locator('#historical-retry').isVisible());
+    await probe.evaluate(()=>{document.querySelector('#historical-retry').click();document.querySelector('#historical-retry').click();});
+    await probe.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready',null,{timeout:30000});
+    assert.equal(attempts,2);assert.equal(await probe.locator('#historical-rows tr').count(),50);
+    assert.equal(await probe.locator('#historical-search').isDisabled(),false);
+    await probe.locator('#historical-next').click();assert.match(await probe.locator('#historical-page-status').innerText(),/^51/);
+    result.initial_failure_retries.push({file:failedFile,attempts,passed:true});await probe.close();
+  }
   const page=await browser.newPage({viewport:{width:1280,height:900}});const started=Date.now();
   page.on('pageerror',e=>result.errors.push(e.message));
   await page.goto(url,{waitUntil:'networkidle',timeout:30000});
-  await page.waitForFunction(()=>document.querySelector('#historical-status')?.textContent.includes('文件版本已校验'));
+  await page.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready');
   result.ready_ms=Date.now()-started;assert.ok(result.ready_ms<10000,'historical table readiness exceeds 10 seconds');
   assert.equal(await page.locator('#historical-rows tr').count(),50);
   assert.match(await page.locator('#historical-metrics').innerText(),/2,473,948/);
@@ -57,7 +82,7 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   });
   await page.route(`**/data/derived/${chunk}`,route=>route.fulfill({status:503,body:'temporarily unavailable'}));
   await page.locator('#historical-overview').click();await pick.click();
-  await page.waitForFunction(()=>document.querySelector('#historical-details')?.textContent.includes('关系未完整加载'));
+  await page.waitForFunction(()=>document.querySelector('#historical-details')?.textContent.includes('相关关系暂时无法读取'));
   assert.match(await page.locator('#historical-edge-status').innerText(),/尚未完整读取/);
   assert.match(await page.locator('#historical-edges').innerText(),/当前范围没有关系/);
   await page.unroute(`**/data/derived/${chunk}`);await pick.click();
@@ -80,7 +105,7 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:`${prefix}-mobile.png`});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflows horizontally');
   const fallback=await browser.newPage();await fallback.addInitScript(()=>{HTMLCanvasElement.prototype.getContext=function(){return null;};});
-  await fallback.goto(url,{waitUntil:'networkidle'});await fallback.waitForFunction(()=>document.querySelector('#historical-status')?.textContent.includes('文件版本已校验'));
+  await fallback.goto(url,{waitUntil:'networkidle'});await fallback.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready');
   await fallback.locator('#historical-3d').click();await fallback.waitForTimeout(100);
   assert.match(await fallback.locator('#historical-network').innerText(),/3D 暂不可用/);assert.equal(await fallback.locator('#historical-edges tr').count(),50);await fallback.close();
   assert.deepEqual(result.errors,[]);result.status='passed';

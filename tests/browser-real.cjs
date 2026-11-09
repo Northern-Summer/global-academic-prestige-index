@@ -19,9 +19,9 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => requests.push(request.url()));
     await page.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'domcontentloaded',timeout:120000});
-    await page.waitForFunction(() => /版本已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent || ''));
+    await page.waitForFunction(() => ['ready','error'].includes(document.querySelector('#global-status')?.dataset.state));
     const status = await page.locator('#global-status').innerText();
-    assert.ok(!status.includes('真实数据暂不可用'),status);
+    assert.equal(await page.locator('#global-status').getAttribute('data-state'),'ready',status);
     results.load = status;
     results.table_ready_ms=Date.now()-loadStarted;
     assert.ok(results.table_ready_ms<=loadLimit,`complete data readiness exceeds ${loadLimit}ms acceptance`);
@@ -51,10 +51,14 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       award_recipients:publicData.official_award_inventory?.processed_recipients,
       award_attribution_labels:publicData.official_award_attribution?.label_count});
     assert.equal(results.version.actual,results.version.expected);
-    assert.match(status,/正式全球排名尚未发布/);
+    assert.equal(status,'本版数据已加载');
+    assert.equal(requests.some(url=>url.includes('/data/derived/')),false,'default view must not load historical data');
+    assert.doesNotMatch(await page.locator('body').innerText(),/正式排名待核验|技术标识与缺失分数|THE CURRENT EDITION/);
+    await page.getByText('本版数据范围与研究资料',{exact:true}).click();
     const metricText=await page.locator('#global-metrics').innerText();
     for (const value of [results.version.people,results.version.events,results.version.relations,results.version.scored]) assert.ok(metricText.replaceAll(',','').includes(String(value)));
     results.coverage_counts_match=true;
+    await page.getByText('本版数据范围与研究资料',{exact:true}).click();
     const acquisition=publicData.acquisition_progress;
     if(acquisition?.sources?.length){
       await page.locator('#global-acquisition summary').click();
@@ -108,7 +112,8 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await page.locator('#global-sort').selectOption('score');
     const pick = page.locator('#global-rows button').first();
     await pick.focus(); await page.keyboard.press('Enter');
-    assert.match(await page.locator('#global-details').innerText(),/暂未正式排名/);
+    assert.match(await page.locator('#global-details').innerText(),/不是就业率/);
+    assert.doesNotMatch(await page.locator('#global-details').innerText(),/暂未正式排名|技术标识|奖项评分：缺失/);
     assert.ok(await page.locator('#global-details .mini-bars').count()>=1);
     await page.locator('#global-details').screenshot({path:screenshotPath('detail')});
     results.search_filter_sort_keyboard_details = true;
@@ -118,6 +123,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     results.institution_pagination=true;
     const settings=await page.locator('#global-scenario option').evaluateAll(rows=>rows.map(row=>row.value));
     assert.ok(settings.length>2);
+    await page.locator('#global-research-settings summary').click();
     await page.locator('#global-scenario').selectOption(settings.find(value=>value));
     assert.ok((await page.locator('#global-scenario-note').innerText()).length>0);
     await page.locator('#global-scenario').selectOption('');
@@ -129,7 +135,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#global-csv').click();
     const download = await downloadPromise;
-    assert.equal(download.suggestedFilename(),'gapi-real-observed-institutions.csv');
+    assert.match(download.suggestedFilename(),/^gapi-2026-.*-institutions\.csv$/);
     const exported=await page.evaluate(async()=>{
       const blob=window.__gapiExportBlob;if(!(blob instanceof Blob))throw Error('Missing actual CSV Blob');
       let lines=1,quoted=false,afterQuote=false;
@@ -147,15 +153,17 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     await download.cancel();
     results.csv_download={...exported,complete:true,browser_download_observed:true,disk_copy_intentionally_cancelled:true};
     if(results.version.award_recipients){
+      await page.locator('details:has(> summary:text-is("本版数据范围与研究资料")) > summary').click();
       await page.locator('#global-official-awards summary').click();
       await page.locator('#global-award-search').fill('Cambridge');
       assert.match(await page.locator('#global-award-rows').innerText(),/Cambridge/);
       if(results.version.award_attribution_labels){
         assert.match(await page.locator('#global-award-content').innerText(),/单机构.*份额/);
-        assert.match(await page.locator('#global-award-rows').innerText(),/待确认|待核验|待解析/);
+        assert.match(await page.locator('#global-award-rows').innerText(),/官方原文/);
         results.official_award_attribution=true;
       }
       await page.locator('#global-official-awards summary').click();
+      await page.getByText('本版数据范围与研究资料',{exact:true}).click();
       results.official_awards=true;
     }
     await page.locator('#global-reset').click();
@@ -230,7 +238,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     mobile.on('pageerror',error=>errors.push('mobile: '+error.message));
     const mobileStart=Date.now();
     await mobile.goto(results.tested_url,{waitUntil:'domcontentloaded',timeout:120000});
-    await mobile.waitForFunction(()=>/版本已校验/.test(document.querySelector('#global-status')?.textContent||''),null,{timeout:120000});
+    await mobile.waitForFunction(()=>document.querySelector('#global-status')?.dataset.state==='ready',null,{timeout:120000});
     const mobileMs=Date.now()-mobileStart;assert.ok(mobileMs<=loadLimit,'mobile cold full load exceeds acceptance');
     assert.equal(await mobile.locator('#global-rows tr').count(),50);
     const dimensions=await mobile.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
@@ -249,7 +257,7 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     });
     fallback.setDefaultTimeout(120000);
     await fallback.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'domcontentloaded',timeout:120000});
-    await fallback.waitForFunction(()=>/版本已校验/.test(document.querySelector('#global-status')?.textContent||''));
+    await fallback.waitForFunction(()=>document.querySelector('#global-status')?.dataset.state==='ready');
     await fallback.locator('#global-show-network').click();
     await fallback.waitForFunction(() => /暂不可用/.test(document.querySelector('#global-network')?.textContent || ''));
     assert.ok(await fallback.locator('#global-rows button').count()>0);
@@ -278,8 +286,8 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       const hostile=await browser.newPage();
       await hostile.route('**/data/global/**',route=>route.fulfill({status:200,contentType:'application/json',body:route.request().url().includes('manifest.json')?JSON.stringify({snapshot:'attack.json',output_sha256:sha}):bytes}));
       await hostile.goto(results.tested_url,{waitUntil:'networkidle'});
-      await hostile.waitForFunction(()=>/版本已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent||''));
-      if(unsafeNumber)assert.match(await hostile.locator('#global-status').innerText(),/真实数据暂不可用/);
+      await hostile.waitForFunction(()=>['ready','error'].includes(document.querySelector('#global-status')?.dataset.state));
+      if(unsafeNumber){assert.equal(await hostile.locator('#global-status').getAttribute('data-state'),'error');assert.doesNotMatch(await hostile.locator('#global-status').innerText(),/Invalid|SHA|NaN|attack|schema/);}
       else{await hostile.locator('#global-search').fill('<img');assert.ok((await hostile.locator('#global-rows').innerText()).includes('<img'));assert.equal(await hostile.locator('#global-rows img').count(),0);}
       assert.equal(await hostile.evaluate(()=>window.__gapiInjected),undefined);
       await hostile.close();

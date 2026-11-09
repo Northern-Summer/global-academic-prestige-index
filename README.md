@@ -2,9 +2,9 @@
 
 GAPI measures **observed academic education, training and employment relationships** using traceable public statements and deterministic network calculations. Real observations and formal ranking eligibility are separate. **Global collection and independent corroboration are incomplete; no formal global ranking has been released.**
 
-The site shows a global observation view plus a separately named historical US faculty-hiring study where locally available. It never substitutes synthetic scores. Synthetic fixtures are used only for algorithm tests.
+The public site defaults to the current institution observation and offers a separate 2023 ORCID historical view. A U.S. faculty-hiring study remains a separately named local research view. It never substitutes synthetic scores. Synthetic fixtures are used only for algorithm tests.
 
-The public observation site is available at [GAPI](https://northern-summer.github.io/global-academic-prestige-index/). Release scope, measured validation and known limitations are recorded in the [version notes](docs/RELEASE_NOTES_0_2_53.md).
+The public observation site is available at [GAPI](https://northern-summer.github.io/global-academic-prestige-index/). Readers can use the [Chinese data and methodology guide](https://northern-summer.github.io/global-academic-prestige-index/guide.html). Release scope, measured validation and known limitations are recorded in the [version notes](docs/RELEASE_NOTES_0_2_54.md).
 
 ## Quick start
 

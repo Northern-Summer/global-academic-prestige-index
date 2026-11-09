@@ -136,15 +136,19 @@ class UnifiedScan:
     person is joined before scientific rules run. A repeated physical person
     group makes the final group/unique-person equality fail, never a completion.
     """
-    def __init__(self,stores,allowed=None):
+    def __init__(self,stores,allowed=None, *, governance=False):
         from .career_normalization import has_interpretations
         from .corroboration import decisions
         self.stores=tuple(stores);self.task=stores[0].task;self.allowed=allowed
+        self.governance_enabled=governance
+        if governance:
+            from .record_governance import HistoricalConcordance, RecordGovernance
+            self.history=HistoricalConcordance(stores);self.governance=RecordGovernance()
         self.plan=select_analysis_members(stores,allowed_sources=allowed)
         self.binding=digest({'schema':'gapi-unified-input/1','inputs':[
             input_binding(s,allowed) for s in stores],'selection':self.plan})
         key=digest({'stores':[str(s.task.root.resolve()) for s in stores],
-                    'representation':'physical-selected-person/2'})[:16]
+                    'representation':'physical-selected-person/governance-1' if governance else 'physical-selected-person/2'})[:16]
         self.path=self.task.root/('analysis-unified-'+key+'.checkpoint')
         self.canonical=_canonical_directory(stores)
         self.aliases={}
@@ -182,12 +186,14 @@ class UnifiedScan:
     def rows(self,index,**options):
         return _relation_people(self.stores[index],allowed_sources=self.allowed,
             excluded_members=set(map(tuple,self.plan['excluded_members'][index])),
-            shared_aliases=self.aliases,prepared=self.prepared[index],capture_directory=True,**options)
+            shared_aliases=self.aliases,prepared=self.prepared[index],capture_directory=True,governance=self.governance_enabled,**options)
 
     def combine(self, groups):
         events=[];summary={'events':0,'event_status':Counter(),'countries':set(),
                           'directory_ids':set(),'labels':{}}
+        if self.governance_enabled:summary['audit_rows']=[]
         for _,rows,s in groups:
+            if self.governance_enabled:summary['audit_rows'].extend(s['audit_rows'])
             events.extend(rows)
             if len(events)>4096:raise BudgetStop('combined person event fanout exceeds bound')
             summary['events']+=s['events'];summary['event_status'].update(s['event_status'])
@@ -199,6 +205,7 @@ class UnifiedScan:
         return events,summary
 
     def consume(self,events,summary):
+        before_relations=self.state['relations']
         self.state['people']+=bool(summary['events']);self.state['events']+=summary['events']
         self.statuses.update(summary['event_status']);self.countries.update(summary['countries'])
         self.directory_ids.update(summary['directory_ids'])
@@ -223,7 +230,12 @@ class UnifiedScan:
             for (employer,training,stage),_,_ in observed_relations(selected):
                 self.graphs.add((employer,training),DEFAULT_CONFIG['stage_weights'][stage],6+n)
 
+        if self.governance_enabled:
+            self.governance.consume(summary['audit_rows'],self.history.cache.get(self._person,[]),
+                self.aliases,self.state['relations']>before_relations)
+
     def _metadata(self):
+        if self.governance_enabled:self.state['governance']=self.governance.snapshot()
         return dict(self.state,statuses=dict(self.statuses),countries=sorted(self.countries),
             counts=dict(self.counts),source_counts={k:sorted(v) for k,v in self.source_counts.items()},
             corroborated=dict(self.corroborated),origins={k:sorted(v) for k,v in self.origins.items()},
@@ -311,6 +323,8 @@ class UnifiedScan:
             self.source_counts=defaultdict(set,{k:set(v) for k,v in state['source_counts'].items()})
             self.corroborated=Counter(state['corroborated']);self.origins=defaultdict(set,{k:set(v) for k,v in state['origins'].items()})
             self.denominators=Counter(state['denominators'])
+            if self.governance_enabled:
+                self.governance.restore(state.get('governance',{}),state['events'])
         return True
 
     def check_binding(self):
@@ -323,6 +337,7 @@ class UnifiedScan:
         start=time.monotonic();processed=0;last=start
         def settle(person,groups):
             nonlocal processed,last
+            self._person=person
             events,summary=self.combine(groups);self.consume(events,summary);processed+=1
             if person in self.other_people:self.seen.add(person)
             if processed%1000==0:self.task.check_memory()
@@ -345,6 +360,7 @@ class UnifiedScan:
                     if not batch:break
                     if len({g[0] for g in batch})!=len(batch):
                         raise ValueError('physical person groups repeat within a batch')
+                    if self.governance_enabled:self.history.prepare([p for p,_,_ in batch])
                     ids=[p for p,_,_ in batch if p in self.other_people]
                     additions={}
                     if ids:
@@ -377,6 +393,7 @@ class UnifiedScan:
             for offset in range(0,len(remaining),1000):
                 ids=[p for p in remaining[offset:offset+1000] if self.state['after_other'] is None or p>self.state['after_other']]
                 if not ids:continue
+                if self.governance_enabled:self.history.prepare(ids)
                 groups={}
                 for index in (0,1):
                     for group in self.rows(index,persons=ids):groups.setdefault(group[0],[]).append(group)
@@ -471,6 +488,11 @@ class UnifiedScan:
                 'canonical_events_modified':0,'scope':'existing exact official-evidence policy; no new corroboration'},
             'limitations':['Observed scores are not employment rates or causal training effects.',
                 'Formal ranking and composite data are unavailable.','Independent career verification remains incomplete.']}
+        if self.governance_enabled:
+            result['coverage']['processing']=self.governance.public(self.state['events'])
+            result['coverage']['processing']['history']['retained_historical_people']=self.history.population()
+            result['scope']['source_vintages']=[{'source':name,'version':spec.get('version'),
+                'snapshot_date':spec.get('snapshot_date')} for name,spec in self.stores[0].task.config['sources'].items()]
         from .nobel import public_inventory
         from .award_projection import public_projection
         for field,reader in [('official_award_inventory',public_inventory),('official_award_attribution',public_projection)]:
@@ -483,7 +505,7 @@ class UnifiedScan:
         return result
 
 
-def export_unified(paths, *, seconds, progress=None, predecessor_code=None):
+def export_unified(paths, *, seconds, progress=None, predecessor_code=None, governance=False):
     """Public CLI consumer: frozen normalized stores to a private aggregate.
 
     This does not promote a publication status. The existing independent replay
@@ -492,7 +514,7 @@ def export_unified(paths, *, seconds, progress=None, predecessor_code=None):
     from .aggregate_partitions import write_result
     start=time.monotonic()
     with read_stores(paths) as stores:
-        scan=UnifiedScan(stores);scan.load(predecessor_code=predecessor_code)
+        scan=UnifiedScan(stores,governance=governance);scan.load(predecessor_code=predecessor_code)
         remaining=seconds-(time.monotonic()-start)
         if remaining<=0:raise BudgetStop('unified deadline reached before scan')
         run=scan.run(seconds=remaining,progress=progress)
@@ -501,7 +523,7 @@ def export_unified(paths, *, seconds, progress=None, predecessor_code=None):
             if time.monotonic()-start>=seconds:raise BudgetStop('unified calculation deadline reached')
             if progress:progress(item)
         result=scan.result(progress=deadline)
-        target=stores[0].task.root/'global-unified-partitions'
+        target=stores[0].task.root/('global-governed-partitions' if governance else 'global-unified-partitions')
         manifest=write_result(stores[0].task,result,target,progress=deadline)
         scan.check_binding()
         return dict(run,manifest=str(target/'manifest.json'),manifest_sha256=digest(manifest),

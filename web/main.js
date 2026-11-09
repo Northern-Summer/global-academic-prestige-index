@@ -1,7 +1,14 @@
 import './style.css';
 import './scores.css';
-import './global.js';
-import './derived.js';
+// Each document owns only one full observation dataset. Navigation releases
+// the previous graph instead of retaining two complete JS universes in memory.
+const historyView = new URLSearchParams(location.search).get('view') === 'historical'
+  || (!new URLSearchParams(location.search).has('view') && location.hash === '#historical-observations');
+document.querySelector('#current-observation-slot').hidden=historyView;
+document.querySelector('#historical-observation-slot').hidden=!historyView;
+document.querySelector(historyView?'#historical-view-link':'#current-view-link').setAttribute('aria-current','page');
+if(historyView) await import('./derived.js');
+else await import('./global.js');
 import { validateScoreSnapshot, verifySnapshotBytes } from './snapshot.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -45,7 +52,7 @@ function renderDirectory() {
 
 function setLoadFailure(error) {
   $('#directory-status').textContent = `Real score snapshot unavailable: ${error.message}`;
-  $('#scope-notice').textContent = 'No score is shown until a versioned real-data snapshot is available.';
+  if($('#scope-notice'))$('#scope-notice').textContent = 'No score is shown until a versioned real-data snapshot is available.';
   $('#directory-rows').innerHTML = '<tr><td class="empty-state" colspan="6">The local real score snapshot is unavailable. Run the real-data ingest command first.</td></tr>';
   $('#source-status').textContent = 'No score data loaded. Synthetic/demo scores are never used as a fallback.';
 }
@@ -65,7 +72,7 @@ async function loadRanking() {
     records = snapshot.nodes;
     $('#node-count').textContent = snapshot.algorithm.nodes.toLocaleString('en');
     $('#edge-count').textContent = snapshot.algorithm.edges.toLocaleString('en');
-    $('#scope-notice').textContent = `US employing institutions, ${snapshot.scope.employment_sample_start}–${snapshot.scope.employment_sample_end}; doctorate only. The score uses ${snapshot.algorithm.within_ranked_network_edges.toLocaleString('en')} internal network edges. ${snapshot.algorithm.external_doctoral_origin_edges.toLocaleString('en')} external doctoral-origin edges (${snapshot.algorithm.external_doctoral_origin_count.toLocaleString('en')} source records) are excluded from PageRank.`;
+    if($('#scope-notice'))$('#scope-notice').textContent = `US employing institutions, ${snapshot.scope.employment_sample_start}–${snapshot.scope.employment_sample_end}; doctorate only. The score uses ${snapshot.algorithm.within_ranked_network_edges.toLocaleString('en')} internal network edges. ${snapshot.algorithm.external_doctoral_origin_edges.toLocaleString('en')} external doctoral-origin edges (${snapshot.algorithm.external_doctoral_origin_count.toLocaleString('en')} source records) are excluded from PageRank.`;
     $('#directory-status').textContent = `${snapshot.algorithm.nodes.toLocaleString('en')} real institutions · ${snapshot.algorithm.edges.toLocaleString('en')} observed directed relations · PageRank converged in ${snapshot.algorithm.iterations} iterations.`;
     const inputDigests = Object.entries(snapshot.input_sha256).map(([name, digest]) => `${name} ${digest}`).join(' · ');
     $('#source-status').textContent = `Revision ${snapshot.snapshot_revision} · pinned source commit ${snapshot.source.commit.slice(0, 12)} · input SHA-256 ${inputDigests} · ${snapshot.publication_status}.`;

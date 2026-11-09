@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 
 test('bundled Chinese subsets cover UI characters and retain licensed hash identities',()=>{
  const coverage=JSON.parse(readFileSync('web/fonts/cjk-coverage.json','utf8'));
- const text=['index.html','vite.config.js',...readdirSync('web').filter(x=>x.endsWith('.js')&&!x.endsWith('.test.js')).map(x=>'web/'+x)]
+ const text=['index.html','guide.html','vite.config.js',...readdirSync('web').filter(x=>x.endsWith('.js')&&!x.endsWith('.test.js')).map(x=>'web/'+x)]
   .map(x=>readFileSync(x,'utf8')).join('');
  const required=[...new Set(text.match(/[\u3000-\u303f\u3400-\u9fff\uf900-\ufaff\uff01-\uff60]/g)||[])];
  const names=new Intl.DisplayNames(['zh-CN'],{type:'region'});

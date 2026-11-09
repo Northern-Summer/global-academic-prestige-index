@@ -349,7 +349,7 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
     directory=Path(directory).absolute()
     for path in (directory,*directory.parents,Path(source_directory).absolute(),*Path(source_directory).absolute().parents):
         if path.is_symlink() or (path.exists() and path.is_junction()):raise ValueError('linked partition directory')
-    if manifest_name not in ('manifest.json','local-input-manifest.json') or source_name not in ('manifest.json','local-input-source-manifest.json'):
+    if manifest_name not in ('manifest.json','local-input-manifest.json') or source_name not in ('manifest.json','source-manifest.json','local-input-source-manifest.json'):
         raise ValueError('unsafe partition evidence filename')
     if public_status not in (None,'public-observations-pending-external-review'):raise ValueError('invalid public status transform')
     pointer=directory/manifest_name
