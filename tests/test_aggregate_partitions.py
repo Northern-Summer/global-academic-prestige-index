@@ -16,6 +16,28 @@ class AggregatePartitionTests(unittest.TestCase):
     tearDown=fixtures.StreamingTests.tearDown
     store=fixtures.StreamingTests.store
 
+    def test_independent_bundle_order_hash_and_legacy_contract(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('independent_bundle','scripts/verify-public-release.py')
+        independent=importlib.util.module_from_spec(spec);spec.loader.exec_module(independent)
+        s=self.store(fixtures.archive([]))
+        try:
+            target=s.task.root/'bundled';m=write_result(s.task,self.sample(),target)
+            entries=[a for f in m['fields'] for a in (f['assets'] if f['kind']=='rows' else [v['asset'] for v in f['entries']] if f['kind']=='object' else [f['asset']])]
+            body=b''.join((target/a['file']).read_bytes() for a in entries)
+            sha=hashlib.sha256(body).hexdigest()
+            self.assertIsNone(independent.verify_partition_bundle(m,target))
+            m['bundle']={'format':'gapi-partition-concat/1','file':sha+'.gapi','sha256':sha,'bytes':len(body)}
+            self.assertEqual(independent.verify_partition_bundle(m,target),{'sha256':sha,'bytes':len(body)})
+            original=dict(m['bundle'])
+            for changes in ({'sha256':'0'*64,'file':'0'*64+'.gapi'},{'bytes':len(body)+1},{'format':'wrong'}):
+                m['bundle']={**original,**changes}
+                with self.assertRaisesRegex(ValueError,'bundle'):independent.verify_partition_bundle(m,target)
+            m['bundle']=original
+            with self.assertRaisesRegex(ValueError,'member mismatch'):
+                independent.verify_partition_bundle(m,target,asset_reader=lambda p:b'corrupt')
+        finally:s.close()
+
     def test_memory_sink_matches_filesystem_and_propagates_failure(self):
         s=self.store(fixtures.archive([]))
         try:

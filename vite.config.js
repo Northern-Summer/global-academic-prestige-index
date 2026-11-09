@@ -122,8 +122,7 @@ export default defineConfig({
       if(manifest.schema_version==='gapi-aggregate-partitions/1'){
         const selected=readReleasePartitions(manifestPath,manifest);
         if(process.env.GAPI_LOCAL_BUILD!=='1'&&manifest.publication_status!=='public-observations-pending-external-review')throw new Error('Local/restricted dataset cannot be published');
-        for(const [name,asset] of selected.files)this.emitFile({type:'asset',fileName:`data/global/${name}`,source:await readFile(asset.path)});
-        for(const [name,asset] of selected.bindings)this.emitFile({type:'asset',fileName:`data/global/${name}`,source:await readFile(asset.path)});
+        for(const [name,asset] of selected.outputFiles)this.emitFile({type:'asset',fileName:`data/global/${name}`,source:asset.body??await readFile(asset.path)});
         this.emitFile({type:'asset',fileName:'data/global/manifest.json',source:JSON.stringify(manifest)});
         const historical=readDerivedBundle(buildRoot,manifest.derived_bundle);
         if(historical)for(const [name,bytes] of historical.files)this.emitFile({type:'asset',fileName:`data/derived/${name}`,source:bytes});

@@ -17,6 +17,249 @@ class AnalysisTests(unittest.TestCase):
     tearDown = fixtures.StreamingTests.tearDown
     store = fixtures.StreamingTests.store
 
+    def _snapshot_pair(self):
+        return (self.store(archive([]), work_dir=str(self.root/'left')),
+                self.store(archive([]), work_dir=str(self.root/'right')))
+
+    def _snapshot(self, store, locator, events, *, stamp='2026-10-01T00:00:00+00:00', checksum='a'*64):
+        from gapi.orcid_stream import API_RECORD_TRANSPORT
+        from gapi.task import digest
+        source='orcid-public-api';store.start(source)
+        with store.member(source,locator):
+            for event in events:
+                store.event(dict(person='snapshot-person',source=source,locator=locator+'#record',
+                                 country='GB',status='observed',**event))
+            store.db.execute('INSERT INTO member_parts VALUES(?,?,?,?,?,?,?)',
+                             (source,locator,'record','https://example.invalid/record',checksum,100,stamp))
+            store.finish_member(source,locator,digest({'transport':API_RECORD_TRANSPORT,'parts':{'record':checksum}}))
+
+    @staticmethod
+    def _snapshot_events():
+        return [dict(institution='ror:training',kind='education',stage='doctorate',role='PhD',
+                     year_start=2000,year_end=2004,put_code='education'),
+                dict(institution='ror:employer',kind='employment',stage='academic',role='Professor',
+                     year_start=2005,year_end=2010,put_code='job')]
+
+    def test_multi_store_relations_join_person_before_deduplication(self):
+        from gapi.global_analysis import relation_rows,relation_rows_from_stores
+        left,right=self._snapshot_pair()
+        try:
+            education,job=self._snapshot_events()
+            self._snapshot(left,'education-member',[education])
+            self._snapshot(right,'job-member',[job])
+            self.assertEqual(list(relation_rows(left)),[])
+            self.assertEqual(list(relation_rows(right)),[])
+            rows=list(relation_rows_from_stores((left,right)))
+            self.assertEqual([r[0] for r in rows],[('ror:employer','ror:training','doctorate')])
+            self.assertEqual(list(relation_rows_from_stores((right,left))),rows)
+            self.assertEqual(list(relation_rows_from_stores((left,right),persons=['absent'])),[])
+        finally:left.close();right.close()
+
+    def test_multi_store_identical_members_do_not_double_relations(self):
+        from gapi.global_analysis import relation_rows,relation_rows_from_stores,select_analysis_members
+        left,right=self._snapshot_pair()
+        try:
+            for store in (left,right):self._snapshot(store,'same-member',self._snapshot_events())
+            before=[s.db.total_changes for s in (left,right)]
+            plan=select_analysis_members((left,right))
+            self.assertEqual(plan['identical_members'],1)
+            self.assertEqual(list(relation_rows_from_stores((left,right))),list(relation_rows(left)))
+            self.assertEqual([s.db.total_changes for s in (left,right)],before)
+        finally:left.close();right.close()
+
+    def test_multi_store_newer_complete_snapshot_removes_old_analysis_events_only(self):
+        from gapi.global_analysis import relation_rows,relation_rows_from_stores,select_analysis_members
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'changed-member',self._snapshot_events())
+            self._snapshot(right,'changed-member',self._snapshot_events()[1:],
+                           stamp='2026-10-02T00:00:00+00:00',checksum='b'*64)
+            self.assertEqual(len(list(relation_rows(left))),1)
+            self.assertEqual(select_analysis_members((left,right))['changed_members'],1)
+            self.assertEqual(list(relation_rows_from_stores((left,right))),[])
+            self.assertEqual(list(relation_rows_from_stores((right,left))),[])
+            from gapi.global_analysis import analysis_counts_from_stores
+            selected=analysis_counts_from_stores((left,right))
+            self.assertEqual(selected['coverage']['events'],1)
+            self.assertEqual(selected['coverage']['people'],1)
+            self.assertEqual(selected['training_denominators'],{})
+            self.assertEqual([s.db.execute('SELECT count(*) FROM events').fetchone()[0]
+                              for s in (left,right)],[2,1])
+        finally:left.close();right.close()
+
+    def test_multi_store_refuses_ambiguous_or_unbound_snapshot_evidence(self):
+        from gapi.global_analysis import select_analysis_members
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'changed-member',self._snapshot_events())
+            self._snapshot(right,'changed-member',self._snapshot_events(),checksum='b'*64)
+            with self.assertRaisesRegex(ValueError,'windows overlap'):select_analysis_members((left,right))
+            from gapi.global_analysis import relation_rows_from_stores
+            self.assertEqual(list(relation_rows_from_stores((left,right),allowed_sources={'wikidata'})),[])
+            self.assertEqual(list(relation_rows_from_stores((left,right),allowed_sources=set())),[])
+            with right.db:right.db.execute("UPDATE member_parts SET retrieved_at='2026-10-02T00:00:00+00:00',sha256=?",('c'*64,))
+            with self.assertRaisesRegex(ValueError,'evidence hash'):select_analysis_members((left,right))
+            with right.db:right.db.execute("UPDATE member_parts SET retrieved_at='2026-10-02T00:00:00',sha256=?",('b'*64,))
+            with self.assertRaisesRegex(ValueError,'retrieval timestamp'):select_analysis_members((left,right))
+            with right.db:right.db.execute('DELETE FROM member_parts')
+            with self.assertRaisesRegex(ValueError,'complete activity'):select_analysis_members((left,right))
+            with self.assertRaisesRegex(ValueError,'distinct'):select_analysis_members((left,left))
+        finally:left.close();right.close()
+
+    def test_multi_store_input_mutation_prevents_complete_read(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import relation_rows_from_stores
+        from gapi.global_analysis import select_analysis_members
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'member',self._snapshot_events())
+            with patch.object(right,'db',left.db):
+                with self.assertRaisesRegex(ValueError,'bound database'):
+                    select_analysis_members((left,right))
+            rows=relation_rows_from_stores((left,right))
+            self.assertEqual(next(rows)[0],('ror:employer','ror:training','doctorate'))
+            with left.db:left.db.execute("UPDATE runs SET bytes=bytes+1 WHERE source='orcid-public-api'")
+            with self.assertRaisesRegex(ValueError,'input changed'):list(rows)
+        finally:left.close();right.close()
+
+    def test_multi_store_conflicting_aliases_and_combined_fanout_stop_analysis(self):
+        from unittest.mock import patch
+        from gapi.global_analysis import relation_rows_from_stores
+        from gapi.task import BudgetStop
+        left,right=self._snapshot_pair()
+        try:
+            with left.db:left.db.execute('INSERT INTO institution_aliases VALUES(?,?,?)',('wd:Q1','ror:a','test'))
+            with right.db:right.db.execute('INSERT INTO institution_aliases VALUES(?,?,?)',('wd:Q1','ror:b','test'))
+            with self.assertRaisesRegex(ValueError,'aliases disagree'):
+                list(relation_rows_from_stores((left,right)))
+            with right.db:right.db.execute('DELETE FROM institution_aliases')
+            with patch('gapi.global_analysis._relation_people',side_effect=lambda *a,**k:iter([('p',[{}]*2050,{'events':2050,'event_status':{},'countries':set()})])):
+                with self.assertRaisesRegex(BudgetStop,'combined person'):
+                    list(relation_rows_from_stores((left,right)))
+        finally:left.close();right.close()
+
+    def test_multi_store_counts_share_snapshot_selection_and_person_deduplication(self):
+        from gapi.global_analysis import analysis_counts_from_stores,_coverage_counts,_training_denominators
+        left,right=self._snapshot_pair()
+        try:
+            for store in (left,right):self._snapshot(store,'same',self._snapshot_events())
+            actual=analysis_counts_from_stores((left,right))
+            expected=_coverage_counts(left,None)
+            self.assertEqual(actual['coverage'],{k:v for k,v in expected.items() if k!='member_status'})
+            self.assertEqual(actual['training_denominators'],dict(_training_denominators(left,None,lambda *a,**k:None)))
+            self.assertFalse(actual['complete_release'])
+            diagnostic=analysis_counts_from_stores((left,right),persons=['absent'])
+            self.assertEqual(diagnostic['scope'],'selected-people-diagnostic')
+            self.assertEqual(diagnostic['coverage']['people'],0)
+        finally:left.close();right.close()
+
+    def test_multi_store_counts_keep_unresolved_events_and_empty_members_separate(self):
+        from gapi.global_analysis import analysis_counts_from_stores
+        left,right=self._snapshot_pair()
+        try:
+            event=dict(institution=None,kind='employment',stage=None,role=None,
+                       year_start=None,year_end=None,put_code='unresolved')
+            left.start('orcid-public-api')
+            with left.member('orcid-public-api','unresolved'):
+                left.event(dict(event,person='p',source='orcid-public-api',
+                                locator='unresolved#record',status='unresolved',country=None))
+                left.finish_member('orcid-public-api','unresolved','a'*64)
+            self._snapshot(right,'empty',[])
+            actual=analysis_counts_from_stores((left,right))
+            self.assertEqual(actual['coverage'],dict(people=1,events=1,
+                             event_status={'unresolved':1},countries=[]))
+            self.assertEqual(actual['training_denominators'],{})
+        finally:left.close();right.close()
+
+    def test_multi_store_scan_restart_keeps_graph_and_counts_atomic(self):
+        from gapi.global_analysis import scan_analysis_stores,analysis_counts_from_stores
+        from gapi.analysis_checkpoint import GraphCheckpoint
+        from pathlib import Path
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'first',self._snapshot_events())
+            right.start('orcid-public-api')
+            with right.member('orcid-public-api','second'):
+                for event in self._snapshot_events():
+                    right.event(dict(event,person='z-second',source='orcid-public-api',
+                                     locator='second#record',status='observed',country='US'))
+                right.finish_member('orcid-public-api','second','c'*64)
+            first=scan_analysis_stores((left,right),max_people=1)
+            self.assertFalse(first['complete'])
+            self.assertEqual(first['state']['coverage']['people'],1)
+            self.assertNotEqual(Path(first['checkpoint']),GraphCheckpoint(left,None).path)
+            final=scan_analysis_stores((left,right))
+            self.assertTrue(final['complete'])
+            self.assertEqual(final['state']['graph']['relation_count'],2)
+            self.assertEqual(dict((tuple(k),n) for k,n in final['state']['graph']['edges']),
+                             {('ror:employer','ror:training'):2.0})
+            expected=analysis_counts_from_stores((left,right))
+            self.assertEqual(final['state']['coverage'],expected['coverage'])
+            self.assertEqual(final['state']['training_denominators'],expected['training_denominators'])
+            before=Path(final['checkpoint']).read_bytes()
+            repeat=scan_analysis_stores((left,right))
+            self.assertEqual(repeat['people_processed_this_run'],0)
+            self.assertEqual(Path(final['checkpoint']).read_bytes(),before)
+            self.assertFalse(repeat['publication_ready'])
+        finally:left.close();right.close()
+
+    def test_multi_store_explicit_checkpoint_rebind_preserves_state_and_refuses_drift(self):
+        import hashlib
+        from pathlib import Path
+        import gapi.analysis_checkpoint as owner
+        from gapi.analysis_checkpoint import MultiStoreGraphCheckpoint
+        from gapi.global_analysis import scan_analysis_stores
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'member',self._snapshot_events())
+            result=scan_analysis_stores((left,right),max_people=1)
+            cp=MultiStoreGraphCheckpoint((left,right),None)
+            # The public result must already have the same representation as
+            # recovery; migration must not hide a lossy or unequal roundtrip.
+            self.assertEqual(cp.load(),result['state'])
+            predecessor={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in Path(owner.__file__).parent.glob('*.py')}
+            checksum=hashlib.sha256(cp.path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError,'checksum'):
+                cp.migrate_unchanged_state(predecessor,original_sha256='0'*64)
+            receipt=cp.migrate_unchanged_state(predecessor,original_sha256=checksum)
+            self.assertEqual(receipt['people'],1)
+            self.assertEqual(cp.load(),result['state'])
+            resumed=scan_analysis_stores((left,right))
+            self.assertTrue(resumed['complete'])
+            self.assertEqual(cp.load(),resumed['state'])
+            self.assertEqual(resumed['state'],result['state'])
+            completed_checksum=hashlib.sha256(cp.path.read_bytes()).hexdigest()
+            self._snapshot(right,'other',[])
+            newer=MultiStoreGraphCheckpoint((left,right),None)
+            with self.assertRaisesRegex(ValueError,'input or version drift'):
+                newer.migrate_unchanged_state(predecessor,original_sha256=completed_checksum)
+        finally:left.close();right.close()
+
+    def test_multi_store_scan_rejects_second_input_drift_and_preserves_checkpoint_on_failure(self):
+        from gapi.global_analysis import scan_analysis_stores
+        from gapi.task import BudgetStop
+        from unittest.mock import patch
+        from pathlib import Path
+        left,right=self._snapshot_pair()
+        try:
+            self._snapshot(left,'first',self._snapshot_events())
+            initial=scan_analysis_stores((left,right),max_people=1)
+            path=Path(initial['checkpoint']);before=path.read_bytes()
+            with patch('gapi.global_analysis._write_aggregate',side_effect=BudgetStop('injected capacity')):
+                with self.assertRaisesRegex(BudgetStop,'capacity'):scan_analysis_stores((left,right))
+            self.assertEqual(path.read_bytes(),before)
+            with right.db:right.db.execute("UPDATE runs SET bytes=bytes+1")
+            # An empty run table does not drift: use a durable new member.
+            self._snapshot(right,'changed',self._snapshot_events())
+            with self.assertRaisesRegex(ValueError,'input or version drift'):
+                scan_analysis_stores((left,right))
+            self.assertEqual(path.read_bytes(),before)
+            for maximum in (0,-1,True,float('nan')):
+                with self.assertRaisesRegex(ValueError,'scan bound'):
+                    scan_analysis_stores((left,right),max_seconds=maximum)
+        finally:left.close();right.close()
+
     def test_unresolved_append_label_witness_matches_full_analysis(self):
         self.test_unresolved_append_reuses_graph_and_matches_full_analysis(existing=True)
 

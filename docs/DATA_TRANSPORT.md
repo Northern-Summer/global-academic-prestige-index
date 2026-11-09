@@ -290,6 +290,46 @@ do not. Completion and failure cancel the remaining requests and clear the
 idle timer. These bounds preserve slow productive transfers without waiting
 indefinitely for a stalled source. They do not establish a network speed gain.
 
+### Reading multiple observation stores
+
+`global_analysis.select_analysis_members` binds two settled database connections
+to their frozen task identities and file generations. Equal source/member
+digests select one copy. Different ORCID API digests require complete record or
+education/employment part evidence whose hashes reproduce the member digest.
+Only strictly ordered, timezone-qualified capture windows select a newer
+complete snapshot; incomplete, overlapping or unbound evidence stops selection.
+Failed versions cannot replace a successfully observed member. Both source
+databases retain all original rows and evidence.
+
+`relation_rows_from_stores` reads the selected versions, merges sorted person
+groups and calls the existing `observed_relations` rule once per person. It
+preserves relation direction, weights and evidence-source grouping. Conflicting
+active institution aliases or more than 4,096 eligible events for one combined
+person stop analysis. Callers hold the existing writer exclusions throughout;
+input-generation drift prevents a completed read. Duplicate selection is bounded
+to 1,000 members, and source-deletion scenarios do not select excluded sources.
+
+This reader is an analysis-input capability, not a combined release exporter.
+`analysis_people_from_stores` shares selected person groups and raw observation
+counts with the relationship reader. `analysis_counts_from_stores` derives
+distinct people, event statuses, countries and per-institution training people
+from those same groups. A selected-person run is explicitly diagnostic; member
+totals and a complete release are not inferred from it. Directory metadata,
+source adjudication, member-ledger totals and checkpoint bindings must also
+describe the same selected stores before any combined score publication. An annual-only checkpoint or the sum of two existing graph
+aggregates cannot establish that result. No existing publication is changed by
+calling this reader.
+
+`scan_analysis_stores` uses the existing graph accumulation rules and atomic
+checkpoint writer. `MultiStoreGraphCheckpoint` binds both database generations,
+source selection, code bytes and duplicate-member plan in a separate namespace.
+Graph state, raw event coverage and training denominators commit together only
+at complete person boundaries. Time/person limits save an incomplete checkpoint;
+resume seeks strictly after its person cursor. An incomplete or completed
+single-store checkpoint cannot substitute for this input. Changed inputs or
+failed atomic writes preserve the prior checkpoint and stop acceptance. This
+pass still does not produce a directory, member totals or a publishable result.
+
 ### Retiring duplicate legacy aggregate blocks
 
 `gapi.aggregate_chunks.select_successor` may select a sibling partition
@@ -401,3 +441,61 @@ The optional local archive index supports a selected gzip storage descriptor.
 native import. `compress_index` selects this representation without deleting the
 original; retirement requires separate verified cleanup. This preserves the exact
 index bytes and cursor identity and does not read or reacquire the source archive.
+
+### Unified inputs and a single browser transfer
+
+The optional partition `bundle` descriptor uses `format=gapi-partition-concat/1`,
+`file=<sha256>.gapi`, `sha256`, and `bytes`. Its bytes are the exact compressed
+assets concatenated in manifest field/entry order, including repeated references.
+The sum of the stored asset lengths is the complete bundle length. No framing,
+extra records, changed rows or publication decisions enter this representation.
+
+Build provenance verifies every original asset, derives the bundle in memory and
+checks its complete SHA-256 before emitting it. A bundled site emits the transfer
+and provenance bindings once, while original shards remain verified source
+inputs. The bundle need not be stored as another source copy. Browsers consume one bounded compressed asset at a time,
+verify both asset identities, and incrementally verify the full bundle hash and
+EOF. Old manifests continue to use the existing bounded partition prefetcher.
+A failed or incomplete transfer never yields a partially accepted dataset.
+
+The unified calculation reads both frozen source stores under their existing
+common exclusion. Snapshot selection and per-person relationship rules precede
+all aggregation. Physical annual traversal is accepted only after an independent
+unique-person index count matches its complete person groups. Cross-store facts
+are joined before ordinary and source-deletion relationships are deduplicated.
+Graph weights, coverage, training denominators, directory labels and cursors share
+one checksum-bound atomic checkpoint; source files are never copied or rewritten.
+
+Manual retries retain at most 24 MiB of already verified compressed assets in the
+current page. An unchanged bundle resumes with an exact HTTP byte range after its
+verified prefix; a server that ignores the range is refused before consuming the
+body. Version or base-URL changes discard the cache. Legacy shard retries request
+only uncached assets. Retained content is verified again before use, and the UI
+shows success only after complete lengths, identities and EOF have settled. No
+automatic reload loop or persistent browser storage is installed.
+
+A completed unified scan can be read with an explicitly supplied predecessor code
+manifest when only the declared orchestration/bounded-view modules changed. Both database generations,
+source configs, selection plan and all unchanged modules must reproduce the
+old binding; incomplete scans and any other module drift are refused. This
+in-memory rebind leaves the original checksum-bound checkpoint bytes untouched.
+Completed-scan edge lookup indexes and duplicated decoded metadata are released
+before PageRank; graph columns and scientific inputs remain intact.
+
+Fixed-universe sensitivity uses the compact graph view to filter endpoints,
+so an expanded-universe scenario does not duplicate a full edge dictionary.
+The existing scenario owner still computes the same fixed and expanded results;
+representation-equivalence regressions cover the actual boundary branch.
+
+Member disposition uses a scalar table stream and a small status counter. The
+real member schema has no source/status index; an unbounded SQLite GROUP BY
+would create a temporary B-tree. The reader selects memory-only temporary work
+and its regression inspects actual query plans to reject that spill mechanism.
+
+The expanded canonical JSON length is an identity, not a buffer allocation.
+Unified row-column transport decodes below 256 MiB; its repeated expanded JSON
+field names exceed that length. The browser checks those separately: a 384 MiB
+expanded-identity limit, an unchanged 256 MiB total decoded-asset limit, 24 MiB
+compressed transfer, and unchanged complete node/edge limits. Acceptance still
+requires measuring the full real data; these guards never authorize increasing
+the 512 MiB analysis-memory or 32 GB task-storage allowances.

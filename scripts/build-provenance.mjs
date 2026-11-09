@@ -123,7 +123,14 @@ export function readReleasePartitions(manifestPath,manifest) {
     bindings.set(p.local_manifest,{path:resolve(folder,p.local_manifest),sha256:hash(original),bytes:original.length});
     bindings.set(p.local_source_manifest,{path:resolve(folder,p.local_source_manifest),sha256:hash(source),bytes:source.length});
   }
-  return {files,bindings,bytes:[...files.values(),...bindings.values()].reduce((n,f)=>n+f.bytes,0)};
+  let bundle=null;
+  if(manifest.bundle){
+    const body=Buffer.concat(descriptors.map(a=>regular(files.get(a.file).path)));
+    if(body.length!==manifest.bundle.bytes||hash(body)!==manifest.bundle.sha256)throw new Error('Partition bundle identity mismatch');
+    bundle={...manifest.bundle,body};
+  }
+  const outputFiles=new Map([...(bundle?[[bundle.file,{body:bundle.body,sha256:bundle.sha256,bytes:bundle.bytes}]]:files),...bindings]);
+  return {files,bindings,bundle,outputFiles,bytes:[...outputFiles.values()].reduce((n,f)=>n+f.bytes,0)};
 }
 
 export function readLocalPartitionSelection(taskRoot){
@@ -146,6 +153,7 @@ function selection(root,manifestPath) {
     const partitions=readReleasePartitions(path,manifest);
     return {manifest:inside(root,path),manifest_sha256:hash(manifestBytes),
       partition_inputs:ordered(Object.fromEntries([...partitions.files,...partitions.bindings].map(([name,f])=>[inside(root,resolve(dirname(path),name)),f.sha256]))),
+      partition_outputs:ordered(Object.fromEntries([...partitions.outputFiles].map(([name,f])=>[name,f.sha256]))),
       partition_bytes:partitions.bytes,logical_sha256:manifest.logical_sha256,
       publication_status:manifest.publication_status,derived_bundle:readDerivedBundle(root,manifest.derived_bundle)?.identity??null};
   }
@@ -185,8 +193,8 @@ export function verifyBuild({root,outDir,manifestPath,publish=false}) {
     const built = JSON.parse(regular(resolve(outDir,'data/global/manifest.json')));
     if (JSON.stringify(built) !== JSON.stringify(JSON.parse(regular(resolve(root,current.manifest))))) throw new Error('Built/selected manifest mismatch');
     if(current.partition_inputs){
-      for(const [path,expected] of Object.entries(current.partition_inputs))
-        if(hash(regular(resolve(outDir,'data/global',path.split('/').at(-1))))!==expected)throw new Error('Built partition mismatch');
+      for(const [name,expected] of Object.entries(current.partition_outputs))
+        if(hash(regular(resolve(outDir,'data/global',name)))!==expected)throw new Error('Built partition mismatch');
     }else if (hash(regular(resolve(outDir,'data/global',built.snapshot))) !== current.snapshot_sha256) throw new Error('Built snapshot mismatch');
     if(current.derived_bundle)for(const [path,expected] of Object.entries(current.derived_bundle.assets??current.derived_bundle.inputs)){
       const name=path.split('/').at(-1);

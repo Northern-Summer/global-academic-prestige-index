@@ -47,7 +47,7 @@ def _rank_graph(store, nodes, edges, alpha, tolerance, iterations, personalizati
     task memory budget.
     """
     store.task.check_memory()
-    if hasattr(edges,'packed_rows'):
+    if hasattr(edges,'packed_rows') and len(edges)>PACKED_GRAPH_THRESHOLD:
         from .ranking import pagerank_sparse
         store.task.check_memory()
         return pagerank_sparse(nodes, edges.packed_rows(), alpha,tolerance,iterations,
@@ -55,6 +55,9 @@ def _rank_graph(store, nodes, edges, alpha, tolerance, iterations, personalizati
     if len(edges) <= PACKED_GRAPH_THRESHOLD:
         return pagerank(nodes, dict(sorted(edges.items())), alpha, tolerance, iterations, personalization)
     from .ranking import pagerank_sparse
+    if hasattr(edges,'packed_rows'):
+        return pagerank_sparse(nodes,edges.packed_rows(),alpha,tolerance,iterations,
+            check=store.task.check_memory,personalization=personalization)
     keys = sorted(edges)
     store.task.check_memory()
     return pagerank_sparse(nodes, ((a,b,edges[(a,b)]) for a,b in keys),
@@ -220,6 +223,16 @@ def observed_relations(items):
 
 
 def relation_rows(store, *, allowed_sources=None, after_person=None, person_complete=None, persons=None):
+    for person, events, _ in _relation_people(store, allowed_sources=allowed_sources,
+                                         after_person=after_person, persons=persons):
+        yield from observed_relations(events)
+        if person_complete is not None:
+            person_complete(person)
+
+
+def _relation_people(store, *, allowed_sources=None, after_person=None, persons=None,
+                     excluded_members=(), shared_aliases=None, prepared=None,
+                     physical_source=None, after_rowid=0, capture_directory=False):
     """Read one person's bounded events at a time. No population-sized JSON/list."""
     # Source-deletion sensitivity can remove the only available source. That
     # graph is exactly empty: do not scan the population merely to discard it.
@@ -233,21 +246,27 @@ def relation_rows(store, *, allowed_sources=None, after_person=None, person_comp
             raise ValueError('invalid bounded relation person selection')
         selected=tuple(sorted(persons))
     from .career_normalization import has_interpretations, VERSION, POLICY_SHA256
-    enriched = has_interpretations(store)
+    enriched = has_interpretations(store) if prepared is None else prepared['enriched']
     from .corroboration import decisions
-    verified = decisions(store, allowed_sources=allowed_sources)
+    verified = decisions(store, allowed_sources=allowed_sources) if prepared is None else prepared['verified']
     # This reader already owns a stable analysis transaction under the writer
     # lock. Reuse the authoritative active view once instead of probing its
     # alias and issue indexes for every event, including ineligible events.
-    aliases = {}
-    for number, (alias, target) in enumerate(store.db.execute(
-            'SELECT alias,institution FROM active_institution_aliases'), 1):
-        aliases[alias] = target
-        if number % 1000 == 0:
-            store.task.check_memory()
+    aliases = shared_aliases
+    if aliases is None:
+        aliases = {}
+        for number, (alias, target) in enumerate(store.db.execute(
+                'SELECT alias,institution FROM active_institution_aliases'), 1):
+            aliases[alias] = target
+            if number % 1000 == 0:
+                store.task.check_memory()
     store.task.check_memory()
     archive_predicate,archive_params=verified_archive_sql(store.task)
     columns = ',i.kind,i.stage,i.status' if enriched else ',NULL,NULL,NULL'
+    if excluded_members:
+        columns += ',e.locator'
+    columns += ',e.country'
+    if capture_directory:columns += ',e.rowid'
     join = " LEFT JOIN event_interpretations i ON i.event_id=e.id AND i.rule_version=? AND i.policy_sha256=?" if enriched else ''
     seek = ' AND e.person>?' if after_person is not None else ''
     if selected:seek=' AND e.person IN ('+','.join('?' for _ in selected)+')'
@@ -256,31 +275,63 @@ def relation_rows(store, *, allowed_sources=None, after_person=None, person_comp
     # Keep physical payload bytes until scalar eligibility has been checked.
     # The reader otherwise decompresses every unresolved event before the loop
     # discards it. Preserve row order, interpretation overrides and fanout gates.
-    cursor = store.db.execute("""SELECT e.person,e.payload AS stored_payload,e.institution,e.status,e.source,e.id""" + columns + """
-        FROM events e""" + join + """
+    if physical_source is not None:
+        if after_person is not None or selected or type(after_rowid) is not int or after_rowid<0:
+            raise ValueError('invalid physical person cursor')
+        seek=' AND e.source=? AND e.rowid>?'
+    cursor = store.db.cursor()
+    # These columns contain no encoded digest/URL. Decode payloads explicitly
+    # only after eligibility; the generic factory inspects every scalar column.
+    cursor.row_factory=None
+    cursor.execute("""SELECT e.person,e.payload AS stored_payload,e.institution,e.status,e.source,e.id""" + columns + """
+        FROM events e""" + (' NOT INDEXED' if physical_source is not None else '') + join + """
         WHERE """ + member_evidence_sql() + " AND " + archive_predicate + seek + """
-        ORDER BY e.person,e.id""", ((VERSION, POLICY_SHA256) if enriched else ()) + archive_params
-        + ((after_person,) if after_person is not None else selected))
+        ORDER BY """ + ('e.rowid' if physical_source is not None else 'e.person,e.id'),
+        ((VERSION, POLICY_SHA256) if enriched else ()) + archive_params
+        + ((physical_source,after_rowid) if physical_source is not None else
+           (after_person,) if after_person is not None else selected))
     try:
         person, events = None, []
-        for pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status in cursor:
+        summary = {'events': 0, 'event_status': Counter(), 'countries': set()}
+        if capture_directory:summary.update(labels={},directory_ids=set(),end_rowid=after_rowid)
+        for record in cursor:
+            pid, payload, institution, status, source, event_id, interpreted_kind, interpreted_stage, interpreted_status = record[:9]
             institution = aliases.get(institution, institution)
             if person is not None and pid != person:
-                yield from observed_relations(events)
-                if person_complete is not None:
-                    person_complete(person)
+                yield person, events, summary
                 events = []
+                summary = {'events': 0, 'event_status': Counter(), 'countries': set()}
+                if capture_directory:summary.update(labels={},directory_ids=set(),end_rowid=after_rowid)
             person = pid
-            if len(events) >= 4096:
+            if excluded_members and (source, record[9].split('#', 1)[0]) in excluded_members:
+                continue
+            if allowed_sources is not None and source not in allowed_sources:
+                continue
+            summary['events'] += 1
+            summary['event_status'][status] += 1
+            country = record[-2] if capture_directory else record[-1]
+            if capture_directory:summary['end_rowid']=record[-1]
+            if country is not None and (allowed_sources is None or country != ''):
+                summary['countries'].add(country)
+            if len(events) >= 4096 or capture_directory and summary['events']>4096:
                 raise BudgetStop("person event fanout exceeds bounded relation analysis")
+            row=None
+            if capture_directory and institution:
+                summary['directory_ids'].add(institution)
+                if institution not in prepared['canonical_ids']:
+                    from .event_storage import decode_event
+                    row=json.loads(decode_event(store.db,payload))
+                    label=row.get('institution_name')
+                    if label:
+                        previous=summary['labels'].get(institution)
+                        if previous is None or event_id<previous[0]:
+                            summary['labels'][institution]=(event_id,label,country)
             if interpreted_status is not None:
                 status = interpreted_status
             if status not in ("observed", "corroborated") or not institution:
                 continue
-            if allowed_sources is not None and source not in allowed_sources:
-                continue
             from .event_storage import decode_event
-            row = json.loads(decode_event(store.db,payload))
+            if row is None:row = json.loads(decode_event(store.db,payload))
             row["institution"], row["status"] = institution, status
             if source.startswith('orcid-'):
                 row['kind'], row['stage'] = classify(row['kind'],row.get('role'),completed_only=True)
@@ -290,12 +341,285 @@ def relation_rows(store, *, allowed_sources=None, after_person=None, person_comp
                 row['status'] = 'corroborated'
                 row['evidence_origins'] = verified[event_id]['origins']
             events.append(row)
-        if events:
-            yield from observed_relations(events)
-        if person is not None and person_complete is not None:
-            person_complete(person)
+        if person is not None:
+            yield person, events, summary
     finally:
         cursor.close()
+
+
+def select_analysis_members(stores, *, allowed_sources=None):
+    """Select duplicate member versions for a two-store analysis, without writes.
+
+    Callers hold both stores' existing writer exclusions. Source identities must
+    agree before identical locators are compared. Different API bodies require
+    complete, hash-bound activity captures with strictly ordered time windows.
+    This is an input selection, not a combined coverage or release manifest.
+    """
+    from datetime import datetime
+    from .career_store import source_identity
+    from .orcid_stream import API_RECORD_TRANSPORT
+    if not isinstance(stores, (tuple, list)) or len(stores) != 2 or stores[0] is stores[1]:
+        raise ValueError('analysis requires two distinct stores')
+    generations = []
+    sources = []
+    for store in stores:
+        store.task.require_frozen()
+        path = store.task.root / 'careers.sqlite'
+        actual = next((row[2] for row in store.db.execute('PRAGMA database_list') if row[1] == 'main'), None)
+        if not actual or Path(actual).resolve() != path.resolve():
+            raise ValueError('analysis connection differs from its bound database')
+        if store.db.in_transaction or any(Path(str(path)+suffix).exists() for suffix in ('-wal', '-journal')):
+            raise ValueError('multi-store analysis requires settled inputs')
+        info = path.stat()
+        generations.append((str(path.resolve()), info.st_size, info.st_mtime_ns))
+        active = {}
+        for source, identity, members in store.db.execute('SELECT source,identity,members FROM runs WHERE members>0'):
+            if allowed_sources is not None and source not in allowed_sources:
+                continue
+            if source not in store.task.config['sources'] or identity != source_identity(store.task, source):
+                raise ValueError('analysis source identity differs from its freeze')
+            active[source] = (identity, members)
+        sources.append(active)
+    if generations[0][0] == generations[1][0]:
+        raise ValueError('analysis stores refer to the same database')
+
+    def window(store, source, locator, checksum):
+        parts = list(store.db.execute('SELECT part,sha256,retrieved_at FROM member_parts WHERE source=? AND locator=?',
+                                      (source, locator)))
+        names = {part for part, _, _ in parts}
+        if len(names) != len(parts) or names not in ({'record'}, {'educations', 'employments'}):
+            raise ValueError('changed member lacks complete activity evidence')
+        transport = API_RECORD_TRANSPORT if names == {'record'} else 'incremental-affiliation-xml/v1'
+        if digest({'transport': transport, 'parts': {part: sha for part, sha, _ in parts}}) != checksum:
+            raise ValueError('changed member evidence hash mismatch')
+        times = []
+        for _, _, stamp in parts:
+            try:
+                value = datetime.fromisoformat(stamp)
+                if value.utcoffset() is None:
+                    raise ValueError('unqualified timestamp')
+            except (TypeError, ValueError):
+                raise ValueError('invalid member retrieval timestamp') from None
+            times.append(value)
+        return min(times), max(times)
+
+    excluded = [set(), set()]
+    same = changed = rejected = 0
+    for source in sorted(set(sources[0]) & set(sources[1])):
+        if sources[0][source][0] != sources[1][source][0]:
+            raise ValueError('cannot combine different frozen identities under one source name')
+        small = 0 if sources[0][source][1] <= sources[1][source][1] else 1
+        other = 1-small
+        for locator, sha, status in stores[small].db.execute(
+                'SELECT locator,sha256,status FROM members WHERE source=?', (source,)):
+            old = stores[other].db.execute('SELECT sha256,status FROM members WHERE source=? AND locator=?',
+                                           (source, locator)).fetchone()
+            if old is None:
+                continue
+            if len(excluded[0])+len(excluded[1]) >= 1000:
+                raise BudgetStop('duplicate member selection exceeds bounded plan')
+            if sha == old[0] and status == old[1]:
+                loser = 1
+                same += 1
+            elif status != 'observed' or old[1] != 'observed':
+                if (status == 'observed') == (old[1] == 'observed'):
+                    raise ValueError('conflicting rejected member versions')
+                loser = other if status == 'observed' else small
+                rejected += 1
+            else:
+                if source != 'orcid-public-api':
+                    raise ValueError('changed member has no supported snapshot selection rule')
+                left = window(stores[small], source, locator, sha)
+                right = window(stores[other], source, locator, old[0])
+                if left[1] < right[0]:
+                    loser = small
+                elif right[1] < left[0]:
+                    loser = other
+                else:
+                    raise ValueError('changed member capture windows overlap')
+                changed += 1
+            excluded[loser].add((source, locator))
+            stores[small].task.check_memory()
+    for store, expected in zip(stores, generations):
+        path = store.task.root / 'careers.sqlite'
+        info = path.stat()
+        if (str(path.resolve()), info.st_size, info.st_mtime_ns) != expected:
+            raise ValueError('analysis input changed during member selection')
+    return {'schema': 'gapi-analysis-member-selection/1', 'generations': generations,
+            'excluded_members': [sorted(values) for values in excluded],
+            'identical_members': same, 'changed_members': changed,
+            'failed_versions_excluded': rejected}
+
+
+def relation_rows_from_stores(stores, *, allowed_sources=None, persons=None):
+    """Stream both stores through the existing per-person relation rule owner.
+
+    The selection's capture policy removes superseded API members before person
+    grouping. This iterator does not authorize a merged score publication:
+    coverage, denominator, directory and checkpoint inputs need the same stores.
+    """
+    for _, events, _ in analysis_people_from_stores(stores, allowed_sources=allowed_sources, persons=persons):
+        yield from observed_relations(events)
+
+
+def analysis_people_from_stores(stores, *, allowed_sources=None, persons=None, after_person=None):
+    """One selected person group for relations, coverage and training counts.
+
+    Coverage retains raw observation statuses; interpretation never converts a
+    coverage event into independent evidence. Event payloads retain the existing
+    relation-reader eligibility contract. All consumers must drain this stream
+    before accepting the final generation check.
+    """
+    from heapq import merge
+    from itertools import groupby
+    if allowed_sources is not None and not allowed_sources:
+        return
+    versions=[(s.db.total_changes,s.db.execute('PRAGMA data_version').fetchone()[0]) for s in stores]
+    plan = select_analysis_members(stores, allowed_sources=allowed_sources)
+    aliases = {}
+    for store in stores:
+        for alias, target in store.db.execute('SELECT alias,institution FROM active_institution_aliases'):
+            if alias in aliases and aliases[alias] != target:
+                raise ValueError('analysis institution aliases disagree')
+            aliases[alias] = target
+        store.task.check_memory()
+    streams = [_relation_people(store, allowed_sources=allowed_sources, persons=persons,
+                               after_person=after_person,
+                               excluded_members=set(map(tuple, excluded)), shared_aliases=aliases)
+               for store, excluded in zip(stores, plan['excluded_members'])]
+    for _, groups in groupby(merge(*streams, key=lambda item: item[0]), key=lambda item: item[0]):
+        events = []
+        summary = {'events': 0, 'event_status': Counter(), 'countries': set()}
+        for person, rows, counts in groups:
+            if len(events)+len(rows) > 4096:
+                raise BudgetStop('combined person event fanout exceeds bounded relation analysis')
+            events.extend(rows)
+            summary['events'] += counts['events']
+            summary['event_status'].update(counts['event_status'])
+            summary['countries'].update(counts['countries'])
+        yield person, events, summary
+    for store, version, expected in zip(stores, versions, plan['generations']):
+        if (store.db.total_changes,store.db.execute('PRAGMA data_version').fetchone()[0])!=version:
+            raise ValueError('analysis input changed during relation reading')
+        path = store.task.root / 'careers.sqlite'
+        info = path.stat()
+        if (str(path.resolve()), info.st_size, info.st_mtime_ns) != tuple(expected):
+            raise ValueError('analysis input changed during relation reading')
+
+
+def analysis_counts_from_stores(stores, *, allowed_sources=None, persons=None, progress=None):
+    """Reconcile selected observation coverage and training denominators together.
+
+    Returns scalar/organization aggregates only. No source rows or database copies
+    are written. A bounded person selection is diagnostic and explicitly labeled.
+    Member totals remain separate until the full selected-member ledger is read.
+    """
+    events = people = 0
+    statuses = Counter()
+    countries = set()
+    denominators = Counter()
+    for _, rows, summary in analysis_people_from_stores(stores, allowed_sources=allowed_sources, persons=persons):
+        events += summary['events']
+        people += bool(summary['events'])
+        statuses.update(summary['event_status'])
+        countries.update(summary['countries'])
+        institutions = {row['institution'] for row in rows if training_observation_eligible(
+            row['kind'], row.get('role'), row.get('year_start'), row.get('year_end'))}
+        denominators.update(institutions)
+        if people and people % 10000 == 0:
+            for store in stores:
+                store.task.check_memory()
+            if progress:
+                progress({'people': people, 'events': events})
+    return {'scope': 'selected-people-diagnostic' if persons is not None else 'selected-two-store-observations',
+            'coverage': {'people': people, 'events': events, 'event_status': dict(statuses),
+                         'countries': sorted(countries)},
+            'training_denominators': dict(denominators), 'complete_release': False}
+
+
+def _accumulate_relation(relation, edges, stages, counts, source_counts, corroborated,
+                         independent_origins, recent_edges):
+    (employer, training, stage), train, job = relation
+    key = employer, training
+    counts[training] += 1
+    source_counts[training].update(train['supporting_sources'])
+    source_counts[training].update(job['supporting_sources'])
+    if train['status'] == job['status'] == 'corroborated':
+        corroborated[training] += 1
+        independent_origins[training].update(set(train.get('evidence_origins', ())) & set(job.get('evidence_origins', ())))
+    weight = DEFAULT_CONFIG['stage_weights'][stage]
+    edges[key] += weight
+    stages[key][stage] += weight
+    if job['year_start'] >= 2016:
+        recent_edges[key] += weight
+
+
+def scan_analysis_stores(stores, *, allowed_sources=None, max_seconds=300, max_people=None, progress=None):
+    """Resume one atomic graph/coverage/denominator pass at person boundaries.
+
+    Callers hold the existing writer exclusions. A time/person boundary saves a
+    partial, never a completed result. The output is private analysis state, not
+    scores, publication qualification or a source completion assertion.
+    """
+    from .analysis_checkpoint import MultiStoreGraphCheckpoint
+    if (isinstance(max_seconds,bool) or not isinstance(max_seconds,(int,float))
+            or not math.isfinite(max_seconds) or max_seconds<=0
+            or max_people is not None and (type(max_people) is not int or max_people<1)):
+        raise ValueError('invalid multi-store scan bound')
+    checkpoint=MultiStoreGraphCheckpoint(stores,allowed_sources)
+    saved=checkpoint.load()
+    edges,stages,counts=defaultdict(float),defaultdict(Counter),Counter()
+    source_counts,corroborated=defaultdict(set),Counter()
+    independent_origins,recent_edges=defaultdict(set),defaultdict(float)
+    relation_count=people=events=0
+    statuses=Counter();countries=set();denominators=Counter()
+    if saved:
+        graph=saved['graph']
+        edges.update((tuple(k),n) for k,n in graph['edges'])
+        stages.update((tuple(k),Counter(n)) for k,n in graph['stages'])
+        counts.update(graph['counts']);source_counts.update((k,set(n)) for k,n in graph['source_counts'].items())
+        corroborated.update(graph['corroborated']);independent_origins.update((k,set(n)) for k,n in graph['independent_origins'].items())
+        recent_edges.update((tuple(k),n) for k,n in graph['recent_edges']);relation_count=graph['relation_count']
+        coverage=saved['coverage'];people=coverage['people'];events=coverage['events']
+        statuses.update(coverage['event_status']);countries.update(coverage['countries'])
+        denominators.update(saved['training_denominators'])
+        del saved
+    def state():
+        # Return the persisted JSON representation on both fresh and resumed
+        # scans, so callers can compare state without a second full encoding.
+        return {'graph':{'edges':[[list(k),n] for k,n in edges.items()],
+                'stages':[[list(k),dict(n)] for k,n in stages.items()],'counts':dict(counts),
+                'source_counts':{k:sorted(n) for k,n in source_counts.items()},'corroborated':dict(corroborated),
+                'independent_origins':{k:sorted(n) for k,n in independent_origins.items()},
+                'recent_edges':[[list(k),n] for k,n in recent_edges.items()],'relation_count':relation_count},
+                'coverage':{'people':people,'events':events,'event_status':dict(statuses),'countries':sorted(countries)},
+                'training_denominators':dict(denominators)}
+    started=time.monotonic();processed=0;last=started
+    if not checkpoint.complete:
+        rows=analysis_people_from_stores(stores,allowed_sources=allowed_sources,after_person=checkpoint.after_person)
+        try:
+            for person,items,summary in rows:
+                for relation in observed_relations(items):
+                    _accumulate_relation(relation,edges,stages,counts,source_counts,corroborated,independent_origins,recent_edges)
+                    relation_count+=1
+                people+=bool(summary['events']);events+=summary['events']
+                statuses.update(summary['event_status']);countries.update(summary['countries'])
+                denominators.update({row['institution'] for row in items if training_observation_eligible(
+                    row['kind'],row.get('role'),row.get('year_start'),row.get('year_end'))})
+                checkpoint.boundary(person,state);processed+=1
+                if processed%1000==0:
+                    for store in stores:store.task.check_memory()
+                if progress and time.monotonic()-last>=30:
+                    progress({'phase':'selected-person-scan','people':people,'events':events,'relations':relation_count})
+                    last=time.monotonic()
+                if time.monotonic()-started>=max_seconds or max_people is not None and processed>=max_people:
+                    checkpoint.save(state,complete=False)
+                    break
+            else:checkpoint.finish(state)
+        finally:rows.close()
+    return {'state':state(),'complete':checkpoint.complete,'checkpoint':str(checkpoint.path),
+            'input_binding':checkpoint.binding,'people_processed_this_run':processed,
+            'elapsed_seconds':time.monotonic()-started,'publication_ready':False}
 
 
 def _training_denominators(store, allowed, report):
@@ -455,6 +779,7 @@ def scenario_result(store, nodes, changed_edges, alpha=.85, personalization=None
                       else {edge:weight for edge,weight in changed_edges.items() if weight > 0})
     new_endpoints=sorted({endpoint for edge in positive_edges for endpoint in edge}-reference_nodes)
     fixed_edges=(positive_edges if not new_endpoints else
+                 positive_edges.restrict_to(reference_nodes) if hasattr(positive_edges,'restrict_to') else
                  {edge:weight for edge,weight in positive_edges.items() if edge[0] in reference_nodes and edge[1] in reference_nodes})
     def evaluate(universe, valid_edges, boundary):
         scores,conv=_rank_graph(store,universe,valid_edges,alpha,1e-12,1000,personalization)
@@ -827,20 +1152,9 @@ def rank_global(store, *, public=False, publication_policy=None, checkpoint=Fals
     relations = (() if resume is not None and resume.complete else
                  relation_rows(store,allowed_sources=allowed,**options))
     report('relations',resumed_complete=bool(resume is not None and resume.complete))
-    for (employer, training, stage), train, job in relations:
+    for relation in relations:
         relation_count += 1
-        key = employer, training
-        counts[training] += 1
-        source_counts[training].update(train['supporting_sources'])
-        source_counts[training].update(job['supporting_sources'])
-        if train["status"] == job["status"] == "corroborated":
-            corroborated[training] += 1
-            independent_origins[training].update(set(train.get('evidence_origins', ())) & set(job.get('evidence_origins', ())))
-        weight = DEFAULT_CONFIG["stage_weights"][stage]
-        edges[key] += weight
-        stages[key][stage] += weight
-        if job["year_start"] >= 2016:
-            recent_edges[key] += weight
+        _accumulate_relation(relation,edges,stages,counts,source_counts,corroborated,independent_origins,recent_edges)
         if relation_count % 1000 == 0:
             store.task.check_memory()
     if resume is not None:

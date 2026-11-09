@@ -79,6 +79,35 @@ test('partition build binds all stored inputs and refuses local-only publication
   assert.equal(readReleasePartitions(join(root,args.manifestPath),JSON.parse(readFileSync(join(root,args.manifestPath)))).bytes,asset.stored_bytes);
 }));
 
+test('partition bundle is derived from exact committed asset order and rejects a wrong hash',()=>partitionFixture(({args,root,manifest,asset,packed})=>{
+  const bundle=Buffer.concat([packed]);
+  // The fixture contains one status value and two empty row fields.
+  const sha=createHash('sha256').update(bundle).digest('hex');
+  const bundled={...manifest,bundle:{format:'gapi-partition-concat/1',file:sha+'.gapi',bytes:bundle.length,sha256:sha}};
+  const result=readReleasePartitions(join(root,args.manifestPath),bundled);
+  assert.deepEqual(result.bundle.body,bundle);assert.equal(result.bundle.sha256,sha);
+  assert.equal(result.bytes,bundle.length);
+  assert.deepEqual([...result.outputFiles.keys()],[bundled.bundle.file]);
+  const wrong={...bundled,bundle:{...bundled.bundle,sha256:'c'.repeat(64),file:'c'.repeat(64)+'.gapi'}};
+  assert.throws(()=>readReleasePartitions(join(root,args.manifestPath),wrong),/bundle identity/);
+}));
+
+test('bundled build requires the complete transfer and does not require duplicate served shards',()=>partitionFixture(({args,root,manifest,packed,put,asset})=>{
+  const sha=createHash('sha256').update(packed).digest('hex');
+  const bundled={...manifest,bundle:{format:'gapi-partition-concat/1',file:sha+'.gapi',bytes:packed.length,sha256:sha}};
+  put(args.manifestPath,JSON.stringify(bundled));put('dist/data/global/manifest.json',JSON.stringify(bundled));
+  writeBuildProvenance(args);
+  assert.throws(()=>verifyBuild({...args,publish:false}),/ENOENT/);
+  put('dist/data/global/'+bundled.bundle.file,packed);
+  // Source shards remain committed inputs; only their served copies retire.
+  rmSync(join(root,'dist/data/global/'+asset.file));
+  writeBuildProvenance(args);
+  assert.equal(verifyBuild({...args,publish:false}).status,'verified');
+  put('dist/data/global/'+bundled.bundle.file,Buffer.alloc(packed.length));
+  writeBuildProvenance(args); // A regenerated receipt cannot bless corrupt data.
+  assert.throws(()=>verifyBuild({...args,publish:false}),/Built partition mismatch/);
+}));
+
 test('partition provenance rejects changed source and built assets',()=>partitionFixture(({args,root,put,asset,packed})=>{
   put('outputs/global/'+asset.file,Buffer.alloc(packed.length));
   assert.throws(()=>verifyBuild({...args,publish:false}),/partition identity mismatch/);

@@ -4,6 +4,8 @@ GAPI measures **observed academic education, training and employment relationshi
 
 The site shows a global observation view plus a separately named historical US faculty-hiring study where locally available. It never substitutes synthetic scores. Synthetic fixtures are used only for algorithm tests.
 
+The public observation site is available at [GAPI](https://northern-summer.github.io/global-academic-prestige-index/). Release scope, measured validation and known limitations are recorded in the [version notes](docs/RELEASE_NOTES_0_2_53.md).
+
 ## Quick start
 
 Python 3.11+ and Node.js 22+. The Windows task defaults to external D-drive processing. Storage, write reserve and parser memory limits are defined in [`configs/streaming.json`](configs/streaming.json); see [the streaming guide](docs/STREAMING.md) for the resource policy and its changes. Source XML/archives are never saved by the new streaming pipeline.
@@ -23,7 +25,7 @@ python -m gapi rank-global
 npm run dev
 ```
 
-Edit the task's external work location before freezing if needed. Its source lock rejects changes within the same work directory. Repeating `--discover --resume` advances an ordered live discovery page and processes unfinished queue members; it does **not** claim complete global source enumeration. The default Wikidata selection uses university-teacher candidates without converting their occupation into a job fact. The annual 2026 ORCID summary importer is implemented separately, but download bytes and upstream checksum are currently inaccessible from this execution environment.
+Edit the task's external work location before freezing if needed. Its source lock rejects changes within the same work directory. Repeating `--discover --resume` advances an ordered live discovery page and processes unfinished queue members; it does **not** claim complete global source enumeration. The default Wikidata selection uses university-teacher candidates without converting their occupation into a job fact. The annual ORCID summary importer verifies the frozen source identity, full length, compressed stream and checksum separately from member parsing and record validity; see [source scope and evidence](docs/DATA_SOURCES.md).
 
 For strict streaming, failures, snapshot scope, optional DuckDB/Parquet analysis and local/public builds, follow [the streaming guide](docs/STREAMING.md).
 

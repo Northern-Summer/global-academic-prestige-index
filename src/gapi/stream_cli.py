@@ -105,6 +105,10 @@ def register(sub):
         parser = sub.add_parser(name)
         parser.add_argument("--task", type=Path, default=Path("configs/streaming.json"))
         if name == 'rank-global':
+            parser.add_argument('--second-task',type=Path,
+                help='unify two existing frozen stores without copying source rows')
+            parser.add_argument('--analysis-seconds',type=float,default=14400,
+                help='remaining unified computation wall-time allowance')
             parser.add_argument('--progress',action='store_true',
                 help='emit analysis phase JSON lines on stderr; final JSON stays on stdout')
             parser.add_argument('--chunked',action='store_true',
@@ -220,6 +224,13 @@ def execute(args):
     names = {"sources", "acquisition-status", "resolve-institutions-online", "project-awards", "normalize-careers", "ingest-nobel", "discover-crossref", "discover-openalex", "discover-easy-orcid", "collect-global", "discover-wikidata-dump", "ingest-orcid", "ingest-wikidata", "ingest-orcid-api", "quality", "corroborate", "rank-global", "export-release"}
     if args.command not in names and args.command not in ('freeze-candidates','queue-archive-rejections','compact-member-digests','repack-evidence-urls','repack-full-input','repack-projection-pages','repack-event-pages','compact-frozen-inputs','promote-wikidata-dump','compact-events','census-easy-orcid','ingest-easy-orcid','rank-easy-orcid','ingest-easy-orcid-full','export-easy-orcid-web'):
         return False
+    if args.command=='rank-global' and getattr(args,'second_task',None):
+        from .unified_analysis import export_unified
+        result=export_unified((args.task,args.second_task),seconds=args.analysis_seconds,
+            progress=(lambda item:print(json.dumps({'analysis_progress':item}),
+                file=__import__('sys').stderr,flush=True)) if args.progress else None)
+        print(json.dumps(result,indent=2,sort_keys=True))
+        return True
     task = Task(args.task)
     task.activate_runtime()
     try:

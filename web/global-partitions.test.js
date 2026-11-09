@@ -6,6 +6,23 @@ import {decodePartitionRows,fetchPartitionAsset,loadPartitionedGlobal,validatePa
 import {validateGlobal} from './global-data.js';
 
 const hash=b=>createHash('sha256').update(b).digest('hex');
+
+test('one streamed bundle preserves every field and rejects truncation, trailing data and wrong identity',async()=>{
+  for(const chunkSize of [1,7,63,64,65,4096]){
+    const f=fixture(),assets=f.manifest.fields.flatMap(v=>v.kind==='rows'?v.assets:v.kind==='object'?v.entries.map(x=>x.asset):[v.asset]);
+    const body=Buffer.concat(assets.map(a=>f.files.get(a.file))),sha=hash(body);
+    const manifest={...f.manifest,bundle:{format:'gapi-partition-concat/1',file:sha+'.gapi',sha256:sha,bytes:body.length}};
+    const stream=bytes=>new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=chunkSize)controller.enqueue(new Uint8Array(bytes.subarray(i,i+chunkSize)));controller.close();}});
+    let requests=0;
+    const options={fetcher:async url=>{requests++;assert.ok(url.href.endsWith(sha+'.gapi'));return new Response(stream(body));}};
+    assert.deepEqual(await loadPartitionedGlobal(manifest,'https://example.test/',options),f.data);assert.equal(requests,1);
+    for(const bad of [body.subarray(0,body.length-1),Buffer.concat([body,Buffer.from([0])])]){
+      await assert.rejects(loadPartitionedGlobal(manifest,'https://example.test/',{fetcher:async()=>new Response(stream(bad))}));
+    }
+    const wrong={...manifest,bundle:{...manifest.bundle,sha256:'c'.repeat(64),file:'c'.repeat(64)+'.gapi'}};
+    await assert.rejects(loadPartitionedGlobal(wrong,'https://example.test/',{fetcher:async()=>new Response(stream(body))}),/SHA-256/);
+  }
+});
 function fixture(){
   const files=new Map(),fields=[];
   function asset(value,rows){
@@ -198,4 +215,56 @@ test('real HTTP gzip content encoding is decoded once by fetch',async()=>{
   }finally{
     server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
   }
+});
+
+
+test('failed bundle retries only its unverified suffix and refuses an ignored range',async()=>{
+  const f=fixture(),plan=f.manifest.fields.flatMap(v=>v.kind==='rows'?v.assets:v.kind==='object'?v.entries.map(x=>x.asset):[v.asset]);
+  const body=Buffer.concat(plan.map(a=>f.files.get(a.file))),sha=hash(body),prefix=plan[0].stored_bytes;
+  const m={...f.manifest,bundle:{format:'gapi-partition-concat/1',file:sha+'.gapi',sha256:sha,bytes:body.length}};
+  const retryCache={};
+  await assert.rejects(loadPartitionedGlobal(m,'https://example.test/',{retryCache,
+    fetcher:async()=>new Response(body.subarray(0,prefix))}),/Truncated/);
+  assert.equal(retryCache.bytes,prefix);
+  let requested;
+  await assert.rejects(loadPartitionedGlobal(m,'https://example.test/',{retryCache,
+    fetcher:async(_url,options)=>{requested=options.headers.Range;return new Response(body);}}),/无法继续加载/);
+  assert.equal(requested,`bytes=${prefix}-`);
+  const suffix=async(_url,options)=>{
+    assert.equal(options.headers.Range,`bytes=${prefix}-`);
+    return new Response(body.subarray(prefix),{status:206,headers:{'Content-Range':`bytes ${prefix}-${body.length-1}/${body.length}`}});
+  };
+  assert.deepEqual(await loadPartitionedGlobal(m,'https://example.test/',{retryCache,fetcher:suffix}),f.data);
+  assert.ok(retryCache.bytes<=24*1024*1024);
+  let requests=0;
+  assert.deepEqual(await loadPartitionedGlobal(m,'https://example.test/',{retryCache,fetcher:async()=>{requests++;throw Error('unexpected');}}),f.data);
+  assert.equal(requests,0,'fully verified cached bytes must not be downloaded again');
+  const changed={...m,logical_sha256:'b'.repeat(64)};
+  await assert.rejects(loadPartitionedGlobal(changed,'https://example.test/',{retryCache,fetcher:async(_url,options)=>{
+    assert.equal(options.headers,undefined,'changed version must invalidate the old prefix');throw Error('version changed');
+  }}),/version changed/);
+  assert.equal(retryCache.bytes,0);
+});
+
+test('legacy retry reuses only hash-verified assets and corrupt retained bytes fail closed',async()=>{
+  const f=fixture(),retryCache={};let attempts=0;const first=f.manifest.fields[0].asset.file;
+  const fetcher=async(url,options)=>{attempts++;if(attempts===2)return new Response('',{status:503});return f.fetcher(url,options);};
+  await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{retryCache,fetcher,concurrency:1}),/503/);
+  assert.equal(f.requests.filter(x=>x===first).length,1);
+  assert.deepEqual(await loadPartitionedGlobal(f.manifest,'https://example.test/',{retryCache,fetcher:f.fetcher,concurrency:1}),f.data);
+  assert.equal(f.requests.filter(x=>x===first).length,1);
+  const saved=retryCache.assets.values().next().value;saved[0]^=1;
+  await assert.rejects(loadPartitionedGlobal(f.manifest,'https://example.test/',{retryCache,fetcher:f.fetcher}),/hash|SHA|mismatch/i);
+});
+
+
+test('expanded JSON identity is separate from the unchanged decoded-asset buffer budget',()=>{
+  const f=fixture(),m=structuredClone(f.manifest),nodes=m.fields.find(v=>v.field==='nodes');
+  const descriptor={...nodes.assets[0],bytes:1024*1024,stored_bytes:1,rows:1};
+  nodes.assets=Array.from({length:250},()=>({...descriptor}));nodes.rows=m.nodes=250;
+  m.logical_bytes=300*1024*1024;
+  const totals=()=>{const all=m.fields.flatMap(v=>v.kind==='rows'?v.assets:v.kind==='object'?v.entries.map(x=>x.asset):[v.asset]);m.asset_count=all.length;m.stored_bytes=all.reduce((n,a)=>n+a.stored_bytes,0);};
+  totals();assert.equal(validatePartitionManifest(m),m);
+  nodes.assets.push(...Array.from({length:10},()=>({...descriptor})));nodes.rows=m.nodes=260;totals();
+  assert.throws(()=>validatePartitionManifest(m),/totals mismatch/);
 });

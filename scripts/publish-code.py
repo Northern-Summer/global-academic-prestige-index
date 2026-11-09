@@ -13,6 +13,92 @@ import re
 import subprocess
 
 
+def publish_prepared_objects(root, *, receipt, api, external_bytes):
+    """Settle an existing prepared public commit through the GCM HTTPS client.
+
+    Content-addressed uploads avoid a second local copy of bounded aggregate
+    assets. The existing reviewed parent/tree and non-force ref boundary remain
+    authoritative. api(method, repo-relative-path, body) is the normal client,
+    returning None only for an absent immutable object or ref.
+    """
+    import base64
+    import datetime
+    root=Path(root).resolve();receipt=Path(receipt)
+    require(receipt.is_absolute() and receipt.resolve().is_relative_to(root)
+            and not receipt.is_symlink(),'receipt must belong to reviewed checkout')
+    record=json.loads(receipt.read_text('utf-8'))
+    repository=record['repository'];branch=record['branch'];commit=record['public_commit']
+    require(bool(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repository)),'invalid reviewed repository')
+    require(branch.startswith('refs/heads/') and '..' not in branch,'invalid reviewed branch')
+    require(set(external_bytes)<=set(record['paths']),'memory assets outside reviewed set')
+    require(sum(len(v) for v in external_bytes.values())<=24*1024**2,'memory publication exceeds bound')
+    def git(*args):return subprocess.check_output(['git',*args],cwd=root)
+    origin=git('remote','get-url','origin').decode().strip()
+    require(origin.removesuffix('.git')=='https://github.com/'+repository,'publication origin changed')
+    require(git('rev-parse',commit+':').decode().strip()==record['tree'],'prepared tree changed')
+    require(git('show','-s','--format=%P',commit).decode().strip()==record['base'],'prepared parent changed')
+    prefix='/repos/'+repository;ref='/git/'+branch;read_ref='/git/ref/'+branch.removeprefix('refs/')
+    remote=api('GET',prefix+read_ref,None)
+    require(remote is not None,'reviewed public branch missing')
+    current=remote['object']['sha']
+    require(current in (record['base'],commit),'public branch advanced; preserve concurrent work')
+    def save():receipt.write_text(json.dumps(record,indent=2)+'\n','utf-8')
+    def immutable(path,sha,body):
+        existing=api('GET',prefix+path+'/'+sha,None)
+        if existing is None:
+            try:existing=api('POST',prefix+path,body)
+            except Exception:
+                existing=api('GET',prefix+path+'/'+sha,None)
+                if existing is None:raise
+        require(existing.get('sha')==sha,'immutable remote object mismatch')
+    entries=[]
+    for name in record['paths']:
+        relative=PurePosixPath(name)
+        require(not relative.is_absolute() and '..' not in relative.parts,'invalid reviewed object path')
+        if name in external_bytes:
+            require(bool(re.fullmatch(r'outputs/global/[a-f0-9]{64}\.json\.gz',name)),'invalid memory aggregate path')
+            body=external_bytes[name]
+        else:
+            require(file_hash(root/name)==record['tested_worktree_sha256'][name],'reviewed worktree changed')
+            body=git('show',commit+':'+name)
+        require(hashlib.sha256(body).hexdigest()==record['tested_worktree_sha256'][name]
+                or name not in external_bytes and body.replace(b'\r\n',b'\n')==(root/name).read_bytes().replace(b'\r\n',b'\n'),
+                'reviewed publication bytes changed')
+        blob=hashlib.sha1(b'blob '+str(len(body)).encode()+b'\0'+body).hexdigest()
+        tree_entry=git('ls-tree',commit,'--',name).decode().split()
+        require(len(tree_entry)>=3 and tree_entry[2]==blob,'prepared blob differs from reviewed bytes')
+        if current!=commit:
+            immutable('/git/blobs',blob,{'content':base64.b64encode(body).decode('ascii'),'encoding':'base64'})
+        entries.append({'path':name,'mode':'100644','type':'blob','sha':blob})
+    if current!=commit:
+        base_tree=git('rev-parse',record['base']+':').decode().strip()
+        immutable('/git/trees',record['tree'],{'base_tree':base_tree,'tree':entries})
+        raw=git('cat-file','commit',commit).decode('utf-8');header,message=raw.split('\n\n',1)
+        fields=dict(line.split(' ',1) for line in header.splitlines())
+        def identity(value):
+            match=re.fullmatch(r'(.*) <([^<>]*)> (\d+) ([+-]\d{4})',value)
+            require(match is not None,'unsupported reviewed Git identity')
+            name,email,seconds,offset=match.groups()
+            zone=datetime.timezone(datetime.timedelta(minutes=(1 if offset[0]=='+' else -1)*(int(offset[1:3])*60+int(offset[3:5]))))
+            return {'name':name,'email':email,'date':datetime.datetime.fromtimestamp(int(seconds),zone).isoformat()}
+        immutable('/git/commits',commit,{'message':message,'tree':record['tree'],'parents':[record['base']],
+            'author':identity(fields['author']),'committer':identity(fields['committer'])})
+        remote=api('GET',prefix+read_ref,None)
+        require(remote['object']['sha']==record['base'],'public branch changed before settlement')
+        record['state']='ref-write-prepared';save()
+        try:api('PATCH',prefix+ref,{'sha':commit,'force':False})
+        except Exception:
+            remote=api('GET',prefix+read_ref,None)
+            if remote is None or remote['object']['sha']!=commit:raise
+    remote=api('GET',prefix+read_ref,None)
+    require(remote is not None and remote['object']['sha']==commit,'public ref readback mismatch')
+    settled=api('GET',prefix+'/git/commits/'+commit,None)
+    require(settled is not None and settled['tree']['sha']==record['tree']
+            and [p['sha'] for p in settled['parents']]==[record['base']],'remote public ancestry mismatch')
+    record.update(state='pushed-and-read-back',transport='existing GCM HTTPS immutable-object transport');save()
+    return record
+
+
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)

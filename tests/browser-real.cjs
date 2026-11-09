@@ -12,17 +12,19 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
   const browser = await chromium.launch({headless:true, executablePath:process.env.GAPI_BROWSER, args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const results = {tested_url:process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/'}, errors = [], requests = [];
   try {
-    const page = await browser.newPage({viewport:{width:1280,height:900}});
+    const page = await browser.newPage({viewport:{width:1280,height:900},acceptDownloads:false});
     const loadStarted=Date.now();
+    const loadLimit=results.tested_url.startsWith('http://127.0.0.1')?10000:120000;
+    page.setDefaultTimeout(120000);
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => requests.push(request.url()));
-    await page.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'networkidle',timeout:30000});
+    await page.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'domcontentloaded',timeout:120000});
     await page.waitForFunction(() => /版本已校验|真实数据暂不可用/.test(document.querySelector('#global-status')?.textContent || ''));
     const status = await page.locator('#global-status').innerText();
     assert.ok(!status.includes('真实数据暂不可用'),status);
     results.load = status;
     results.table_ready_ms=Date.now()-loadStarted;
-    if(results.tested_url.startsWith('http://127.0.0.1'))assert.ok(results.table_ready_ms<10000,'local table readiness exceeds 10s acceptance');
+    assert.ok(results.table_ready_ms<=loadLimit,`complete data readiness exceeds ${loadLimit}ms acceptance`);
     results.version = await page.evaluate(async () => {
       const base = new URL('.', location.href);
       const manifest = await (await fetch(new URL('data/global/manifest.json',base))).json();
@@ -110,12 +112,40 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
     assert.ok(await page.locator('#global-details .mini-bars').count()>=1);
     await page.locator('#global-details').screenshot({path:screenshotPath('detail')});
     results.search_filter_sort_keyboard_details = true;
+    await page.locator('#global-next').click();
+    assert.match(await page.locator('#global-page-status').innerText(),/51[—–-]100/);
+    await page.locator('#global-prev').click();
+    results.institution_pagination=true;
+    const settings=await page.locator('#global-scenario option').evaluateAll(rows=>rows.map(row=>row.value));
+    assert.ok(settings.length>2);
+    await page.locator('#global-scenario').selectOption(settings.find(value=>value));
+    assert.ok((await page.locator('#global-scenario-note').innerText()).length>0);
+    await page.locator('#global-scenario').selectOption('');
+    results.sensitivity_control=true;
+    await page.evaluate(()=>{
+      window.__gapiOriginalObjectURL=URL.createObjectURL;
+      URL.createObjectURL=blob=>{window.__gapiExportBlob=blob;return window.__gapiOriginalObjectURL(blob);};
+    });
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#global-csv').click();
     const download = await downloadPromise;
     assert.equal(download.suggestedFilename(),'gapi-real-observed-institutions.csv');
+    const exported=await page.evaluate(async()=>{
+      const blob=window.__gapiExportBlob;if(!(blob instanceof Blob))throw Error('Missing actual CSV Blob');
+      let lines=1,quoted=false,afterQuote=false;
+      const reader=blob.stream().getReader();
+      try{while(true){const {done,value}=await reader.read();if(done)break;
+        for(const char of new TextDecoder().decode(value)){
+          if(char==='"'){if(quoted)afterQuote=!afterQuote;else quoted=true;}
+          else{if(afterQuote){quoted=false;afterQuote=false;}if(char==='\n'&&!quoted)lines++;}
+        }
+      }}finally{reader.releaseLock();URL.createObjectURL=window.__gapiOriginalObjectURL;delete window.__gapiExportBlob;delete window.__gapiOriginalObjectURL;}
+      if(quoted&&!afterQuote)throw Error('Incomplete CSV quoted field');
+      return {rows:lines-1,bytes:blob.size};
+    });
+    assert.equal(exported.rows,publicData.nodes.length,'CSV must contain the complete directory');
     await download.cancel();
-    results.csv_download = true;
+    results.csv_download={...exported,complete:true,browser_download_observed:true,disk_copy_intentionally_cancelled:true};
     if(results.version.award_recipients){
       await page.locator('#global-official-awards summary').click();
       await page.locator('#global-award-search').fill('Cambridge');
@@ -196,13 +226,30 @@ const receiptPath=process.env.GAPI_TEST_RECEIPT || 'outputs/browser-review-2026-
       .filter(el => el.getBoundingClientRect().right > innerWidth+2 && !el.closest('.table-wrap'))
       .slice(0,12).map(el => ({tag:el.tagName,id:el.id,class:el.className,right:el.getBoundingClientRect().right})));
     assert.equal(overflow,false,'mobile page has horizontal overflow outside table scroller');
-    results.mobile = true;
+    const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    mobile.on('pageerror',error=>errors.push('mobile: '+error.message));
+    const mobileStart=Date.now();
+    await mobile.goto(results.tested_url,{waitUntil:'domcontentloaded',timeout:120000});
+    await mobile.waitForFunction(()=>/版本已校验/.test(document.querySelector('#global-status')?.textContent||''),null,{timeout:120000});
+    const mobileMs=Date.now()-mobileStart;assert.ok(mobileMs<=loadLimit,'mobile cold full load exceeds acceptance');
+    assert.equal(await mobile.locator('#global-rows tr').count(),50);
+    const dimensions=await mobile.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
+    assert.equal(dimensions.width,390);assert.equal(dimensions.scroll,390);
+    await mobile.locator('#global-search').fill('Cambridge');
+    assert.match(await mobile.locator('#global-rows').innerText(),/Cambridge/);
+    await mobile.locator('#global-search').fill('');
+    await mobile.locator('#global-observations').scrollIntoViewIfNeeded();
+    await mobile.screenshot({path:screenshotPath('mobile')});
+    results.mobile={cold_complete_load_ms:mobileMs,...dimensions,errors:0};
+    await mobile.close();
     const fallback = await browser.newPage();
     await fallback.addInitScript(() => {
       const old = HTMLCanvasElement.prototype.getContext;
       HTMLCanvasElement.prototype.getContext = function(type,...args) { return /webgl/.test(type) ? null : old.call(this,type,...args); };
     });
-    await fallback.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'networkidle'});
+    fallback.setDefaultTimeout(120000);
+    await fallback.goto(process.env.GAPI_TEST_URL || 'http://127.0.0.1:5174/', {waitUntil:'domcontentloaded',timeout:120000});
+    await fallback.waitForFunction(()=>/版本已校验/.test(document.querySelector('#global-status')?.textContent||''));
     await fallback.locator('#global-show-network').click();
     await fallback.waitForFunction(() => /暂不可用/.test(document.querySelector('#global-network')?.textContent || ''));
     assert.ok(await fallback.locator('#global-rows button').count()>0);

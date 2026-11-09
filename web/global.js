@@ -17,6 +17,7 @@ const root = document.createElement('section');
 root.className='panel global-panel';root.id='global-observations';root.setAttribute('aria-labelledby','global-title');
 root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">ORCID API / WIKIDATA</p><h2 id="global-title">多源观测与核验</h2></div><span class="observation-tag">公开数据 · 持续更新</span></div>
 <p id="global-status" class="global-status" role="status">正在校验真实数据与版本清单…</p>
+<button type="button" id="global-retry" hidden>重新加载</button>
 <div id="global-metrics" class="observation-metrics" aria-label="当前切片的实际数据范围"></div>
 <p class="scope-caption">仅统计已收录的公开记录。各项计数的口径不同，不能相除得到全球覆盖率或就业率。</p>
 <div id="global-evidence" class="evidence-summary"></div>
@@ -40,6 +41,8 @@ root.innerHTML=`<div class="global-heading"><div><p class="eyebrow">ORCID API / 
 <div class="directory-pagination"><span id="global-edge-page"></span><div><button type="button" id="global-edge-prev" aria-label="上一页关系">←</button><button type="button" id="global-edge-next" aria-label="下一页关系">→</button></div></div>`;
 document.querySelector('.intro').after(root);
 const $=selector=>root.querySelector(selector);
+const retryCache={};
+let loading=false;
 let data,page=0,edgePage=0,selected='',dispose,networkEnabled=false,networkGeneration=0;
 let edgeSelectionKey,edgeSelection,nodeNames;
 const fields=()=>({query:$('#global-search').value,country:$('#global-country').value,sort:$('#global-sort').value,scenario:$('#global-scenario').value});
@@ -96,13 +99,16 @@ function renderAwards(){
   $('#global-award-search').addEventListener('input',render);render();
 }
 async function load(){
+  if(loading)return;loading=true;
+  $('#global-retry').hidden=true;
+  $('#global-status').textContent=retryCache.bytes?'正在继续校验，使用已验证内容…':'正在读取公开数据清单…';
   try{
     const base=import.meta.env.BASE_URL;
     const {value:manifest}=await fetchJSON(`${base}data/global/manifest.json`,1024*1024);
     if(manifest.schema_version==='gapi-aggregate-partitions/1'){
       const partitionBase=new URL(`${base}data/global/`,location.href);
       data=validateGlobal(await loadPartitionedGlobal(manifest,partitionBase,{
-        signal:AbortSignal.timeout(1200000),
+        signal:AbortSignal.timeout(120000),retryCache,
         onProgress:({loadedAssets,totalAssets})=>{$('#global-status').textContent=`正在校验年度结果分片 ${loadedAssets} / ${totalAssets}…`;},
       }),{partitionManifest:manifest});
     }else{
@@ -115,17 +121,19 @@ async function load(){
     data=validateGlobal(JSON.parse(new TextDecoder().decode(bytes)));
     }
     const countryCodes=[...new Set(data.nodes.map(n=>n.country).filter(Boolean))].sort();
+    $('#global-country').innerHTML='<option value="">全部已观测地区</option>';
     $('#global-country').innerHTML+=countryCodes.map(c=>`<option value="${esc(c)}">${esc(countryName(c))} · ${esc(c)}</option>`).join('');
     $('#global-scenario').innerHTML='<option value="">参考设置 α = 0.85</option>'+Object.entries(data.sensitivity??{}).filter(([key])=>key!=='alpha_0.85').map(([key,s])=>`<option value="${esc(key)}">${esc(scenarioName(key))}${s.prior_only?'（仅先验）':''}</option>`).join('');
     const local=data.publication_status==='local-only-source-license-review';
-    $('#global-status').textContent=local?'本地年度聚合已校验 · 尚未公开发布 · 正式全球排名尚未发布':'版本已校验 · 数据持续采集中 · 正式全球排名尚未发布';
+    $('#global-status').textContent=local?'本地年度聚合已校验 · 尚未公开发布 · 正式全球排名尚未发布':'版本已校验 · 正式全球排名尚未发布';
     if(local)root.querySelector('.observation-tag').textContent='本地数据 · 未发布';
     $('#global-status').dataset.snapshot=manifest.output_sha256??manifest.logical_sha256;
     const scored=data.nodes.filter(n=>n.network_score!=null).length,relations=data.nodes.reduce((sum,n)=>sum+n.relations,0);
     const metrics=[['收录人数',data.coverage.people,'人'],['履历记录',data.coverage.events,'条'],['去重人才关系',relations,'条'],['评分机构',scored,'个']];
     $('#global-metrics').innerHTML=metrics.map(([label,value,unit])=>`<div><span>${esc(label)}</span><strong>${esc(integer(value))}<small>${esc(unit)}</small></strong></div>`).join('');
     const observed=(data.coverage.event_status?.observed??0)+(data.coverage.event_status?.corroborated??0),pending=data.coverage.event_status?.unresolved??0;
-    $('#global-evidence').innerHTML=`<div><strong>履历记录</strong><span>已识别 ${esc(integer(observed))} 条 · 待定 ${esc(integer(pending))} 条</span></div><div class="evidence-track" aria-hidden="true"><span style="width:${data.coverage.events ? Math.min(100,Math.max(0,observed/data.coverage.events*100)).toFixed(3) : 0}%"></span></div><p>另有 ${esc(integer(data.algorithm.normalization_policy?.interpreted_events??0))} 条按公开规则识别，原始记录保留。已识别的记录仍需独立核验。</p>`;
+    const interpreted=data.algorithm.normalization_policy?.interpreted_events;
+    $('#global-evidence').innerHTML=`<div><strong>履历记录</strong><span>已识别 ${esc(integer(observed))} 条 · 待定 ${esc(integer(pending))} 条</span></div><div class="evidence-track" aria-hidden="true"><span style="width:${data.coverage.events ? Math.min(100,Math.max(0,observed/data.coverage.events*100)).toFixed(3) : 0}%"></span></div><p>${interpreted==null?'':`另有 ${esc(integer(interpreted))} 条按公开规则识别，原始记录保留。`}已识别的记录仍需独立核验。</p>`;
     const acquisition=data.acquisition_progress?.sources??[];
     if(acquisition.length){
       $('#global-acquisition').hidden=false;
@@ -141,7 +149,10 @@ async function load(){
     $('#global-stage').onchange=()=>{edgePage=0;renderNetwork();};$('#global-show-network').onclick=()=>{networkEnabled=true;renderNetwork();};$('#global-reset').onclick=()=>{selected='';edgePage=0;renderNetwork();};
     $('#global-edge-prev').onclick=()=>{edgePage--;renderNetwork();};$('#global-edge-next').onclick=()=>{edgePage++;renderNetwork();};
     $('#global-csv').onclick=()=>{const url=URL.createObjectURL(new Blob([csv(selectRows(data,fields()))],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='gapi-real-observed-institutions.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+    for(const input of root.querySelectorAll('input,select,button'))input.disabled=false;
+    retryCache.assets?.clear();retryCache.bytes=0;
     renderTable();renderNetwork();
-  }catch(error){$('#global-status').textContent=`真实数据暂不可用：${error.message}。未展示替代评分。`;for(const input of root.querySelectorAll('input,select,button'))input.disabled=true;}
+  }catch(error){$('#global-status').textContent=`真实数据暂不可用：${error.message}。未展示替代评分。`;for(const input of root.querySelectorAll('input,select,button'))input.disabled=true;const retry=$('#global-retry');retry.hidden=false;retry.disabled=false;retry.textContent='继续加载';retry.onclick=()=>load();}
+  finally{loading=false;}
 }
 load();

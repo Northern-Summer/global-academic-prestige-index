@@ -446,8 +446,18 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
                         if type(index) is not int or not 0<=index<len(universe):raise ValueError('partition reference index')
                         restored[name]=universe[index]
                     if replay_graph:
-                        if key=='edges':projection['edges'].append({k:restored[k] for k in ('source','target','weight')})
-                        elif restored['network_score'] is not None:projection['nodes'].append({k:restored[k] for k in ('institution_id','network_score','observed_rank')})
+                        if key=='edges':
+                            weights=restored.get('stages')
+                            if (not isinstance(weights,dict) or set(weights)-{'bachelor','master','doctorate','postdoc'}
+                                    or any(type(v) not in (int,float) or not math.isfinite(v) or v<0 for v in weights.values())
+                                    or not math.isclose(math.fsum(weights.values()),restored['weight'],rel_tol=1e-9,abs_tol=1e-12)):
+                                raise ValueError('independent stage weights mismatch')
+                            projection['edges'].append({k:restored[k] for k in ('source','target','weight')})
+                        elif restored['network_score'] is not None:
+                            projection['nodes'].append({k:restored[k] for k in ('institution_id','network_score','observed_rank')})
+                            if 'network_intensity_score' in restored:
+                                projection['nodes'][-1].update(network_intensity_score=restored['network_intensity_score'],
+                                    observed_training_denominator=restored.get('observed_training_denominator'))
                         if len(projection['nodes'])>200000 or len(projection['edges'])>edge_limit:raise ValueError('partition replay projection bound')
                     if count:emit(b',')
                     emit(encode(restored));count+=1
@@ -485,9 +495,50 @@ def verify_local_partitions(directory, source_directory, *, replay_graph=False, 
             'not_verified':['publication eligibility','personal facts','source independence','world coverage']}
     if replay_graph:
         result.update(replay(projection,edge_limit=edge_limit))
+        if projection['nodes'] and all('network_intensity_score' in r for r in projection['nodes']):
+            denominators={r['institution_id']:r['observed_training_denominator'] for r in projection['nodes']}
+            if any(v is not None and (type(v) is not int or v<1) for v in denominators.values()):
+                raise ValueError('invalid independent training denominator')
+            for edge in projection['edges']:edge['weight']/=max(1,denominators[edge['target']] or 0)
+            for row in projection['nodes']:row['network_score']=row.pop('network_intensity_score')
+            ordered=sorted(projection['nodes'],key=lambda r:(-r['network_score'],r['institution_id']))
+            for n,row in enumerate(ordered,1):row['observed_rank']=n
+            intensity=replay(projection,edge_limit=edge_limit)
+            result.update(intensity_max_score_error=intensity['max_score_error'],
+                          intensity_probability_mass=intensity['probability_mass'],
+                          stage_weights_verified=True)
         result['scope']='independent exact original transport reconstruction and graph-to-score replay through selected successor'
     if public_status is not None:result.update(public_logical_sha256=public_sha.hexdigest(),public_logical_bytes=public_size)
     return result
+
+
+def verify_partition_bundle(manifest, directory, *, asset_reader=None):
+    """Independently derive the optional transfer identity in stored field order."""
+    bundle=manifest.get('bundle')
+    if bundle is None:return None
+    if (not isinstance(bundle,dict) or set(bundle)!={'format','file','sha256','bytes'}
+            or bundle.get('format')!='gapi-partition-concat/1'
+            or not re.fullmatch('[a-f0-9]{64}',str(bundle.get('sha256','')))
+            or bundle.get('file')!=bundle['sha256']+'.gapi'
+            or type(bundle.get('bytes')) is not int or not 0<bundle['bytes']<=24*1024**2
+            or bundle['bytes']!=manifest['stored_bytes']):
+        raise ValueError('invalid independent partition bundle descriptor')
+    checksum=hashlib.sha256();size=0
+    for field in manifest['fields']:
+        entries=field['assets'] if field['kind']=='rows' else [v['asset'] for v in field['entries']] if field['kind']=='object' else [field['asset']]
+        for entry in entries:
+            name=entry['file']
+            if not re.fullmatch('[a-f0-9]{64}\\.json\\.gz',name):raise ValueError('unsafe independent bundle member')
+            path=Path(directory)/name
+            body=bounded(path) if asset_reader is None else asset_reader(path)
+            if (not isinstance(body,bytes) or len(body)!=entry['stored_bytes']
+                    or hashlib.sha256(body).hexdigest()!=entry['stored_sha256']):
+                raise ValueError('independent bundle stored member mismatch')
+            checksum.update(body);size+=len(body)
+            if size>bundle['bytes']:raise ValueError('independent bundle length exceeded')
+    if size!=bundle['bytes'] or checksum.hexdigest()!=bundle['sha256']:
+        raise ValueError('independent bundle identity mismatch')
+    return {'sha256':checksum.hexdigest(),'bytes':size}
 
 
 def verify_public_partitions(manifest_path, *, asset_reader=None):
@@ -519,9 +570,11 @@ def verify_public_partitions(manifest_path, *, asset_reader=None):
     expected=json.loads(local_raw);expected['fields']=[new if f['field']=='publication_status' else f for f in expected['fields']]
     expected.update(publication_status=m['publication_status'],logical_sha256=result['public_logical_sha256'],
                     logical_bytes=result['public_logical_bytes'],stored_bytes=local['stored_bytes']-old['asset']['stored_bytes']+a['stored_bytes'])
-    actual=dict(m);actual.pop('publication',None);actual.pop('derived_bundle',None)
+    actual=dict(m);actual.pop('publication',None);actual.pop('derived_bundle',None);actual.pop('bundle',None)
     if actual!=expected or p.get('logical_sha256')!=local.get('logical_sha256') or bounded(manifest_path,1024**2)!=raw:
         raise ValueError('public transform changed content outside publication status')
+    bundle=verify_partition_bundle(m,manifest_path.parent,asset_reader=asset_reader)
+    if bundle is not None:result['bundle_verified']=bundle
     return {**result,'schema_version':'gapi-public-independent-replay/v1','manifest_sha256':hashlib.sha256(raw).hexdigest(),
             'logical_sha256':m['logical_sha256'],'logical_bytes':m['logical_bytes'],
             'scope':'independent public status transform, original local transport reconstruction and full graph-to-score replay'}
