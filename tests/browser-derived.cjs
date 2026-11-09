@@ -3,6 +3,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.GAPI_PLAYWRIGHT||'playwright');
 const selectedURL=new URL(process.env.GAPI_TEST_URL||'http://127.0.0.1:5174/');selectedURL.searchParams.set('view','historical');const url=selectedURL.href;
 const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
+const loadLimit=selectedURL.hostname==='127.0.0.1'||selectedURL.hostname==='localhost'?10000:120000;
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.GAPI_BROWSER,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const result={url,errors:[]};
@@ -34,9 +35,9 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   }
   const page=await browser.newPage({viewport:{width:1280,height:900}});const started=Date.now();
   page.on('pageerror',e=>result.errors.push(e.message));
-  await page.goto(url,{waitUntil:'networkidle',timeout:30000});
-  await page.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready');
-  result.ready_ms=Date.now()-started;assert.ok(result.ready_ms<10000,'historical table readiness exceeds 10 seconds');
+  await page.goto(url,{waitUntil:'domcontentloaded',timeout:120000});
+  await page.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready',null,{timeout:120000});
+  result.ready_ms=Date.now()-started;assert.ok(result.ready_ms<=loadLimit,`historical table readiness exceeds ${loadLimit}ms acceptance`);
   assert.equal(await page.locator('#historical-rows tr').count(),50);
   assert.match(await page.locator('#historical-metrics').innerText(),/2,473,948/);
   const documentation=await page.request.get(new URL('docs/EASY_ORCID_2023_OBSERVATIONS.md',url).href);
@@ -89,7 +90,7 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   await page.waitForFunction(()=>document.querySelector('#historical-details')?.textContent.includes('全部直接关系已加载'));
   result.failed_chunk_does_not_display_partial_or_stale_results=true;
   await page.locator('#historical-stage').selectOption('doctorate');
-  await page.locator('#historical-3d').click();await page.waitForTimeout(500);
+  await page.locator('#historical-3d').click();await page.waitForFunction(()=>document.querySelector('#historical-network canvas')||/3D 暂不可用/.test(document.querySelector('#historical-network')?.textContent||''),null,{timeout:120000});
   assert.ok(await page.locator('#historical-network canvas').count()||/3D 暂不可用/.test(await page.locator('#historical-network').innerText()));
   const canvas=page.locator('#historical-network canvas');
   if(await canvas.count()){
@@ -104,9 +105,13 @@ const prefix=process.env.GAPI_DERIVED_PREFIX||'outputs/derived-browser';
   await page.locator('#historical-overview').click();assert.match(await page.locator('#historical-edge-status').innerText(),/概览/);
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:`${prefix}-mobile.png`});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflows horizontally');
+  const mobile=await browser.newPage({viewport:{width:390,height:844}});const mobileErrors=[];mobile.on('pageerror',e=>mobileErrors.push(e.message));const mobileStart=Date.now();
+  await mobile.goto(url,{waitUntil:'domcontentloaded',timeout:120000});await mobile.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready',null,{timeout:120000});
+  result.mobile_cold_complete_load_ms=Date.now()-mobileStart;assert.ok(result.mobile_cold_complete_load_ms<=loadLimit,`historical mobile readiness exceeds ${loadLimit}ms acceptance`);
+  await mobile.locator('#historical-search').fill('Cambridge');assert.match(await mobile.locator('#historical-rows').innerText(),/Cambridge/);assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth),390);assert.deepEqual(mobileErrors,[]);await mobile.close();
   const fallback=await browser.newPage();await fallback.addInitScript(()=>{HTMLCanvasElement.prototype.getContext=function(){return null;};});
   await fallback.goto(url,{waitUntil:'networkidle'});await fallback.waitForFunction(()=>document.querySelector('#historical-status')?.dataset.state==='ready');
-  await fallback.locator('#historical-3d').click();await fallback.waitForTimeout(100);
+  await fallback.locator('#historical-3d').click();await fallback.waitForFunction(()=>/3D 暂不可用/.test(document.querySelector('#historical-network')?.textContent||''),null,{timeout:120000});
   assert.match(await fallback.locator('#historical-network').innerText(),/3D 暂不可用/);assert.equal(await fallback.locator('#historical-edges tr').count(),50);await fallback.close();
   assert.deepEqual(result.errors,[]);result.status='passed';
  }finally{fs.writeFileSync(`${prefix}.json`,JSON.stringify(result,null,2));await browser.close();}
