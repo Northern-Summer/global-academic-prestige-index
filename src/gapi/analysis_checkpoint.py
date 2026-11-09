@@ -391,13 +391,22 @@ class GraphCheckpoint:
         self.complete=False
         self.last_save=time.monotonic()
 
+    def _current_binding(self):
+        return input_binding(self.store,self.allowed)
+
+    def _validate_state(self, state):
+        if (set(state)!={'edges','stages','counts','source_counts','corroborated',
+                         'independent_origins','recent_edges','relation_count'}
+                or type(state['relation_count']) is not int or state['relation_count']<0):
+            raise ValueError('invalid graph checkpoint state')
+
     def load(self):
-        if not self.path.exists():return None
         if self.path.is_symlink() or self.path.is_junction():
             raise ValueError('linked graph checkpoint')
         compact=self.path.with_suffix('.compact')
         if compact.exists():
             return self._load_compact(compact)
+        if not self.path.exists():return None
         if self.path.is_symlink() or self.path.is_junction():
             raise ValueError('linked graph checkpoint')
         with self.path.open('rb') as stream:body=stream.read(MAX_PACKED+1)
@@ -420,10 +429,7 @@ class GraphCheckpoint:
                 or value.get('after_person') is not None and not isinstance(value['after_person'],str)):
             raise ValueError('graph checkpoint input or version drift')
         state=value['state']
-        if (set(state)!={'edges','stages','counts','source_counts','corroborated',
-                         'independent_origins','recent_edges','relation_count'}
-                or type(state['relation_count']) is not int or state['relation_count']<0):
-            raise ValueError('invalid graph checkpoint state')
+        self._validate_state(state)
         self.after_person=value['after_person'];self.complete=value['complete']
         self.store.task.check_memory()
         return state
@@ -610,7 +616,7 @@ class GraphCheckpoint:
         emit(b'}}')
         if count!=length or reconstructed.digest()!=expected:
             raise ValueError('compact predecessor logical mismatch')
-        if input_binding(self.store,self.allowed)!=self.binding:
+        if self._current_binding()!=self.binding:
             raise ValueError('migration input changed')
         target=self.write_compact(state)
         return {'predecessor_binding':old_binding,'current_binding':self.binding,
@@ -629,7 +635,7 @@ class GraphCheckpoint:
         if not self.complete:self.save(state,complete=True)
 
     def save(self, state, *, complete):
-        if input_binding(self.store,self.allowed)!=self.binding:
+        if self._current_binding()!=self.binding:
             raise ValueError('graph checkpoint input changed during calculation')
         self.store.task.check_memory()
         value={'schema':'gapi-analysis-graph/1','binding':self.binding,
@@ -655,3 +661,87 @@ class GraphCheckpoint:
         from .global_analysis import _write_aggregate
         _write_aggregate(self.store.task,self.path,content)
         self.complete=complete;self.last_save=time.monotonic()
+
+
+class MultiStoreGraphCheckpoint(GraphCheckpoint):
+    """Existing atomic graph writer with both database generations and summary.
+
+    Old single-store checkpoints keep their paths and formats. This namespace
+    never consumes one as a multi-store baseline or mutates either source DB.
+    """
+    def __init__(self, stores, allowed):
+        from .global_analysis import select_analysis_members
+        self.stores=tuple(stores)
+        self.member_selection=select_analysis_members(stores,allowed_sources=allowed)
+        super().__init__(stores[0],allowed)
+        self.binding=self._current_binding()
+        key=digest({'stores':[str(s.task.root.resolve()) for s in stores],
+                    'allowed':None if allowed is None else sorted(allowed)})[:16]
+        self.path=stores[0].task.root/('analysis-multistore-'+key+'.checkpoint')
+
+    def _current_binding(self):
+        return self._binding_for()
+
+    def _binding_for(self,predecessor_code=None):
+        return digest({'schema':'gapi-multistore-analysis-input/1',
+                       'inputs':[input_binding(s,self.allowed,predecessor_code=predecessor_code) for s in self.stores],
+                       'member_selection':self.member_selection})
+
+    def migrate_unchanged_state(self, predecessor_code, *, original_sha256):
+        """Explicit code-only rebind; both source file generations stay exact.
+
+        Caller reviews behavior equivalence and retains the predecessor code
+        manifest. The old binding must reproduce from the current databases;
+        this cannot authorize a source mutation or a changed snapshot plan.
+        """
+        if self.path.is_symlink() or self.path.is_junction():
+            raise ValueError('linked multi-store checkpoint')
+        checksum=hashlib.sha256()
+        with self.path.open('rb') as stream:
+            for body in iter(lambda:stream.read(65536),b''):checksum.update(body)
+        if checksum.hexdigest()!=original_sha256:
+            raise ValueError('multi-store predecessor checksum mismatch')
+        current=self.binding;previous=self._binding_for(predecessor_code)
+        try:
+            self.binding=previous
+            state=self.load()
+            if state is None:raise ValueError('multi-store predecessor missing')
+            completed=self.complete
+        finally:self.binding=current
+        self.save(lambda:state,complete=completed)
+        if self.load()!=state:raise ValueError('multi-store migrated state differs')
+        return {'previous_binding':previous,'current_binding':current,
+                'original_sha256':original_sha256,
+                'output_sha256':hashlib.sha256(self.path.read_bytes()).hexdigest(),
+                'complete':self.complete,'people':state['coverage']['people']}
+
+    def _validate_state(self,state):
+        if not isinstance(state,dict) or set(state)!={'graph','coverage','training_denominators'}:
+            raise ValueError('invalid multi-store checkpoint state')
+        super()._validate_state(state['graph'])
+        coverage=state['coverage']
+        if (not isinstance(coverage,dict) or set(coverage)!={'people','events','event_status','countries'}
+                or any(type(coverage[k]) is not int or coverage[k]<0 for k in ('people','events'))
+                or coverage['people']>coverage['events']
+                or not isinstance(coverage['event_status'],dict)
+                or any(not isinstance(k,str) or type(n) is not int or n<1 for k,n in coverage['event_status'].items())
+                or sum(coverage['event_status'].values())!=coverage['events']
+                or not isinstance(coverage['countries'],list)
+                or any(not isinstance(x,str) for x in coverage['countries'])
+                or coverage['countries']!=sorted(set(coverage['countries']))):
+            raise ValueError('invalid multi-store checkpoint coverage')
+        denominators=state['training_denominators']
+        if (not isinstance(denominators,dict)
+                or any(not isinstance(k,str) or not k or type(n) is not int or n<1 for k,n in denominators.items())):
+            raise ValueError('invalid multi-store checkpoint denominators')
+
+    def save(self,state,*,complete):
+        value=state()
+        self._validate_state(value)
+        super().save(lambda:value,complete=complete)
+
+    def _load_compact(self,*args,**kwargs):
+        raise ValueError('multi-store checkpoint requires atomic graph and summary')
+
+    def write_compact(self,*args,**kwargs):
+        raise ValueError('multi-store checkpoint requires atomic graph and summary')

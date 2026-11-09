@@ -146,6 +146,40 @@ class CodePublicationTests(unittest.TestCase):
         self.assertEqual(self.publish()['state'], 'pushed-and-read-back')
         self.assertEqual(self.pushes, 1)
 
+    def test_prepared_memory_objects_settle_once_without_private_ancestry(self):
+        import hashlib,base64
+        self.git('remote','add','origin',self.origin)
+        name='outputs/global/'+'a'*64+'.json.gz';body=b'reviewed aggregate fixture'
+        prepared=self.publish(paths=['code.py',name],external_bytes={name:body},prepare_only=True)
+        objects={};calls=[];remote=[self.base];lose=[True]
+        def api(method,path,value):
+            calls.append((method,path))
+            if '/git/ref/' in path:return {'object':{'sha':remote[0]}}
+            if method=='PATCH':
+                self.assertFalse(value['force']);self.assertEqual(remote[0],self.base);remote[0]=value['sha']
+                if lose[0]:lose[0]=False;raise RuntimeError('response lost')
+            if method=='GET':return objects.get(path)
+            if path.endswith('/blobs'):
+                raw=base64.b64decode(value['content']);sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+                result={'sha':sha}
+            elif path.endswith('/trees'):
+                self.assertEqual({e['path'] for e in value['tree']},{'code.py',name})
+                result={'sha':prepared['tree']}
+            else:
+                self.assertEqual(value['parents'],[self.base]);result={'sha':prepared['public_commit'],
+                    'tree':{'sha':prepared['tree']},'parents':[{'sha':self.base}]}
+            objects[path+'/'+result['sha']]=result;return result
+        result=publication.publish_prepared_objects(self.root,receipt=self.receipt,api=api,external_bytes={name:body})
+        self.assertEqual(result['state'],'pushed-and-read-back')
+        self.assertEqual(sum(m=='PATCH' for m,_ in calls),1)
+        publication.publish_prepared_objects(self.root,receipt=self.receipt,api=api,external_bytes={name:body})
+        self.assertEqual(sum(m=='PATCH' for m,_ in calls),1)
+        self.assertNotIn('private.txt',self.git('ls-tree','--name-only',prepared['public_commit']))
+        remote[0]=self.git('rev-parse','HEAD')
+        with self.assertRaisesRegex(RuntimeError,'advanced'):
+            publication.publish_prepared_objects(self.root,receipt=self.receipt,api=api,external_bytes={name:body})
+        self.assertEqual(sum(m=='PATCH' for m,_ in calls),1)
+
     def test_remote_drift_never_pushes(self):
         self.remote = self.git('rev-parse', 'HEAD')
         with self.assertRaisesRegex(RuntimeError, 'branch changed'):
